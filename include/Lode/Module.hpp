@@ -4,14 +4,34 @@
 #include "Lode/State.hpp"
 #include "Lode/Table.hpp"
 #include "Lode/Value.hpp"
+#include "Lode/ClassBuilder.hpp"
+#include "lua.h"
 #include <string>
 #include <functional>
 #include <vector>
-
-struct lua_State;
+#include <initializer_list>
 
 namespace Lode
 {
+
+class LODE_API ModuleReturn
+{
+public:
+    ModuleReturn() = default;
+    ModuleReturn(const Value& val) : values_({ val }) {}
+    ModuleReturn(const Table& tbl) : values_({ Value(tbl) }) {}
+    ModuleReturn(int num) : values_({ Value(num) }) {}
+    ModuleReturn(double num) : values_({ Value(num) }) {}
+    ModuleReturn(const std::string& str) : values_({ Value(str) }) {}
+    ModuleReturn(bool b) : values_({ Value(b) }) {}
+    ModuleReturn(std::initializer_list<Value> list) : values_(list) {}
+    ModuleReturn(std::vector<Value> vals) : values_(std::move(vals)) {}
+
+    [[nodiscard]] const std::vector<Value>& GetValues() const { return values_; }
+
+private:
+    std::vector<Value> values_;
+};
 
 class LODE_API Exports
 {
@@ -19,16 +39,9 @@ public:
     explicit Exports(State& vm);
     explicit Exports(lua_State* L);
 
-    // High-level lambda/function wrapper accepting Lode::State & vector of Lode::Value
     void Function(const std::string& name, const std::function<Value(State& vm, const std::vector<Value>& args)>& fn);
-    
-    // High-level lambda taking no args returning Lode::Value
     void Function(const std::string& name, const std::function<Value()>& fn);
-
-    // High-level lambda taking std::string returning std::string
     void Function(const std::string& name, const std::function<std::string(const std::string&)>& fn);
-
-    // High-level lambda taking double returning double
     void Function(const std::string& name, const std::function<double(double)>& fn);
 
     void SetTable(const std::string& name, const Lode::Table& table);
@@ -43,14 +56,15 @@ private:
 
 } // namespace Lode
 
-void LodeModuleRegister(Lode::State& vm, Lode::Exports& exports);
+Lode::ModuleReturn LodeModuleRegister(Lode::State& vm);
 
-#define LODE_MODULE(vm_var, exports_var) \
+#define LODE_MODULE(vm_var) \
     LODE_EXPORT int LodeModuleInit(lua_State* L) { \
         Lode::State vm_var(L); \
-        Lode::Exports exports_var(vm_var); \
-        LodeModuleRegister(vm_var, exports_var); \
-        exports_var.GetExportTable().PushToLuaState(L); \
-        return 1; \
+        Lode::ModuleReturn ret = LodeModuleRegister(vm_var); \
+        for (const auto& val : ret.GetValues()) { \
+            val.PushToLuaState(L); \
+        } \
+        return static_cast<int>(ret.GetValues().size()); \
     } \
-    void LodeModuleRegister(Lode::State& vm_var, Lode::Exports& exports_var)
+    Lode::ModuleReturn LodeModuleRegister(Lode::State& vm_var)
