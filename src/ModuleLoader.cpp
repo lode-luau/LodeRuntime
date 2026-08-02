@@ -26,28 +26,6 @@ struct LodeNavigationContext
     fs::path rootPath;
 };
 
-static std::string GetPlatformName()
-{
-#if defined(_WIN32)
-    return "windows";
-#elif defined(__APPLE__)
-    return "macos";
-#else
-    return "linux";
-#endif
-}
-
-static std::string GetArchName()
-{
-#if defined(__x86_64__) || defined(_M_X64)
-    return "x64";
-#elif defined(__aarch64__) || defined(_M_ARM64)
-    return "arm64";
-#else
-    return "x86";
-#endif
-}
-
 typedef int (*LodeModuleInitFn)(lua_State* L);
 
 static luarequire_WriteResult WriteBuffer(const std::string& str, char* buffer, size_t bufferSize, size_t* sizeOut)
@@ -88,7 +66,6 @@ static luarequire_NavigateResult reset(lua_State* L, void* ctx, const char* requ
 
         fs::path canonicalP = fs::weakly_canonical(p);
 
-        // If requirer is a file (e.g. C:\...\temp\test.luau), reset must set currentPath to its parent directory!
         if (fs::is_regular_file(canonicalP))
         {
             nav->currentPath = canonicalP.parent_path();
@@ -245,8 +222,8 @@ static int LoadModuleImpl(lua_State* L, void* ctx, const char* path, const char*
 
             if (jsonDoc.contains("libraries") && jsonDoc["libraries"].is_object())
             {
-                std::string platform = GetPlatformName();
-                std::string arch = GetArchName();
+                std::string platform = std::string(Platform::GetOSName());
+                std::string arch = std::string(Platform::GetArchitectureName());
 
                 if (jsonDoc["libraries"].contains(platform) && jsonDoc["libraries"][platform].contains(arch))
                 {

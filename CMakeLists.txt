@@ -9,6 +9,18 @@ project(LodeRuntime LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Cross-platform binary output directory configuration
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
+
+foreach(OUTPUTCONFIG ${CMAKE_CONFIGURATION_TYPES})
+    string(TOUPPER ${OUTPUTCONFIG} OUTPUTCONFIG_UPPER)
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${OUTPUTCONFIG_UPPER} "${CMAKE_BINARY_DIR}/bin")
+    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_${OUTPUTCONFIG_UPPER} "${CMAKE_BINARY_DIR}/bin")
+    set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_${OUTPUTCONFIG_UPPER} "${CMAKE_BINARY_DIR}/lib")
+endforeach()
+
 include(FetchContent)
 
 # Disable unnecessary Luau test targets to speed up build and save compiler memory
@@ -45,6 +57,7 @@ FetchContent_MakeAvailable(luau json libuv)
 
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${json_SOURCE_DIR}/include
     ${luau_SOURCE_DIR}/VM/include
     ${luau_SOURCE_DIR}/Compiler/include
@@ -68,6 +81,7 @@ set(LODE_CORE_SOURCES
     src/Registry.cpp
     src/ModuleLoader.cpp
     src/State.cpp
+    src/Platform/Platform.cpp
     src/Platform/WindowsDll.cpp
     src/Platform/UnixDlopen.cpp
     src/Platform/WindowsCrashHandler.cpp
@@ -99,6 +113,7 @@ target_compile_definitions(LodeCore PRIVATE LODE_CORE_BUILD)
 
 target_include_directories(LodeCore PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
     $<INSTALL_INTERFACE:include>
 )
 
@@ -110,7 +125,7 @@ target_link_libraries(LodeCore PRIVATE
     uv_a
 )
 
-# Main Executable LodeRuntime
+# Main Executable LodeRuntime (lode_runtime on Linux/macOS, lode_runtime.exe on Windows)
 add_executable(lode_runtime
     src/Runtime.cpp
 )

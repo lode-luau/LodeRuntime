@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Lode/Export.hpp"
 #include "Lode/Result.hpp"
 #include "Lode/Error.hpp"
 #include <string_view>
@@ -8,7 +9,28 @@
 namespace Lode::Platform
 {
 
-class DynamicLibrary
+enum class OS
+{
+    Windows,
+    Linux,
+    MacOS,
+    Unknown
+};
+
+enum class Architecture
+{
+    x64,
+    arm64,
+    x86,
+    Unknown
+};
+
+LODE_API OS GetOS();
+LODE_API Architecture GetArchitecture();
+LODE_API std::string_view GetOSName();
+LODE_API std::string_view GetArchitectureName();
+
+class LODE_API DynamicLibrary
 {
 public:
     virtual ~DynamicLibrary() = default;
