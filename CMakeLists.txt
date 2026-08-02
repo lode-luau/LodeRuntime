@@ -1,0 +1,105 @@
+cmake_minimum_required(VERSION 3.20)
+
+if(POLICY CMP0135)
+    cmake_policy(SET CMP0135 NEW)
+endif()
+
+project(LodeRuntime LANGUAGES C CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+include(FetchContent)
+
+# Disable unnecessary Luau test targets to speed up build and save compiler memory
+set(LUAU_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+
+# Fetch Luau
+FetchContent_Declare(
+    luau
+    GIT_REPOSITORY https://github.com/luau-lang/luau.git
+    GIT_TAG        master
+    GIT_SHALLOW    TRUE
+    GIT_PROGRESS   TRUE
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+)
+
+# Fetch nlohmann_json for lightweight lode.json parsing
+FetchContent_Declare(
+    json
+    URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+)
+
+FetchContent_MakeAvailable(luau json)
+
+include_directories(
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${luau_SOURCE_DIR}/VM/include
+    ${luau_SOURCE_DIR}/Compiler/include
+    ${luau_SOURCE_DIR}/Require/include
+    ${luau_SOURCE_DIR}/Config/include
+    ${luau_SOURCE_DIR}/CLI/include
+    ${luau_SOURCE_DIR}/Common/include
+)
+
+set(LODE_CORE_SOURCES
+    src/Error.cpp
+    src/Value.cpp
+    src/Table.cpp
+    src/Coroutine.cpp
+    src/Module.cpp
+    src/Registry.cpp
+    src/ModuleLoader.cpp
+    src/State.cpp
+    src/Platform/WindowsDll.cpp
+    src/Platform/UnixDlopen.cpp
+    src/Platform/WindowsCrashHandler.cpp
+)
+
+set(LODE_CORE_HEADERS
+    include/Lode/Export.hpp
+    include/Lode/Error.hpp
+    include/Lode/Result.hpp
+    include/Lode/Value.hpp
+    include/Lode/Table.hpp
+    include/Lode/Coroutine.hpp
+    include/Lode/Module.hpp
+    include/Lode/State.hpp
+    src/Platform/Platform.hpp
+    src/Platform/WindowsCrashHandler.hpp
+)
+
+# LodeCore SHARED Library Target (Shared DLL linked dynamically by runtime and native modules)
+add_library(LodeCore SHARED ${LODE_CORE_SOURCES} ${LODE_CORE_HEADERS})
+target_compile_definitions(LodeCore PRIVATE LODE_CORE_BUILD)
+
+target_include_directories(LodeCore PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+)
+
+target_link_libraries(LodeCore PUBLIC
+    Luau.VM
+    Luau.Compiler
+    Luau.Require
+    Luau.Config
+    Luau.CLI.lib
+    nlohmann_json::nlohmann_json
+)
+
+# lode_runtime Executable Target
+add_executable(lode_runtime src/Runtime.cpp)
+target_link_libraries(lode_runtime PRIVATE LodeCore)
+
+# Auto-reconfigure triggers for MSVC/Ninja builds
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "CMakeLists.txt"
+    ${LODE_CORE_SOURCES}
+    ${LODE_CORE_HEADERS}
+)
+
+# Adiciona o diretorio temporario do modulo nativo para ser compilado junto
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/temp/native_module/CMakeLists.txt")
+    add_subdirectory(temp/native_module)
+endif()
