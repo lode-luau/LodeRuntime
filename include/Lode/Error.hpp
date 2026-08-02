@@ -31,6 +31,7 @@ public:
     static Error Module(std::string_view message) { return Error(ErrorType::ModuleError, message); }
     static Error Type(std::string_view message) { return Error(ErrorType::TypeError, message); }
     static Error Platform(std::string_view message) { return Error(ErrorType::PlatformError, message); }
+    static Error Syntax(std::string_view message) { return Error(ErrorType::SyntaxError, message); }
 
 private:
     ErrorType type_;
