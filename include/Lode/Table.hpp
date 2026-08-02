@@ -6,11 +6,14 @@
 #include "Lode/Value.hpp"
 #include <string>
 #include <memory>
+#include <vector>
 
 struct lua_State;
 
 namespace Lode
 {
+
+class Metatable;
 
 class LODE_API Table
 {
@@ -32,6 +35,13 @@ public:
 
     [[nodiscard]] bool Has(const std::string& key) const;
     [[nodiscard]] size_t Size() const;
+    [[nodiscard]] std::vector<std::string> GetKeys() const;
+
+    void SetMetatable(const Table& metatable);
+    void SetMetatable(const Metatable& metatable);
+    [[nodiscard]] Result<Table> GetMetatable() const;
+
+    Result<std::vector<Value>> CallMethod(State& vm, const std::string& methodName, const std::vector<Value>& args = {}) const;
 
     void PushToLuaState(lua_State* L) const;
     [[nodiscard]] lua_State* GetLuaState() const;

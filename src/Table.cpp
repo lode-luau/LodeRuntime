@@ -1,4 +1,6 @@
 #include "Lode/Table.hpp"
+#include "Lode/Metatable.hpp"
+#include "Lode/State.hpp"
 #include "lua.h"
 #include "lualib.h"
 #include <stdexcept>
@@ -99,6 +101,71 @@ size_t Table::Size() const
     int len = lua_objlen(L, -1);
     lua_pop(L, 1);
     return static_cast<size_t>(len);
+}
+
+std::vector<std::string> Table::GetKeys() const
+{
+    std::vector<std::string> keys;
+    if (!refData_ || !refData_->L) return keys;
+    lua_State* L = refData_->L;
+    lua_getref(L, refData_->refId);
+    lua_pushnil(L);
+    while (lua_next(L, -2) != 0)
+    {
+        if (lua_type(L, -2) == LUA_TSTRING)
+        {
+            keys.push_back(lua_tostring(L, -2));
+        }
+        lua_pop(L, 1);
+    }
+    lua_pop(L, 1);
+    return keys;
+}
+
+void Table::SetMetatable(const Table& metatable)
+{
+    if (!refData_ || !refData_->L) return;
+    lua_State* L = refData_->L;
+    lua_getref(L, refData_->refId);
+    metatable.PushToLuaState(L);
+    lua_setmetatable(L, -2);
+    lua_pop(L, 1);
+}
+
+void Table::SetMetatable(const Metatable& metatable)
+{
+    SetMetatable(metatable.GetTable());
+}
+
+Result<Table> Table::GetMetatable() const
+{
+    if (!refData_ || !refData_->L) return Error::Runtime("Table is uninitialized");
+    lua_State* L = refData_->L;
+    lua_getref(L, refData_->refId);
+    if (lua_getmetatable(L, -1))
+    {
+        Table mt(L, -1);
+        lua_pop(L, 2);
+        return mt;
+    }
+    lua_pop(L, 1);
+    return Error::Runtime("Table has no metatable");
+}
+
+Result<std::vector<Value>> Table::CallMethod(State& vm, const std::string& methodName, const std::vector<Value>& args) const
+{
+    auto fnRes = Get(methodName);
+    if (fnRes.IsError()) return fnRes.GetError();
+
+    Value fn = fnRes.GetValue();
+    std::vector<Value> callArgs;
+    callArgs.reserve(args.size() + 1);
+    callArgs.push_back(Value(*this));
+    for (const auto& arg : args)
+    {
+        callArgs.push_back(arg);
+    }
+    return fn.Call(vm, callArgs);
 }
 
 void Table::PushToLuaState(lua_State* L) const
