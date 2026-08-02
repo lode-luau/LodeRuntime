@@ -31,7 +31,17 @@ FetchContent_Declare(
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
 
-FetchContent_MakeAvailable(luau json)
+# Fetch libuv for high-performance OS Event Loop
+FetchContent_Declare(
+    libuv
+    GIT_REPOSITORY https://github.com/libuv/libuv.git
+    GIT_TAG        v1.48.0
+    GIT_SHALLOW    TRUE
+    GIT_PROGRESS   TRUE
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+)
+
+FetchContent_MakeAvailable(luau json libuv)
 
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -41,6 +51,7 @@ include_directories(
     ${luau_SOURCE_DIR}/Config/include
     ${luau_SOURCE_DIR}/CLI/include
     ${luau_SOURCE_DIR}/Common/include
+    ${libuv_SOURCE_DIR}/include
 )
 
 set(LODE_CORE_SOURCES
@@ -48,6 +59,9 @@ set(LODE_CORE_SOURCES
     src/Value.cpp
     src/Table.cpp
     src/Coroutine.cpp
+    src/Metatable.cpp
+    src/EventLoop.cpp
+    src/Task.cpp
     src/Module.cpp
     src/Registry.cpp
     src/ModuleLoader.cpp
@@ -63,6 +77,11 @@ set(LODE_CORE_HEADERS
     include/Lode/Result.hpp
     include/Lode/Value.hpp
     include/Lode/Table.hpp
+    include/Lode/Metatable.hpp
+    include/Lode/ObjectWrap.hpp
+    include/Lode/ClassBuilder.hpp
+    include/Lode/EventLoop.hpp
+    include/Lode/Task.hpp
     include/Lode/Coroutine.hpp
     include/Lode/Module.hpp
     include/Lode/State.hpp
@@ -86,6 +105,7 @@ target_link_libraries(LodeCore PUBLIC
     Luau.Config
     Luau.CLI.lib
     nlohmann_json::nlohmann_json
+    uv_a
 )
 
 # lode_runtime Executable Target
