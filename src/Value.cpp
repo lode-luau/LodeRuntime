@@ -1,3 +1,5 @@
+// Copyright (c) 2026 yanlvl99, Lode Runtime Contributors
+// SPDX-License-Identifier: MIT
 #include "Lode/Value.hpp"
 #include "Lode/Table.hpp"
 #include "Lode/State.hpp"

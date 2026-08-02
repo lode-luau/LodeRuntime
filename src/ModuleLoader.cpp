@@ -1,3 +1,5 @@
+// Copyright (c) 2026 yanlvl99, Lode Runtime Contributors
+// SPDX-License-Identifier: MIT
 #include "ModuleLoader.hpp"
 #include "Platform/Platform.hpp"
 #include "Luau/Require.h"
