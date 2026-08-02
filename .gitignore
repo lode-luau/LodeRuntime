@@ -11,6 +11,9 @@ obj/
 *.lib
 *.a
 
+# Helper Scripts
+*.ps1
+
 # IDE
 .vscode/
 .idea/

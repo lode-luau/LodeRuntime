@@ -10,11 +10,14 @@
 #include <string_view>
 #include <vector>
 #include <memory>
+#include <functional>
 
 struct lua_State;
 
 namespace Lode
 {
+
+class Metatable;
 
 class LODE_API State
 {
@@ -41,7 +44,11 @@ public:
     [[nodiscard]] Result<Value> GetGlobal(const std::string& name) const;
 
     [[nodiscard]] Table CreateTable();
+    [[nodiscard]] Metatable CreateMetatable();
+    [[nodiscard]] Value CreateFunction(const std::function<Value(State& vm, const std::vector<Value>& args)>& fn);
     [[nodiscard]] Coroutine CreateCoroutine(const Value& fn);
+
+    int YieldThread();
 
     Result<Value> Require(std::string_view moduleName);
 

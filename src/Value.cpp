@@ -1,5 +1,6 @@
 #include "Lode/Value.hpp"
 #include "Lode/Table.hpp"
+#include "Lode/State.hpp"
 #include "lua.h"
 #include "lualib.h"
 #include <stdexcept>
@@ -15,20 +16,22 @@ Value::RefData::~RefData()
     }
 }
 
-Value::Value() : type_(ValueType::Nil) {}
+Value::Value() = default;
+
 Value::Value(bool b) : type_(ValueType::Boolean), boolVal_(b) {}
 Value::Value(double n) : type_(ValueType::Number), numberVal_(n) {}
-Value::Value(int i) : type_(ValueType::Integer), intVal_(i), numberVal_(i) {}
+Value::Value(int i) : type_(ValueType::Integer), intVal_(i), numberVal_(static_cast<double>(i)) {}
 Value::Value(const char* str) : type_(ValueType::String), stringVal_(str ? str : "") {}
 Value::Value(const std::string& str) : type_(ValueType::String), stringVal_(str) {}
 Value::Value(void* lightUserdata) : type_(ValueType::LightUserdata), lightUserdataVal_(lightUserdata) {}
 
-Value::Value(const Table& table) : type_(ValueType::Table)
+Value::Value(const Table& table)
 {
     lua_State* L = table.GetLuaState();
     if (L)
     {
         table.PushToLuaState(L);
+        type_ = ValueType::Table;
         refData_ = std::make_shared<RefData>();
         refData_->L = L;
         refData_->refId = lua_ref(L, -1);
@@ -47,93 +50,114 @@ ValueType Value::GetType() const
     return type_;
 }
 
-bool Value::AsBoolean() const
-{
-    if (IsBoolean()) return boolVal_;
-    if (IsNil()) return false;
-    return true;
-}
-
-double Value::AsNumber() const
-{
-    if (IsNumber()) return numberVal_;
-    if (IsInteger()) return static_cast<double>(intVal_);
-    throw std::runtime_error("Value is not a Number");
-}
-
-int Value::AsInteger() const
-{
-    if (IsInteger()) return intVal_;
-    if (IsNumber()) return static_cast<int>(numberVal_);
-    throw std::runtime_error("Value is not an Integer");
-}
-
-std::string Value::AsString() const
-{
-    if (IsString()) return stringVal_;
-    throw std::runtime_error("Value is not a String");
-}
-
-void* Value::AsLightUserdata() const
-{
-    if (GetType() == ValueType::LightUserdata) return lightUserdataVal_;
-    throw std::runtime_error("Value is not LightUserdata");
-}
+bool Value::AsBoolean() const { return boolVal_; }
+double Value::AsNumber() const { return numberVal_; }
+int Value::AsInteger() const { return intVal_; }
+std::string Value::AsString() const { return stringVal_; }
+void* Value::AsLightUserdata() const { return lightUserdataVal_; }
 
 Result<bool> Value::TryAsBoolean() const
 {
-    return AsBoolean();
+    if (type_ == ValueType::Boolean) return boolVal_;
+    return Error::Type("Value is not a boolean");
 }
 
 Result<double> Value::TryAsNumber() const
 {
-    if (IsNumber()) return AsNumber();
+    if (type_ == ValueType::Number || type_ == ValueType::Integer) return numberVal_;
     return Error::Type("Value is not a number");
 }
 
 Result<int> Value::TryAsInteger() const
 {
-    if (IsNumber()) return AsInteger();
+    if (type_ == ValueType::Integer) return intVal_;
+    if (type_ == ValueType::Number) return static_cast<int>(numberVal_);
     return Error::Type("Value is not an integer");
 }
 
 Result<std::string> Value::TryAsString() const
 {
-    if (IsString()) return AsString();
+    if (type_ == ValueType::String) return stringVal_;
     return Error::Type("Value is not a string");
+}
+
+Result<std::vector<Value>> Value::Call(State& vm, const std::vector<Value>& args) const
+{
+    lua_State* L = vm.GetLuaState();
+    if (!L || type_ != ValueType::Function)
+    {
+        return Error::Type("Value is not callable");
+    }
+
+    PushToLuaState(L);
+    for (const auto& arg : args)
+    {
+        arg.PushToLuaState(L);
+    }
+
+    int status = lua_pcall(L, static_cast<int>(args.size()), LUA_MULTRET, 0);
+    if (status != LUA_OK)
+    {
+        std::string errStr = lua_tostring(L, -1);
+        lua_pop(L, 1);
+        return Error::Runtime("Function execution failed: " + errStr);
+    }
+
+    int top = lua_gettop(L);
+    std::vector<Value> results;
+    results.reserve(top);
+    for (int i = 1; i <= top; ++i)
+    {
+        results.push_back(Value::FromLuaState(L, i));
+    }
+    lua_pop(L, top);
+    return results;
 }
 
 Value Value::FromLuaState(lua_State* L, int index)
 {
-    int t = lua_type(L, index);
-    switch (t)
+    Value val;
+    int type = lua_type(L, index);
+    switch (type)
     {
     case LUA_TNIL:
-        return Value();
+        val.type_ = ValueType::Nil;
+        break;
     case LUA_TBOOLEAN:
-        return Value(static_cast<bool>(lua_toboolean(L, index)));
+        val.type_ = ValueType::Boolean;
+        val.boolVal_ = (lua_toboolean(L, index) != 0);
+        break;
     case LUA_TNUMBER:
-        return Value(lua_tonumber(L, index));
+        val.type_ = ValueType::Number;
+        val.numberVal_ = lua_tonumber(L, index);
+        val.intVal_ = static_cast<int>(val.numberVal_);
+        break;
     case LUA_TSTRING:
-        return Value(lua_tostring(L, index));
+        val.type_ = ValueType::String;
+        val.stringVal_ = lua_tostring(L, index);
+        break;
     case LUA_TLIGHTUSERDATA:
-        return Value(lua_touserdata(L, index));
-    default:
-    {
-        Value val;
+        val.type_ = ValueType::LightUserdata;
+        val.lightUserdataVal_ = lua_touserdata(L, index);
+        break;
+    case LUA_TTABLE:
+    case LUA_TFUNCTION:
+    case LUA_TTHREAD:
+    case LUA_TUSERDATA:
+        val.type_ = (type == LUA_TTABLE) ? ValueType::Table :
+                    (type == LUA_TFUNCTION) ? ValueType::Function :
+                    (type == LUA_TTHREAD) ? ValueType::Thread : ValueType::Userdata;
         val.refData_ = std::make_shared<RefData>();
         val.refData_->L = L;
-        val.refData_->refId = lua_ref(L, index);
-
-        if (t == LUA_TTABLE) val.type_ = ValueType::Table;
-        else if (t == LUA_TFUNCTION) val.type_ = ValueType::Function;
-        else if (t == LUA_TTHREAD) val.type_ = ValueType::Thread;
-        else if (t == LUA_TUSERDATA) val.type_ = ValueType::Userdata;
-        else val.type_ = ValueType::Nil;
-
-        return val;
+        lua_pushvalue(L, index);
+        val.refData_->refId = lua_ref(L, -1);
+        lua_pop(L, 1);
+        break;
+    default:
+        val.type_ = ValueType::Nil;
+        break;
     }
-    }
+    return val;
 }
 
 void Value::PushToLuaState(lua_State* L) const
@@ -144,7 +168,7 @@ void Value::PushToLuaState(lua_State* L) const
         lua_pushnil(L);
         break;
     case ValueType::Boolean:
-        lua_pushboolean(L, boolVal_);
+        lua_pushboolean(L, boolVal_ ? 1 : 0);
         break;
     case ValueType::Number:
         lua_pushnumber(L, numberVal_);
@@ -153,12 +177,15 @@ void Value::PushToLuaState(lua_State* L) const
         lua_pushinteger(L, intVal_);
         break;
     case ValueType::String:
-        lua_pushlstring(L, stringVal_.data(), stringVal_.length());
+        lua_pushlstring(L, stringVal_.data(), stringVal_.size());
         break;
     case ValueType::LightUserdata:
         lua_pushlightuserdata(L, lightUserdataVal_);
         break;
-    default:
+    case ValueType::Table:
+    case ValueType::Function:
+    case ValueType::Thread:
+    case ValueType::Userdata:
         if (refData_ && refData_->refId != LUA_NOREF)
         {
             lua_getref(L, refData_->refId);

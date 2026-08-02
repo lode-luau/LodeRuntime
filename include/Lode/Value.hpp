@@ -5,6 +5,7 @@
 #include "Lode/Error.hpp"
 #include <string>
 #include <memory>
+#include <vector>
 
 struct lua_State;
 
@@ -67,6 +68,9 @@ public:
     [[nodiscard]] Result<double> TryAsNumber() const;
     [[nodiscard]] Result<int> TryAsInteger() const;
     [[nodiscard]] Result<std::string> TryAsString() const;
+
+    // Invoke if value is a function
+    Result<std::vector<Value>> Call(State& vm, const std::vector<Value>& args = {}) const;
 
     // Internal creation for Luau stack values
     static Value FromLuaState(lua_State* L, int index);

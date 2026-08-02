@@ -1,5 +1,6 @@
 #include "Lode/State.hpp"
 #include "Lode/Result.hpp"
+#include "Lode/EventLoop.hpp"
 #include "Platform/WindowsCrashHandler.hpp"
 #include "Luau/Compiler.h"
 #include "luacode.h"
@@ -82,6 +83,9 @@ int main(int argc, char* argv[])
         std::cerr << "Runtime Error: " << execResult.GetError().GetMessage() << "\n";
         return 1;
     }
+
+    // Process all pending libuv timers, I/O events, and coroutine resumes
+    Lode::EventLoop::Default().Run(vm);
 
     return 0;
 }

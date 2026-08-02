@@ -1,13 +1,11 @@
 #include "Lode/State.hpp"
-#include "Registry.hpp"
+#include "Lode/Metatable.hpp"
 #include "ModuleLoader.hpp"
-
+#include "Registry.hpp"
 #include "lua.h"
 #include "lualib.h"
-#include "luacode.h"
-
-#include <vector>
-#include <string>
+#include "Luau/Compiler.h"
+#include <stdexcept>
 #include <iostream>
 
 namespace Lode
@@ -19,9 +17,8 @@ struct State::Impl
     std::vector<std::string> modulePaths;
 };
 
-State::State() : ownsState_(true), impl_(std::make_unique<Impl>())
+State::State() : L_(luaL_newstate()), ownsState_(true), impl_(std::make_unique<Impl>())
 {
-    L_ = luaL_newstate();
     if (L_)
     {
         luaL_openlibs(L_);
@@ -29,24 +26,21 @@ State::State() : ownsState_(true), impl_(std::make_unique<Impl>())
     }
 }
 
-State::State(lua_State* L) : L_(L), ownsState_(false), impl_(nullptr)
+State::State(lua_State* L) : L_(L), ownsState_(false), impl_(std::make_unique<Impl>())
 {
 }
 
 State::~State()
 {
-    if (L_ && ownsState_ && impl_)
+    if (ownsState_ && L_)
     {
-        impl_->registry.Clear();
         lua_close(L_);
         L_ = nullptr;
     }
 }
 
 State::State(State&& other) noexcept
-    : L_(other.L_)
-    , ownsState_(other.ownsState_)
-    , impl_(std::move(other.impl_))
+    : L_(other.L_), ownsState_(other.ownsState_), impl_(std::move(other.impl_))
 {
     other.L_ = nullptr;
     other.ownsState_ = false;
@@ -56,9 +50,8 @@ State& State::operator=(State&& other) noexcept
 {
     if (this != &other)
     {
-        if (L_ && ownsState_ && impl_)
+        if (ownsState_ && L_)
         {
-            impl_->registry.Clear();
             lua_close(L_);
         }
         L_ = other.L_;
@@ -72,12 +65,12 @@ State& State::operator=(State&& other) noexcept
 
 Result<State> State::Create()
 {
-    State state;
-    if (!state.GetLuaState())
+    State s;
+    if (!s.L_)
     {
-        return Error::Runtime("Failed to initialize Luau lua_State");
+        return Error::Platform("Failed to initialize Luau VM state");
     }
-    return std::move(state);
+    return s;
 }
 
 Result<void> State::ExecuteBytecode(std::string_view bytecode, std::string_view chunkName)
@@ -89,32 +82,38 @@ Result<void> State::ExecuteBytecode(std::string_view bytecode, std::string_view 
 
 Result<int> State::ExecuteBytecodeWithResults(std::string_view bytecode, std::string_view chunkName)
 {
-    if (!L_) return Error::Runtime("State VM is invalid");
+    if (!L_) return Error::Runtime("State is null");
 
-    std::string name(chunkName);
-    int loadRes = luau_load(L_, name.c_str(), bytecode.data(), bytecode.size(), 0);
-    if (loadRes != 0)
+    // Wrap script execution in a Main Coroutine so root code can yield seamlessly
+    lua_State* co = lua_newthread(L_);
+    int coRef = lua_ref(L_, -1);
+    lua_pop(L_, 1);
+
+    std::string nameStr(chunkName);
+    int loadStatus = luau_load(co, nameStr.c_str(), bytecode.data(), bytecode.size(), 0);
+    if (loadStatus != LUA_OK)
     {
-        std::string errStr = lua_tostring(L_, -1);
-        Pop(1);
-        return Error::Runtime("Failed to load Luau bytecode: " + errStr);
+        std::string errStr = lua_tostring(co, -1);
+        lua_pop(co, 1);
+        lua_unref(L_, coRef);
+        return Error::Syntax("Bytecode load failed: " + errStr);
     }
 
-    int topBefore = GetTop() - 1;
-    int pcallRes = lua_pcall(L_, 0, LUA_MULTRET, 0);
-    if (pcallRes != 0)
+    int resStatus = lua_resume(co, nullptr, 0);
+    if (resStatus != LUA_OK && resStatus != LUA_YIELD)
     {
-        std::string errStr = lua_tostring(L_, -1);
-        Pop(1);
-        return Error::Runtime("Execution error: " + errStr);
+        std::string errStr = lua_tostring(co, -1);
+        lua_pop(co, 1);
+        lua_unref(L_, coRef);
+        return Error::Runtime("Execution failed: " + errStr);
     }
 
-    int nresults = GetTop() - topBefore;
-    if (nresults == 0)
+    int nresults = lua_gettop(co);
+    if (nresults > 0)
     {
-        PushNil();
-        nresults = 1;
+        lua_xmove(co, L_, nresults);
     }
+    lua_unref(L_, coRef);
     return nresults;
 }
 
@@ -122,103 +121,27 @@ Result<Value> State::ProtectedCall(std::string_view bytecode, std::string_view c
 {
     auto res = ExecuteBytecodeWithResults(bytecode, chunkName);
     if (res.IsError()) return res.GetError();
-    int count = res.GetValue();
-    if (count <= 0) return Value();
 
-    Value val = Value::FromLuaState(L_, -1);
-    Pop(count);
-    return val;
+    int nresults = res.GetValue();
+    if (nresults > 0)
+    {
+        Value v = Value::FromLuaState(L_, -1);
+        Pop(nresults);
+        return v;
+    }
+    return Value();
 }
 
 Result<std::vector<Value>> State::CallFunction(const Value& fn, const std::vector<Value>& args)
 {
-    if (!L_) return Error::Runtime("State VM is invalid");
-
-    int topBefore = GetTop();
-    fn.PushToLuaState(L_);
-    for (const auto& arg : args)
-    {
-        arg.PushToLuaState(L_);
-    }
-
-    int pcallRes = lua_pcall(L_, static_cast<int>(args.size()), LUA_MULTRET, 0);
-    if (pcallRes != 0)
-    {
-        std::string errStr = lua_tostring(L_, -1);
-        Pop(1);
-        return Error::Runtime("Function call error: " + errStr);
-    }
-
-    int nresults = GetTop() - topBefore;
-    std::vector<Value> results;
-    results.reserve(nresults);
-    for (int i = topBefore + 1; i <= GetTop(); ++i)
-    {
-        results.push_back(Value::FromLuaState(L_, i));
-    }
-    Pop(nresults);
-    return results;
+    return fn.Call(*this, args);
 }
-
-void State::RaiseError(std::string_view message)
-{
-    if (L_)
-    {
-        std::string msg(message);
-        luaL_error(L_, "%s", msg.c_str());
-    }
-}
-
-// --- Stack Manipulation API ---
-int State::GetTop() const { return L_ ? lua_gettop(L_) : 0; }
-void State::SetTop(int index) { if (L_) lua_settop(L_, index); }
-void State::Pop(int count) { if (L_ && count > 0) lua_pop(L_, count); }
-void State::Remove(int index) { if (L_) lua_remove(L_, index); }
-void State::Insert(int index) { if (L_) lua_insert(L_, index); }
-void State::Replace(int index) { if (L_) lua_replace(L_, index); }
-
-// --- Stack Push API ---
-void State::PushNil() { if (L_) lua_pushnil(L_); }
-void State::PushBoolean(bool b) { if (L_) lua_pushboolean(L_, b ? 1 : 0); }
-void State::PushNumber(double n) { if (L_) lua_pushnumber(L_, n); }
-void State::PushInteger(int i) { if (L_) lua_pushinteger(L_, i); }
-void State::PushString(std::string_view str) { if (L_) lua_pushlstring(L_, str.data(), str.size()); }
-void State::PushLightUserdata(void* ptr) { if (L_) lua_pushlightuserdata(L_, ptr); }
-void State::PushValue(const Value& val) { if (L_) val.PushToLuaState(L_); }
-void State::PushValues(const std::vector<Value>& values) { for (const auto& val : values) PushValue(val); }
-void State::PushTable(const Table& table) { if (L_) table.PushToLuaState(L_); }
-
-// --- Stack Type Inspection API ---
-bool State::IsNil(int index) const { return L_ ? lua_isnil(L_, index) : false; }
-bool State::IsBoolean(int index) const { return L_ ? lua_isboolean(L_, index) : false; }
-bool State::IsNumber(int index) const { return L_ ? lua_isnumber(L_, index) : false; }
-bool State::IsInteger(int index) const { return L_ ? lua_isnumber(L_, index) : false; }
-bool State::IsString(int index) const { return L_ ? lua_isstring(L_, index) : false; }
-bool State::IsTable(int index) const { return L_ ? lua_istable(L_, index) : false; }
-bool State::IsFunction(int index) const { return L_ ? lua_isfunction(L_, index) : false; }
-bool State::IsThread(int index) const { return L_ ? lua_isthread(L_, index) : false; }
-bool State::IsUserdata(int index) const { return L_ ? lua_isuserdata(L_, index) : false; }
-bool State::IsLightUserdata(int index) const { return L_ ? lua_islightuserdata(L_, index) : false; }
-
-// --- Stack Reading API ---
-Value State::GetValue(int index) const { return L_ ? Value::FromLuaState(L_, index) : Value(); }
-std::string State::GetString(int index) const { return L_ ? lua_tostring(L_, index) : ""; }
-double State::GetNumber(int index) const { return L_ ? lua_tonumber(L_, index) : 0.0; }
-int State::GetInteger(int index) const { return L_ ? static_cast<int>(lua_tointeger(L_, index)) : 0; }
-bool State::GetBoolean(int index) const { return L_ ? static_cast<bool>(lua_toboolean(L_, index)) : false; }
-void* State::GetLightUserdata(int index) const { return L_ ? lua_touserdata(L_, index) : nullptr; }
-
-// --- Stack Table & Field API ---
-void State::GetField(int index, const char* name) { if (L_) lua_getfield(L_, index, name); }
-void State::SetField(int index, const char* name) { if (L_) lua_setfield(L_, index, name); }
-void State::RawGet(int index, int n) { if (L_) lua_rawgeti(L_, index, n); }
-void State::RawSet(int index, int n) { if (L_) lua_rawseti(L_, index, n); }
 
 void State::AddModulePath(std::string_view path)
 {
     if (impl_)
     {
-        impl_->modulePaths.emplace_back(path);
+        impl_->modulePaths.push_back(std::string(path));
     }
 }
 
@@ -231,10 +154,10 @@ void State::SetGlobal(const std::string& name, const Value& value)
 
 Result<Value> State::GetGlobal(const std::string& name) const
 {
-    if (!L_) return Error::Runtime("State VM is invalid");
+    if (!L_) return Error::Runtime("State is null");
     lua_getglobal(L_, name.c_str());
     Value val = Value::FromLuaState(L_, -1);
-    const_cast<State*>(this)->Pop(1);
+    lua_pop(L_, 1);
     return val;
 }
 
@@ -243,8 +166,45 @@ Table State::CreateTable()
     if (!L_) return Table();
     lua_newtable(L_);
     Table t(L_, -1);
-    Pop(1);
+    lua_pop(L_, 1);
     return t;
+}
+
+Metatable State::CreateMetatable()
+{
+    return Metatable(*this);
+}
+
+Value State::CreateFunction(const std::function<Value(State& vm, const std::vector<Value>& args)>& fn)
+{
+    if (!L_) return Value();
+
+    struct ClosureData
+    {
+        std::function<Value(State& vm, const std::vector<Value>& args)> func;
+    };
+    auto* data = new ClosureData{ fn };
+
+    auto cfunc = [](lua_State* L) -> int {
+        auto* data = static_cast<ClosureData*>(lua_touserdata(L, lua_upvalueindex(1)));
+        int top = lua_gettop(L);
+        std::vector<Value> args;
+        args.reserve(top);
+        for (int i = 1; i <= top; ++i)
+        {
+            args.push_back(Value::FromLuaState(L, i));
+        }
+        State vm(L);
+        Value res = data->func(vm, args);
+        res.PushToLuaState(L);
+        return 1;
+    };
+
+    lua_pushlightuserdata(L_, data);
+    lua_pushcclosure(L_, cfunc, "CFunction", 1);
+    Value val = Value::FromLuaState(L_, -1);
+    lua_pop(L_, 1);
+    return val;
 }
 
 Coroutine State::CreateCoroutine(const Value& fn)
@@ -252,33 +212,100 @@ Coroutine State::CreateCoroutine(const Value& fn)
     if (!L_) return Coroutine();
     fn.PushToLuaState(L_);
     int fnRef = lua_ref(L_, -1);
-    Pop(1);
-    return Coroutine(L_, fnRef);
+    lua_pop(L_, 1);
+
+    Coroutine co(L_, fnRef);
+    lua_unref(L_, fnRef);
+    return co;
+}
+
+int State::YieldThread()
+{
+    if (!L_) return 0;
+    return lua_yield(L_, 0);
 }
 
 Result<Value> State::Require(std::string_view moduleName)
 {
-    if (!L_) return Error::Runtime("State VM is invalid");
+    if (!L_) return Error::Runtime("State is null");
     lua_getglobal(L_, "require");
     if (!lua_isfunction(L_, -1))
     {
-        Pop(1);
-        return Error::Runtime("Require function is not available in Luau global scope");
+        lua_pop(L_, 1);
+        return Error::Runtime("Global require is missing");
     }
-
-    std::string modStr(moduleName);
-    lua_pushlstring(L_, modStr.data(), modStr.length());
-    int res = lua_pcall(L_, 1, 1, 0);
-    if (res != 0)
+    lua_pushlstring(L_, moduleName.data(), moduleName.size());
+    int status = lua_pcall(L_, 1, 1, 0);
+    if (status != LUA_OK)
     {
         std::string errStr = lua_tostring(L_, -1);
-        Pop(1);
-        return Error::Runtime("Require failed: " + errStr);
+        lua_pop(L_, 1);
+        return Error::Module("Require failed: " + errStr);
     }
-
     Value val = Value::FromLuaState(L_, -1);
-    Pop(1);
+    lua_pop(L_, 1);
     return val;
 }
+
+void State::RaiseError(std::string_view message)
+{
+    if (L_)
+    {
+        std::string msgStr(message);
+        luaL_error(L_, "%s", msgStr.c_str());
+    }
+}
+
+// --- Stack Manipulation API ---
+int State::GetTop() const { return L_ ? lua_gettop(L_) : 0; }
+void State::SetTop(int index) { if (L_) lua_settop(L_, index); }
+void State::Pop(int count) { if (L_) lua_pop(L_, count); }
+void State::Remove(int index) { if (L_) lua_remove(L_, index); }
+void State::Insert(int index) { if (L_) lua_insert(L_, index); }
+void State::Replace(int index) { if (L_) lua_replace(L_, index); }
+
+// --- Stack Push API ---
+void State::PushNil() { if (L_) lua_pushnil(L_); }
+void State::PushBoolean(bool b) { if (L_) lua_pushboolean(L_, b ? 1 : 0); }
+void State::PushNumber(double n) { if (L_) lua_pushnumber(L_, n); }
+void State::PushInteger(int i) { if (L_) lua_pushinteger(L_, i); }
+void State::PushString(std::string_view str) { if (L_) lua_pushlstring(L_, str.data(), str.size()); }
+void State::PushLightUserdata(void* ptr) { if (L_) lua_pushlightuserdata(L_, ptr); }
+void State::PushValue(const Value& val) { if (L_) val.PushToLuaState(L_); }
+void State::PushValues(const std::vector<Value>& values)
+{
+    if (!L_) return;
+    for (const auto& val : values)
+    {
+        val.PushToLuaState(L_);
+    }
+}
+void State::PushTable(const Table& table) { if (L_) table.PushToLuaState(L_); }
+
+// --- Stack Type Inspection API ---
+bool State::IsNil(int index) const { return L_ ? (lua_isnil(L_, index) != 0) : false; }
+bool State::IsBoolean(int index) const { return L_ ? (lua_isboolean(L_, index) != 0) : false; }
+bool State::IsNumber(int index) const { return L_ ? (lua_isnumber(L_, index) != 0) : false; }
+bool State::IsInteger(int index) const { return L_ ? (lua_isnumber(L_, index) != 0) : false; }
+bool State::IsString(int index) const { return L_ ? (lua_isstring(L_, index) != 0) : false; }
+bool State::IsTable(int index) const { return L_ ? (lua_istable(L_, index) != 0) : false; }
+bool State::IsFunction(int index) const { return L_ ? (lua_isfunction(L_, index) != 0) : false; }
+bool State::IsThread(int index) const { return L_ ? (lua_isthread(L_, index) != 0) : false; }
+bool State::IsUserdata(int index) const { return L_ ? (lua_isuserdata(L_, index) != 0) : false; }
+bool State::IsLightUserdata(int index) const { return L_ ? (lua_islightuserdata(L_, index) != 0) : false; }
+
+// --- Stack Reading API ---
+Value State::GetValue(int index) const { return L_ ? Value::FromLuaState(L_, index) : Value(); }
+std::string State::GetString(int index) const { return L_ ? lua_tostring(L_, index) : ""; }
+double State::GetNumber(int index) const { return L_ ? lua_tonumber(L_, index) : 0.0; }
+int State::GetInteger(int index) const { return L_ ? static_cast<int>(lua_tonumber(L_, index)) : 0; }
+bool State::GetBoolean(int index) const { return L_ ? (lua_toboolean(L_, index) != 0) : false; }
+void* State::GetLightUserdata(int index) const { return L_ ? lua_touserdata(L_, index) : nullptr; }
+
+// --- Stack Table & Field API ---
+void State::GetField(int index, const char* name) { if (L_) lua_getfield(L_, index, name); }
+void State::SetField(int index, const char* name) { if (L_) lua_setfield(L_, index, name); }
+void State::RawGet(int index, int n) { if (L_) lua_rawgeti(L_, index, n); }
+void State::RawSet(int index, int n) { if (L_) lua_rawseti(L_, index, n); }
 
 } // namespace Lode
