@@ -1,0 +1,18 @@
+{
+  "name": "native_module",
+  "version": "1.0.0",
+  "description": "Exemplo de modulo nativo em C++ DLL para o LodeRuntime",
+  "author": "Lode Team",
+  "license": "MIT",
+  "libraries": {
+    "windows": {
+      "x64": "libs/windows/x64/native_module.dll"
+    },
+    "linux": {
+      "x64": "libs/linux/x64/native_module.so"
+    },
+    "macos": {
+      "x64": "libs/macos/x64/native_module.dylib"
+    }
+  }
+}
