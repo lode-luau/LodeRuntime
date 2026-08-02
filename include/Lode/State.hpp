@@ -48,6 +48,10 @@ public:
     [[nodiscard]] Value CreateFunction(const std::function<Value(State& vm, const std::vector<Value>& args)>& fn);
     [[nodiscard]] Coroutine CreateCoroutine(const Value& fn);
 
+    void* CreateUserdata(size_t size);
+    void SetUserdataMetatable(int index, const Table& metatable);
+    void SetUserdataGC(const Table& metatable, void(*destructor)(void* ptr));
+
     int YieldThread();
 
     Result<Value> Require(std::string_view moduleName);
@@ -91,7 +95,8 @@ public:
     [[nodiscard]] double GetNumber(int index) const;
     [[nodiscard]] int GetInteger(int index) const;
     [[nodiscard]] bool GetBoolean(int index) const;
-    [[nodiscard]] void* GetLightUserdata(int index) const;
+    [[nodiscard]] void* GetUserdata(int index = -1) const;
+    [[nodiscard]] void* GetLightUserdata(int index = -1) const;
 
     // --- Stack Table & Field API ---
     void GetField(int index, const char* name);

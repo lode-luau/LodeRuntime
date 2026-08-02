@@ -219,6 +219,36 @@ Coroutine State::CreateCoroutine(const Value& fn)
     return co;
 }
 
+void* State::CreateUserdata(size_t size)
+{
+    return L_ ? lua_newuserdata(L_, size) : nullptr;
+}
+
+void State::SetUserdataMetatable(int index, const Table& metatable)
+{
+    if (!L_) return;
+    metatable.PushToLuaState(L_);
+    lua_setmetatable(L_, index < 0 ? index - 1 : index);
+}
+
+void State::SetUserdataGC(const Table& metatable, void(*destructor)(void* ptr))
+{
+    if (!L_) return;
+    metatable.PushToLuaState(L_);
+    lua_pushlightuserdata(L_, reinterpret_cast<void*>(destructor));
+    auto gcFunc = [](lua_State* L) -> int {
+        auto* dt = reinterpret_cast<void(*)(void*)>(lua_touserdata(L, lua_upvalueindex(1)));
+        void* ud = lua_touserdata(L, 1);
+        if (dt && ud) {
+            dt(ud);
+        }
+        return 0;
+    };
+    lua_pushcclosure(L_, gcFunc, "__gc", 1);
+    lua_setfield(L_, -2, "__gc");
+    lua_pop(L_, 1);
+}
+
 int State::YieldThread()
 {
     if (!L_) return 0;
@@ -300,6 +330,7 @@ std::string State::GetString(int index) const { return L_ ? lua_tostring(L_, ind
 double State::GetNumber(int index) const { return L_ ? lua_tonumber(L_, index) : 0.0; }
 int State::GetInteger(int index) const { return L_ ? static_cast<int>(lua_tonumber(L_, index)) : 0; }
 bool State::GetBoolean(int index) const { return L_ ? (lua_toboolean(L_, index) != 0) : false; }
+void* State::GetUserdata(int index) const { return L_ ? lua_touserdata(L_, index) : nullptr; }
 void* State::GetLightUserdata(int index) const { return L_ ? lua_touserdata(L_, index) : nullptr; }
 
 // --- Stack Table & Field API ---

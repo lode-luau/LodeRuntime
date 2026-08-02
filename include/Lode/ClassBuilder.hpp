@@ -5,7 +5,6 @@
 #include "Lode/Table.hpp"
 #include "Lode/Metatable.hpp"
 #include "Lode/ObjectWrap.hpp"
-#include "lua.h"
 #include <string>
 #include <functional>
 #include <memory>
@@ -21,25 +20,16 @@ public:
     explicit ClassBuilder(State& vm, const std::string& className)
         : vm_(vm), className_(className), metatable_(vm.CreateTable()), methodsTable_(vm.CreateTable())
     {
-        lua_State* L = vm.GetLuaState();
         metatable_.Set("__index", Value(methodsTable_));
 
-        // Automatic __gc calling ~T()
+        // Automatic __gc calling ~std::shared_ptr<T>()
         using Holder = std::shared_ptr<T>;
-        auto gcClosure = [](lua_State* L) -> int {
-            if (lua_isuserdata(L, 1)) {
-                auto* holder = static_cast<Holder*>(lua_touserdata(L, 1));
-                if (holder) {
-                    holder->~Holder();
-                }
+        vm_.SetUserdataGC(metatable_, [](void* ptr) {
+            if (ptr) {
+                auto* holder = static_cast<Holder*>(ptr);
+                holder->~Holder();
             }
-            return 0;
-        };
-
-        metatable_.PushToLuaState(L);
-        lua_pushcclosure(L, gcClosure, "__gc", 0);
-        lua_setfield(L, -2, "__gc");
-        lua_pop(L, 1);
+        });
     }
 
     template <typename... Args>
@@ -49,14 +39,12 @@ public:
 
         methodsTable_.Set("new", vm_.CreateFunction([meta](State& vm, const std::vector<Value>& args) -> Value {
             auto instance = std::make_shared<T>();
-            lua_State* L = vm.GetLuaState();
             using Holder = std::shared_ptr<T>;
-            void* userMemory = lua_newuserdata(L, sizeof(Holder));
+            void* userMemory = vm.CreateUserdata(sizeof(Holder));
             new (userMemory) Holder(instance);
 
-            meta.PushToLuaState(L);
-            lua_setmetatable(L, -2);
-            return Value::FromLuaState(L, -1);
+            vm.SetUserdataMetatable(-1, meta);
+            return vm.GetValue(-1);
         }));
 
         return *this;
@@ -68,14 +56,12 @@ public:
         methodsTable_.Set("new", vm_.CreateFunction([meta, factory](State& vm, const std::vector<Value>& args) -> Value {
             auto instance = factory(vm, args);
             if (!instance) instance = std::make_shared<T>();
-            lua_State* L = vm.GetLuaState();
             using Holder = std::shared_ptr<T>;
-            void* userMemory = lua_newuserdata(L, sizeof(Holder));
+            void* userMemory = vm.CreateUserdata(sizeof(Holder));
             new (userMemory) Holder(instance);
 
-            meta.PushToLuaState(L);
-            lua_setmetatable(L, -2);
-            return Value::FromLuaState(L, -1);
+            vm.SetUserdataMetatable(-1, meta);
+            return vm.GetValue(-1);
         }));
         return *this;
     }

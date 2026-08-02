@@ -1,7 +1,7 @@
 #include "Lode/State.hpp"
 #include "Lode/Result.hpp"
 #include "Lode/EventLoop.hpp"
-#include "Platform/WindowsCrashHandler.hpp"
+#include "Platform/CrashHandler.hpp"
 #include "Luau/Compiler.h"
 #include "luacode.h"
 
@@ -15,7 +15,7 @@ namespace fs = std::filesystem;
 
 int main(int argc, char* argv[])
 {
-    // Initialize Windows DbgHelp.dll crash handler for detailed exception reporting
+    // Initialize cross-platform CrashHandler (Windows / Linux / macOS)
     Lode::Platform::CrashHandler::Initialize();
 
     if (argc < 2)

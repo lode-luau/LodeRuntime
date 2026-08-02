@@ -1,6 +1,6 @@
 #if defined(_WIN32)
 
-#include "WindowsCrashHandler.hpp"
+#include "CrashHandler.hpp"
 #include <windows.h>
 #include <dbghelp.h>
 #include <iostream>
@@ -137,12 +137,5 @@ void CrashHandler::Initialize()
 }
 
 } // namespace Lode::Platform
-
-#else
-
-namespace Lode::Platform
-{
-void CrashHandler::Initialize() {}
-}
 
 #endif

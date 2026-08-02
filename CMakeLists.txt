@@ -45,8 +45,10 @@ FetchContent_MakeAvailable(luau json libuv)
 
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${json_SOURCE_DIR}/include
     ${luau_SOURCE_DIR}/VM/include
     ${luau_SOURCE_DIR}/Compiler/include
+    ${luau_SOURCE_DIR}/Ast/include
     ${luau_SOURCE_DIR}/Require/include
     ${luau_SOURCE_DIR}/Config/include
     ${luau_SOURCE_DIR}/CLI/include
@@ -69,6 +71,7 @@ set(LODE_CORE_SOURCES
     src/Platform/WindowsDll.cpp
     src/Platform/UnixDlopen.cpp
     src/Platform/WindowsCrashHandler.cpp
+    src/Platform/PosixCrashHandler.cpp
 )
 
 set(LODE_CORE_HEADERS
@@ -86,6 +89,7 @@ set(LODE_CORE_HEADERS
     include/Lode/Module.hpp
     include/Lode/State.hpp
     src/Platform/Platform.hpp
+    src/Platform/CrashHandler.hpp
     src/Platform/WindowsCrashHandler.hpp
 )
 
@@ -98,28 +102,22 @@ target_include_directories(LodeCore PUBLIC
     $<INSTALL_INTERFACE:include>
 )
 
-target_link_libraries(LodeCore PUBLIC
+target_link_libraries(LodeCore PRIVATE
     Luau.VM
     Luau.Compiler
+    Luau.Ast
     Luau.Require
-    Luau.Config
-    Luau.CLI.lib
-    nlohmann_json::nlohmann_json
     uv_a
 )
 
-# lode_runtime Executable Target
-add_executable(lode_runtime src/Runtime.cpp)
-target_link_libraries(lode_runtime PRIVATE LodeCore)
-
-# Auto-reconfigure triggers for MSVC/Ninja builds
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-    "CMakeLists.txt"
-    ${LODE_CORE_SOURCES}
-    ${LODE_CORE_HEADERS}
+# Main Executable LodeRuntime
+add_executable(lode_runtime
+    src/Runtime.cpp
 )
 
-# Adiciona o diretorio temporario do modulo nativo para ser compilado junto
+target_link_libraries(lode_runtime PRIVATE LodeCore Luau.Compiler Luau.Ast)
+
+# Add subdirectories for optional/test modules
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/temp/native_module/CMakeLists.txt")
     add_subdirectory(temp/native_module)
 endif()
