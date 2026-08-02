@@ -14,6 +14,12 @@ enum class OS
     Windows,
     Linux,
     MacOS,
+    Android,
+    IOS,
+    BSD,
+    Solaris,
+    Haiku,
+    WASM,
     Unknown
 };
 
@@ -22,6 +28,8 @@ enum class Architecture
     x64,
     arm64,
     x86,
+    wasm32,
+    wasm64,
     Unknown
 };
 

@@ -1,5 +1,9 @@
 #include "Platform.hpp"
 
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+
 namespace Lode::Platform
 {
 
@@ -7,8 +11,22 @@ OS GetOS()
 {
 #if defined(_WIN32)
     return OS::Windows;
+#elif defined(__EMSCRIPTEN__)
+    return OS::WASM;
+#elif defined(__ANDROID__)
+    return OS::Android;
 #elif defined(__APPLE__)
-    return OS::MacOS;
+    #if TARGET_OS_IPHONE || TARGET_OS_IOS
+        return OS::IOS;
+    #else
+        return OS::MacOS;
+    #endif
+#elif defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__) || defined(__bsdi__)
+    return OS::BSD;
+#elif defined(__sun) || defined(__sun__) || defined(__SVR4)
+    return OS::Solaris;
+#elif defined(__HAIKU__)
+    return OS::Haiku;
 #elif defined(__linux__)
     return OS::Linux;
 #else
@@ -18,7 +36,11 @@ OS GetOS()
 
 Architecture GetArchitecture()
 {
-#if defined(__x86_64__) || defined(_M_X64)
+#if defined(__wasm64__)
+    return Architecture::wasm64;
+#elif defined(__wasm32__) || defined(__EMSCRIPTEN__)
+    return Architecture::wasm32;
+#elif defined(__x86_64__) || defined(_M_X64)
     return Architecture::x64;
 #elif defined(__aarch64__) || defined(_M_ARM64)
     return Architecture::arm64;
@@ -35,7 +57,13 @@ std::string_view GetOSName()
     {
     case OS::Windows: return "windows";
     case OS::MacOS:   return "macos";
+    case OS::IOS:     return "ios";
     case OS::Linux:   return "linux";
+    case OS::Android: return "android";
+    case OS::BSD:     return "freebsd";
+    case OS::Solaris: return "solaris";
+    case OS::Haiku:   return "haiku";
+    case OS::WASM:    return "wasm";
     default:          return "unknown";
     }
 }
@@ -44,10 +72,12 @@ std::string_view GetArchitectureName()
 {
     switch (GetArchitecture())
     {
-    case Architecture::x64:   return "x64";
-    case Architecture::arm64: return "arm64";
-    case Architecture::x86:   return "x86";
-    default:                  return "unknown";
+    case Architecture::x64:    return "x64";
+    case Architecture::arm64:  return "arm64";
+    case Architecture::x86:    return "x86";
+    case Architecture::wasm32: return "wasm32";
+    case Architecture::wasm64: return "wasm64";
+    default:                   return "unknown";
     }
 }
 
