@@ -58,6 +58,7 @@ private:
 
 Lode::ModuleReturn LodeModuleRegister(Lode::State& vm);
 
+// Dynamic DLL Module macro
 #define LODE_MODULE(vm_var) \
     LODE_EXPORT int LodeModuleInit(lua_State* L) { \
         Lode::State vm_var(L); \
@@ -68,3 +69,22 @@ Lode::ModuleReturn LodeModuleRegister(Lode::State& vm);
         return static_cast<int>(ret.GetValues().size()); \
     } \
     Lode::ModuleReturn LodeModuleRegister(Lode::State& vm_var)
+
+// Static Production Module macro (for single executable production builds, iOS sandbox, and Luau LSP parity)
+#define LODE_STATIC_MODULE(name, vm_var) \
+    static Lode::ModuleReturn LodeModuleRegister_##name(Lode::State& vm_var); \
+    static int LodeModuleInit_##name(lua_State* L) { \
+        Lode::State vm_var(L); \
+        Lode::ModuleReturn ret = LodeModuleRegister_##name(vm_var); \
+        for (const auto& val : ret.GetValues()) { \
+            val.PushToLuaState(L); \
+        } \
+        return static_cast<int>(ret.GetValues().size()); \
+    } \
+    struct LodeStaticAutoRegister_##name { \
+        LodeStaticAutoRegister_##name() { \
+            ::Lode::NativeModuleRegistry::GetGlobalRegistry().RegisterStaticModule(#name, LodeModuleInit_##name); \
+            ::Lode::NativeModuleRegistry::GetGlobalRegistry().RegisterStaticModule("./" #name, LodeModuleInit_##name); \
+        } \
+    } g_lodeStaticAutoRegister_##name; \
+    static Lode::ModuleReturn LodeModuleRegister_##name(Lode::State& vm_var)

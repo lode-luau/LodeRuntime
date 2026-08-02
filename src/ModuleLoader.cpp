@@ -206,7 +206,7 @@ static int LoadModuleImpl(lua_State* L, void* ctx, const char* path, const char*
     std::string rawPathStr(path ? path : "");
     std::string loadNameStr(loadname ? loadname : "");
 
-    // 1. Check for Static Module Registration (iOS / Static Linking / App Store Sandbox)
+    // 1. Check for Static Module Registration (Production Bundling / iOS / App Store Sandbox)
     if (loaderCtx && loaderCtx->registry)
     {
         if (loaderCtx->registry->HasStaticModule(rawPathStr))
@@ -219,6 +219,16 @@ static int LoadModuleImpl(lua_State* L, void* ctx, const char* path, const char*
             auto initFn = loaderCtx->registry->GetStaticModule(loadNameStr);
             if (initFn) return initFn(L);
         }
+    }
+    if (NativeModuleRegistry::GetGlobalRegistry().HasStaticModule(rawPathStr))
+    {
+        auto initFn = NativeModuleRegistry::GetGlobalRegistry().GetStaticModule(rawPathStr);
+        if (initFn) return initFn(L);
+    }
+    if (!loadNameStr.empty() && NativeModuleRegistry::GetGlobalRegistry().HasStaticModule(loadNameStr))
+    {
+        auto initFn = NativeModuleRegistry::GetGlobalRegistry().GetStaticModule(loadNameStr);
+        if (initFn) return initFn(L);
     }
 
     fs::path targetPath(loadname ? loadname : (path ? path : ""));

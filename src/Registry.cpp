@@ -3,6 +3,12 @@
 namespace Lode
 {
 
+NativeModuleRegistry& NativeModuleRegistry::GetGlobalRegistry()
+{
+    static NativeModuleRegistry instance;
+    return instance;
+}
+
 bool NativeModuleRegistry::IsLoaded(const std::string& moduleName) const
 {
     std::lock_guard<std::mutex> lock(mutex_);
