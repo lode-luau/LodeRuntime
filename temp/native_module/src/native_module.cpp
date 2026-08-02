@@ -2,25 +2,44 @@
 #include "Lode/State.hpp"
 #include "Lode/Table.hpp"
 #include "Lode/Value.hpp"
+#include "Lode/Task.hpp"
+#include "Lode/Metatable.hpp"
+#include "Lode/ClassBuilder.hpp"
 #include <string>
+#include <cmath>
 
-LODE_MODULE(vm, exports)
+struct Vector3
 {
-    // High-level C++ lambda (takes std::string, returns std::string)
-    exports.Function("greet", [](const std::string& name) -> std::string {
-        std::string targetName = name.empty() ? "Lode User" : name;
-        return "Hello from Native C++ DLL! Welcome, " + targetName + "!";
-    });
+    double x = 0.0;
+    double y = 0.0;
+    double z = 0.0;
 
-    // High-level C++ lambda (takes double, returns double)
-    exports.Function("square", [](double x) -> double {
-        return x * x;
-    });
+    Vector3() = default;
+    Vector3(double x, double y, double z) : x(x), y(y), z(z) {}
 
-    // High-level C++ lambda receiving Lode::State& vm directly in parameters (no dangling reference capture!)
-    exports.Function("getSystemInfo", [](Lode::State& vm, const std::vector<Lode::Value>&) -> Lode::Value {
+    double Length() const
+    {
+        return std::sqrt(x * x + y * y + z * z);
+    }
+};
+
+LODE_MODULE(vm)
+{
+    Lode::Table exports = vm.CreateTable();
+
+    // 1. High-level functions
+    exports.Set("greet", vm.CreateFunction([](Lode::State& vm, const std::vector<Lode::Value>& args) -> Lode::Value {
+        std::string name = (args.size() > 0 && args[0].IsString()) ? args[0].AsString() : "Lode User";
+        return Lode::Value("Hello from Native C++ DLL! Welcome, " + name + "!");
+    }));
+
+    exports.Set("square", vm.CreateFunction([](Lode::State& vm, const std::vector<Lode::Value>& args) -> Lode::Value {
+        double x = (args.size() > 0 && args[0].IsNumber()) ? args[0].AsNumber() : 0.0;
+        return Lode::Value(x * x);
+    }));
+
+    exports.Set("getSystemInfo", vm.CreateFunction([](Lode::State& vm, const std::vector<Lode::Value>&) -> Lode::Value {
         Lode::Table info = vm.CreateTable();
-
 #if defined(_WIN32)
         info.Set("platform", Lode::Value("Windows"));
 #elif defined(__APPLE__)
@@ -34,7 +53,31 @@ LODE_MODULE(vm, exports)
 #else
         info.Set("arch", Lode::Value("x86"));
 #endif
+        return Lode::Value(info);
+    }));
 
-        return info;
+    // 2. Class Binding: Vector3 with Constructor Arguments
+    Lode::ClassBuilder<Vector3> vec3Builder(vm, "Vector3");
+    vec3Builder.CustomConstructor([](Lode::State&, const std::vector<Lode::Value>& args) -> std::shared_ptr<Vector3> {
+        double x = (args.size() > 0 && args[0].IsNumber()) ? args[0].AsNumber() : 0.0;
+        double y = (args.size() > 1 && args[1].IsNumber()) ? args[1].AsNumber() : 0.0;
+        double z = (args.size() > 2 && args[2].IsNumber()) ? args[2].AsNumber() : 0.0;
+        return std::make_shared<Vector3>(x, y, z);
     });
+    vec3Builder.Method("length", [](Vector3& self, Lode::State&, const std::vector<Lode::Value>&) -> Lode::Value {
+        return Lode::Value(self.Length());
+    });
+    vec3Builder.ToString([](const Vector3& self) -> std::string {
+        return "Vector3(" + std::to_string(self.x) + ", " + std::to_string(self.y) + ", " + std::to_string(self.z) + ")";
+    });
+
+    exports.Set("Vector3", vec3Builder.Build());
+
+    // 3. Secondary Metadata Table export (Multiple Return Values)
+    Lode::Table metaInfo = vm.CreateTable();
+    metaInfo.Set("moduleName", Lode::Value("NativeModule"));
+    metaInfo.Set("version", Lode::Value("2.0.0"));
+
+    // Returns multiple values directly to require: local NativeMod, MetaInfo = require(...)
+    return { exports, metaInfo };
 }
