@@ -6,12 +6,16 @@
   "license": "MIT",
   "libraries": {
     "windows": {
-      "x64": "libs/windows/x64/native_module.dll"
+      "x64": "libs/windows/x64/native_module.dll",
+      "arm64": "libs/windows/arm64/native_module.dll",
+      "x86": "libs/windows/x86/native_module.dll"
     },
     "linux": {
-      "x64": "libs/linux/x64/native_module.so"
+      "x64": "libs/linux/x64/native_module.so",
+      "arm64": "libs/linux/arm64/native_module.so"
     },
     "macos": {
+      "arm64": "libs/macos/arm64/native_module.dylib",
       "x64": "libs/macos/x64/native_module.dylib"
     }
   }
