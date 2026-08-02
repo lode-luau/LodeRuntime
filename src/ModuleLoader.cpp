@@ -203,6 +203,24 @@ static int LoadModuleImpl(lua_State* L, void* ctx, const char* path, const char*
 {
     State vm(L);
     LodeNavigationContext* loaderCtx = static_cast<LodeNavigationContext*>(ctx);
+    std::string rawPathStr(path ? path : "");
+    std::string loadNameStr(loadname ? loadname : "");
+
+    // 1. Check for Static Module Registration (iOS / Static Linking / App Store Sandbox)
+    if (loaderCtx && loaderCtx->registry)
+    {
+        if (loaderCtx->registry->HasStaticModule(rawPathStr))
+        {
+            auto initFn = loaderCtx->registry->GetStaticModule(rawPathStr);
+            if (initFn) return initFn(L);
+        }
+        if (!loadNameStr.empty() && loaderCtx->registry->HasStaticModule(loadNameStr))
+        {
+            auto initFn = loaderCtx->registry->GetStaticModule(loadNameStr);
+            if (initFn) return initFn(L);
+        }
+    }
+
     fs::path targetPath(loadname ? loadname : (path ? path : ""));
 
     fs::path dirPath = targetPath;
