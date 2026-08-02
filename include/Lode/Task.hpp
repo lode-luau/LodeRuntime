@@ -17,11 +17,11 @@ public:
     static void Wait(State& vm, double delayMs);
 
     // Schedules a single callback execution after delayMs milliseconds (OS-level setTimeout)
-    static int SetTimeout(State& vm, const Value& callback, double delayMs);
+    static int SetTimeout(State& vm, const Value& callback, double delayMs, const std::vector<Value>& args = {});
     static void ClearTimeout(State& vm, int timerId);
 
     // Schedules a recurring callback execution every intervalMs milliseconds (OS-level setInterval)
-    static int SetInterval(State& vm, const Value& callback, double intervalMs);
+    static int SetInterval(State& vm, const Value& callback, double intervalMs, const std::vector<Value>& args = {});
     static void ClearInterval(State& vm, int timerId);
 
     // Immediately spawns a function or coroutine
