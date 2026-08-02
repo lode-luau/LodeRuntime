@@ -56,7 +56,7 @@ LODE_MODULE(vm)
         return Lode::Value(info);
     }));
 
-    // 2. Class Binding: Vector3 with Constructor Arguments
+    // 2. Class Binding: Vector3 using full ClassBuilder 4-Phase capabilities!
     Lode::ClassBuilder<Vector3> vec3Builder(vm, "Vector3");
     vec3Builder.CustomConstructor([](Lode::State&, const std::vector<Lode::Value>& args) -> std::shared_ptr<Vector3> {
         double x = (args.size() > 0 && args[0].IsNumber()) ? args[0].AsNumber() : 0.0;
@@ -64,9 +64,15 @@ LODE_MODULE(vm)
         double z = (args.size() > 2 && args[2].IsNumber()) ? args[2].AsNumber() : 0.0;
         return std::make_shared<Vector3>(x, y, z);
     });
-    vec3Builder.Method("length", [](Vector3& self, Lode::State&, const std::vector<Lode::Value>&) -> Lode::Value {
-        return Lode::Value(self.Length());
-    });
+
+    // Automatic member property bindings (&Vector3::x, &Vector3::y, &Vector3::z)
+    vec3Builder.Property("x", &Vector3::x);
+    vec3Builder.Property("y", &Vector3::y);
+    vec3Builder.Property("z", &Vector3::z);
+
+    // Automatic member method binding (&Vector3::Length)
+    vec3Builder.Method("length", &Vector3::Length);
+
     vec3Builder.ToString([](const Vector3& self) -> std::string {
         return "Vector3(" + std::to_string(self.x) + ", " + std::to_string(self.y) + ", " + std::to_string(self.z) + ")";
     });

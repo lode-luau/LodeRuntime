@@ -18,11 +18,14 @@ print("[Native Module DLL] System Info: Platform =", sysInfo.platform, "| Arch =
 print("[True Multi-Return Require] Primary Exports =", NativeMod)
 print("[True Multi-Return Require] Secondary MetaInfo =", MetaInfo, "| Name =", MetaInfo.moduleName, "| Version =", MetaInfo.version)
 
--- 3. Native C++ Class Binding (Vector3 via ObjectWrap)
+-- 3. Native C++ Class Binding (Vector3 via ObjectWrap & ClassBuilder 4-Phase Dispatcher)
 if NativeMod.Vector3 then
     local v = NativeMod.Vector3.new(3, 4, 0)
     print("[Class Binding ObjectWrap] Vector3 length():", v:length())
     print("[Class Binding ObjectWrap] Vector3 tostring():", tostring(v))
+    print("[Class Builder Property Getter] v.x =", v.x, "| v.y =", v.y, "| v.z =", v.z)
+    v.x = 10
+    print("[Class Builder Property Setter] v.x after set to 10 =", v.x, "| new length =", v:length())
 end
 
 print("=== All Integration Tests Passed Successfully! ===")

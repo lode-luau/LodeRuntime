@@ -58,20 +58,10 @@ private:
 
 Lode::ModuleReturn LodeModuleRegister(Lode::State& vm);
 
-// Dynamic DLL Module macro
-#define LODE_MODULE(vm_var) \
-    LODE_EXPORT int LodeModuleInit(lua_State* L) { \
-        Lode::State vm_var(L); \
-        Lode::ModuleReturn ret = LodeModuleRegister(vm_var); \
-        for (const auto& val : ret.GetValues()) { \
-            val.PushToLuaState(L); \
-        } \
-        return static_cast<int>(ret.GetValues().size()); \
-    } \
-    Lode::ModuleReturn LodeModuleRegister(Lode::State& vm_var)
+// --- Single LODE_MODULE Unified Macro with Automatic Compile-Time Detection ---
+#if defined(LODE_STATIC_BUILD) || defined(LODE_STATIC)
 
-// Static Production Module macro (for single executable production builds, iOS sandbox, and Luau LSP parity)
-#define LODE_STATIC_MODULE(name, vm_var) \
+#define LODE_MODULE_NAMED(name, vm_var) \
     static Lode::ModuleReturn LodeModuleRegister_##name(Lode::State& vm_var); \
     static int LodeModuleInit_##name(lua_State* L) { \
         Lode::State vm_var(L); \
@@ -88,3 +78,31 @@ Lode::ModuleReturn LodeModuleRegister(Lode::State& vm);
         } \
     } g_lodeStaticAutoRegister_##name; \
     static Lode::ModuleReturn LodeModuleRegister_##name(Lode::State& vm_var)
+
+#define LODE_MODULE(vm_var) LODE_MODULE_NAMED(default_module, vm_var)
+
+#else
+
+#define LODE_MODULE_NAMED(name, vm_var) \
+    LODE_EXPORT int LodeModuleInit(lua_State* L) { \
+        Lode::State vm_var(L); \
+        Lode::ModuleReturn ret = LodeModuleRegister(vm_var); \
+        for (const auto& val : ret.GetValues()) { \
+            val.PushToLuaState(L); \
+        } \
+        return static_cast<int>(ret.GetValues().size()); \
+    } \
+    Lode::ModuleReturn LodeModuleRegister(Lode::State& vm_var)
+
+#define LODE_MODULE(vm_var) \
+    LODE_EXPORT int LodeModuleInit(lua_State* L) { \
+        Lode::State vm_var(L); \
+        Lode::ModuleReturn ret = LodeModuleRegister(vm_var); \
+        for (const auto& val : ret.GetValues()) { \
+            val.PushToLuaState(L); \
+        } \
+        return static_cast<int>(ret.GetValues().size()); \
+    } \
+    Lode::ModuleReturn LodeModuleRegister(Lode::State& vm_var)
+
+#endif
