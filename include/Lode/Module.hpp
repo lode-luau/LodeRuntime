@@ -16,6 +16,12 @@
 namespace Lode
 {
 
+/**
+ * @brief Represents the values returned by a native C++ Lode module.
+ * 
+ * Used implicitly by the LODE_MODULE macro to support returning single values,
+ * multiple values, or tables back to the Luau environment.
+ */
 class LODE_API ModuleReturn
 {
 public:
@@ -35,20 +41,32 @@ private:
     std::vector<Value> values_;
 };
 
+/**
+ * @brief Helper class to easily construct a table of exports for a native module.
+ */
 class LODE_API Exports
 {
 public:
+    /** @brief Constructs an Exports helper using a State. */
     explicit Exports(State& vm);
+    /** @brief Constructs an Exports helper using a raw lua_State. */
     explicit Exports(lua_State* L);
 
+    /** @brief Binds a C++ lambda as a Luau function in the exports table. */
     void Function(const std::string& name, const std::function<Value(State& vm, const std::vector<Value>& args)>& fn);
+    /** @brief Binds a no-arg C++ lambda as a Luau function. */
     void Function(const std::string& name, const std::function<Value()>& fn);
+    /** @brief Binds a string-to-string C++ lambda as a Luau function. */
     void Function(const std::string& name, const std::function<std::string(const std::string&)>& fn);
+    /** @brief Binds a double-to-double C++ lambda as a Luau function. */
     void Function(const std::string& name, const std::function<double(double)>& fn);
 
+    /** @brief Sets a table field in the exports table. */
     void SetTable(const std::string& name, const Lode::Table& table);
+    /** @brief Sets a generic value field in the exports table. */
     void SetValue(const std::string& name, const Lode::Value& value);
 
+    /** @brief Retrieves the underlying built Table of exports. */
     [[nodiscard]] Lode::Table GetExportTable() const { return exportsTable_; }
 
 private:

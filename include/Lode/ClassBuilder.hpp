@@ -122,6 +122,12 @@ struct ValueReturner<void>
 
 } // namespace Detail
 
+/**
+ * @brief Utility for rapidly binding C++ classes and structures to Luau.
+ * 
+ * Provides an intuitive, fluent API to register constructors, methods, and
+ * properties (getters/setters). Handles all argument conversions automatically.
+ */
 template <typename T>
 class ClassBuilder
 {
@@ -135,6 +141,11 @@ public:
         PropertySetter setter;
     };
 
+    /**
+     * @brief Constructs a new ClassBuilder for the given class name.
+     * @param vm The state to execute in.
+     * @param className The name of the class (used for error reporting and __type metamethods).
+     */
     explicit ClassBuilder(State& vm, const std::string& className)
         : vm_(vm), className_(className), metatable_(vm.CreateTable()), methodsTable_(vm.CreateTable())
     {
@@ -242,7 +253,9 @@ public:
         });
     }
 
-    // Default Constructor
+    /**
+     * @brief Generates a default `new` function that creates the object via std::make_shared<T>().
+     */
     template <typename... Args>
     ClassBuilder& Constructor()
     {
@@ -270,7 +283,10 @@ public:
         return *this;
     }
 
-    // Custom Factory Constructor
+    /**
+     * @brief Provides a custom factory function to instantiate the object.
+     * @param factory The C++ lambda to generate the shared_ptr.
+     */
     ClassBuilder& CustomConstructor(std::function<std::shared_ptr<T>(State& vm, const std::vector<Value>& args)> factory)
     {
         Table meta = metatable_;
@@ -297,7 +313,11 @@ public:
         return *this;
     }
 
-    // Phase 2 & 4: Manual Method binding with zero-allocation slicing & Exception Guards
+    /**
+     * @brief Binds a manually constructed method that receives the native instance and arguments.
+     * @param name The name of the method in Luau.
+     * @param fn The lambda function.
+     */
     ClassBuilder& Method(const std::string& name, const std::function<Value(T& self, State& vm, const std::vector<Value>& args)>& fn)
     {
         std::string className = className_;
@@ -336,7 +356,11 @@ public:
         return *this;
     }
 
-    // Phase 3: Automatic Method binding via member function pointer (Non-const & Const)
+    /**
+     * @brief Automatically binds a C++ member function to Luau (Non-const).
+     * @param name The name of the method in Luau.
+     * @param methodPtr Pointer to the C++ member function.
+     */
     template <typename Ret, typename... Args>
     ClassBuilder& Method(const std::string& name, Ret (T::* methodPtr)(Args...))
     {
@@ -368,6 +392,11 @@ public:
         return *this;
     }
 
+    /**
+     * @brief Automatically binds a C++ member function to Luau (Const).
+     * @param name The name of the method in Luau.
+     * @param methodPtr Pointer to the C++ const member function.
+     */
     template <typename Ret, typename... Args>
     ClassBuilder& Method(const std::string& name, Ret (T::* methodPtr)(Args...) const)
     {
@@ -399,14 +428,23 @@ public:
         return *this;
     }
 
-    // Phase 1: Property with Custom Getters and Setters
+    /**
+     * @brief Binds a property with custom getters and setters.
+     * @param name The name of the property.
+     * @param getter The lambda to get the property value.
+     * @param setter The lambda to set the property value (optional, if omitted it's read-only).
+     */
     ClassBuilder& Property(const std::string& name, PropertyGetter getter, PropertySetter setter = nullptr)
     {
         (*accessorsMap_)[name] = PropertyAccessors{ getter, setter };
         return *this;
     }
 
-    // Phase 3: Automatic Property binding for direct C++ member variables (e.g. &Vector3::x)
+    /**
+     * @brief Automatically binds a direct C++ member variable as a property.
+     * @param name The name of the property in Luau.
+     * @param fieldPtr Pointer to the C++ member variable.
+     */
     template <typename FieldType>
     ClassBuilder& Property(const std::string& name, FieldType T::* fieldPtr)
     {
@@ -422,7 +460,9 @@ public:
         return *this;
     }
 
-    // Phase 4: ToString metamethod binding
+    /**
+     * @brief Binds a custom `__tostring` metamethod for the class.
+     */
     ClassBuilder& ToString(std::function<std::string(const T& self)> fn)
     {
         std::string className = className_;
@@ -444,6 +484,10 @@ public:
         return *this;
     }
 
+    /**
+     * @brief Returns the built Table containing the constructors and static methods.
+     * @return The final Table ready to be exported.
+     */
     [[nodiscard]] Table Build() const
     {
         return methodsTable_;

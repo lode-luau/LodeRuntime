@@ -15,6 +15,9 @@
 namespace Lode
 {
 
+/**
+ * @brief Represents the severity level of a log message.
+ */
 enum class LogLevel
 {
     Info,
@@ -23,6 +26,9 @@ enum class LogLevel
     Error
 };
 
+/**
+ * @brief Represents a secondary label or context pointing to a specific location in source code.
+ */
 struct DiagnosticLabel
 {
     int line = 1;
@@ -31,6 +37,11 @@ struct DiagnosticLabel
     std::string message;
 };
 
+/**
+ * @brief Represents a rich compiler or runtime diagnostic message (errors, warnings, lints).
+ * 
+ * Used by the Logger to render Rust-style beautiful CLI error reports.
+ */
 struct Diagnostic
 {
     std::string filePath;
@@ -46,17 +57,27 @@ struct Diagnostic
     std::vector<std::string> stackTrace;
 };
 
+/**
+ * @brief Core logging and diagnostic reporting facility.
+ */
 class LODE_API Logger
 {
 public:
+    /** @brief Initializes the logger (e.g. enabling virtual terminal processing for colors). */
     static void Initialize();
 
+    /** @brief Logs an informational message. */
     static void Info(std::string_view message);
+    /** @brief Logs a success message. */
     static void Success(std::string_view message);
+    /** @brief Logs a warning message. */
     static void Warn(std::string_view message);
+    /** @brief Logs an error message. */
     static void Error(std::string_view message);
 
+    /** @brief Renders a rich Diagnostic to the console. */
     static void EmitDiagnostic(const Diagnostic& diag);
+    /** @brief Renders a fatal C++ or Lua crash report. */
     static void EmitCrashReport(std::string_view title, std::string_view codeStr, void* address, const std::vector<std::string>& stackTrace, std::string_view details = "");
 
     // Utility helper to parse Luau error strings like "path/file.luau:8: message" or "path/file.luau:8:12: message"

@@ -22,6 +22,12 @@ namespace Lode
 
 class Metatable;
 
+/**
+ * @brief Represents an isolated Luau virtual machine instance or a thread state.
+ * 
+ * The State class is the central point of execution in Lode Runtime. It manages
+ * the lua_State pointer, module resolution, globals, and C++ to Luau bindings.
+ */
 class LODE_API State
 {
 public:
@@ -34,11 +40,42 @@ public:
     State(State&& other) noexcept;
     State& operator=(State&& other) noexcept;
 
+    /**
+     * @brief Creates a new, fully initialized State with standard libraries.
+     * @return Result containing the State on success, or an Error on failure.
+     */
     static Result<State> Create();
 
+    /**
+     * @brief Executes compiled Luau bytecode.
+     * @param bytecode The compiled Luau bytecode.
+     * @param chunkName The name of the chunk (used for error reporting).
+     * @return Result indicating success or failure.
+     */
     Result<void> ExecuteBytecode(std::string_view bytecode, std::string_view chunkName = "=main");
+
+    /**
+     * @brief Executes compiled Luau bytecode and returns the number of results pushed to the stack.
+     * @param bytecode The compiled Luau bytecode.
+     * @param chunkName The name of the chunk.
+     * @return Result containing the number of returned values.
+     */
     Result<int> ExecuteBytecodeWithResults(std::string_view bytecode, std::string_view chunkName = "=main");
+
+    /**
+     * @brief Executes bytecode and captures the first returned value.
+     * @param bytecode The compiled Luau bytecode.
+     * @param chunkName The name of the chunk.
+     * @return Result containing the returned Value.
+     */
     Result<Value> ProtectedCall(std::string_view bytecode, std::string_view chunkName = "=main");
+
+    /**
+     * @brief Calls a Luau function safely.
+     * @param fn The Luau function to call.
+     * @param args The arguments to pass.
+     * @return Result containing the returned Values.
+     */
     Result<std::vector<Value>> CallFunction(const Value& fn, const std::vector<Value>& args = {});
 
     void AddModulePath(std::string_view path);
@@ -46,14 +83,53 @@ public:
     void SetGlobal(const std::string& name, const Value& value);
     [[nodiscard]] Result<Value> GetGlobal(const std::string& name) const;
 
+    /**
+     * @brief Creates a new empty Luau Table.
+     * @return The created Table.
+     */
     [[nodiscard]] Table CreateTable();
+
+    /**
+     * @brief Creates a new empty Metatable.
+     * @return The created Metatable.
+     */
     [[nodiscard]] Metatable CreateMetatable();
+
+    /**
+     * @brief Creates a Luau function bound to a C++ lambda (Standard).
+     * @param fn The C++ lambda to bind.
+     * @return The created Function Value.
+     */
     [[nodiscard]] Value CreateFunction(const std::function<Value(State& vm, const std::vector<Value>& args)>& fn);
+
+    /**
+     * @brief Creates a fast, zero-allocation Luau function bound to a C++ lambda.
+     * @param fn The C++ lambda to bind, using StackArgs for zero-heap overhead.
+     * @return The created Function Value.
+     */
     [[nodiscard]] Value CreateFastFunction(const std::function<Value(State& vm, StackArgs args)>& fn);
+
+    /**
+     * @brief Creates a new coroutine (thread) from a function.
+     * @param fn The function to run in the coroutine.
+     * @return The created Coroutine.
+     */
     [[nodiscard]] Coroutine CreateCoroutine(const Value& fn);
 
+    /**
+     * @brief Allocates userdata memory managed by Luau's Garbage Collector.
+     * @param size The size of the userdata in bytes.
+     * @return Pointer to the allocated memory.
+     */
     void* CreateUserdata(size_t size);
+
+    /**
+     * @brief Creates a Luau buffer of the specified size.
+     * @param size The size of the buffer in bytes.
+     * @return The created Buffer Value.
+     */
     [[nodiscard]] Value CreateBuffer(size_t size);
+
     void SetUserdataMetatable(int index, const Table& metatable);
     void SetUserdataGC(const Table& metatable, void(*destructor)(void* ptr));
 

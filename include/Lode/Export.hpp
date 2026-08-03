@@ -2,6 +2,16 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+/**
+ * @def LODE_API
+ * @brief Macro used to export or import classes and functions from the LodeRuntime shared library.
+ */
+
+/**
+ * @def LODE_EXPORT
+ * @brief Macro used to export C-linkage functions (e.g. for native modules).
+ */
+
 #if defined(_WIN32)
   #if defined(LODE_CORE_BUILD)
     #define LODE_API __declspec(dllexport)
