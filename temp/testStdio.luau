@@ -91,6 +91,28 @@ stdio.print("    Extracted String from Buffer: '" .. buffer.tostring(buf) .. "'"
 stdio.print("")
 
 -- ========================================================
+-- 5. TTY Features & Interactive Menu
+-- ========================================================
+stdio.print("[5] Advanced TTY & Raw Mode Selection")
+sleep(0.5)
+
+if stdio.stdout:isTTY() and stdio.stdin:isTTY() then
+    local size = stdio.stdout:getWindowSize()
+    local w, h = size[1], size[2]
+    stdio.print("    [Info] TTY detected! Terminal dimensions: " .. w .. "x" .. h)
+    stdio.print("    Testing interactive raw-mode menu. Try using UP/DOWN arrows.")
+    stdio.print("")
+    
+    local options = { "Apple", "Banana", "Cherry", "Date", "Elderberry" }
+    local idx, choice = stdio.select("    > Which fruit do you prefer?", options)
+    
+    stdio.print("    Excellent! You chose option " .. tostring(idx) .. ": '" .. choice .. "'")
+else
+    stdio.print("    [Warning] Tests are not running in a TTY terminal. Skipping interactive menu.")
+end
+stdio.print("")
+
+-- ========================================================
 -- Finalization
 -- ========================================================
 sleep(0.5)
