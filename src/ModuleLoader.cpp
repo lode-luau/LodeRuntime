@@ -21,6 +21,21 @@ namespace fs = std::filesystem;
 namespace Lode
 {
 
+fs::path FindLodeJson(const fs::path& startPath)
+{
+    fs::path current = startPath;
+    if (fs::is_regular_file(current))
+        current = current.parent_path();
+        
+    while (current.has_parent_path())
+    {
+        if (fs::exists(current / "lode.json") || fs::exists(current / "init.luau"))
+            return current;
+        current = current.parent_path();
+    }
+    return "";
+}
+
 struct LodeNavigationContext
 {
     NativeModuleRegistry* registry = nullptr;
@@ -91,8 +106,8 @@ static luarequire_NavigateResult reset(lua_State* L, void* ctx, const char* requ
         }
         else
         {
-            nav->currentPath = canonicalP;
-            nav->packagePath = canonicalP;
+            nav->packagePath = FindLodeJson(p);
+            nav->currentPath = p.parent_path();
         }
 
         nav->rootPath = nav->currentPath;
@@ -410,36 +425,19 @@ static int LoadModuleImpl(lua_State* L, void* ctx, const char* path, const char*
     return execResult.GetValue();
 }
 
-static int MultiReturnLodeRequire(lua_State* L)
+std::string GetCallerChunkName(lua_State* L)
 {
     lua_Debug ar;
-    const char* requirerChunkname = "";
-    // syntheticChunkname must outlive requirerChunkname since it may point into it.
-    std::string syntheticChunkname;
+    std::string requirerChunkname;
 
-    // Priority 1: if we are inside a native module's LodeModuleInit, LoadModuleImpl
-    // will have injected the module's directory into the registry. This takes
-    // precedence over any Luau frame on the stack, because the Luau frame would
-    // belong to the outer script that triggered the native module load — not to the
-    // native module itself.
     lua_getfield(L, LUA_REGISTRYINDEX, "_LODE_NATIVE_MODULE_PATH");
     if (lua_isstring(L, -1))
     {
-        // Build a synthetic chunkname as if the native module were an init.luau file
-        // sitting inside its package directory. reset() already handles the init.luau
-        // special case by applying parent_path().parent_path(), which gives the same
-        // resolution semantics: "./X" resolves as a sibling of the package folder,
-        // and "@self/X" resolves inside the package folder via jump_to_alias.
-        syntheticChunkname = "@" + (fs::path(lua_tostring(L, -1)) / "init.luau").string();
-        requirerChunkname = syntheticChunkname.c_str();
+        requirerChunkname = "@" + (fs::path(lua_tostring(L, -1)) / "init.luau").string();
     }
     lua_pop(L, 1);
 
-    // Priority 2: walk the call stack to find the first Luau (non-C) frame.
-    // This handles both the direct case (Luau calls require directly) and the indirect
-    // case where require is wrapped in a C function such as pcall(require, "./mod") —
-    // level 1 would be the C pcall frame, but a higher level holds the Luau script.
-    if (requirerChunkname[0] == '\0')
+    if (requirerChunkname.empty())
     {
         for (int level = 1; level <= 10; ++level)
         {
@@ -451,6 +449,13 @@ static int MultiReturnLodeRequire(lua_State* L)
             }
         }
     }
+    return requirerChunkname;
+}
+
+static int MultiReturnLodeRequire(lua_State* L)
+{
+    std::string requirerChunknameStr = GetCallerChunkName(L);
+    const char* requirerChunkname = requirerChunknameStr.c_str();
 
     const char* pathStr = luaL_checkstring(L, 1);
     luarequire_Configuration* config = static_cast<luarequire_Configuration*>(lua_touserdata(L, lua_upvalueindex(1)));
