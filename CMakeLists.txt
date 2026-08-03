@@ -90,6 +90,7 @@ set(LODE_CORE_SOURCES
     src/Error.cpp
     src/Value.cpp
     src/StackValue.cpp
+    src/Buffer.cpp
     src/Table.cpp
     src/Coroutine.cpp
     src/Metatable.cpp
@@ -113,6 +114,7 @@ set(LODE_CORE_HEADERS
     include/Lode/Error.hpp
     include/Lode/Result.hpp
     include/Lode/Value.hpp
+    include/Lode/Buffer.hpp
     include/Lode/Table.hpp
     include/Lode/Metatable.hpp
     include/Lode/ObjectWrap.hpp
