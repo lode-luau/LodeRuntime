@@ -28,4 +28,14 @@ if NativeMod.Vector3 then
     print("[Class Builder Property Setter] v.x after set to 10 =", v.x, "| new length =", v:length())
 end
 
+-- 4. Native Buffer Zero-Copy Test
+if NativeMod.processBuffer then
+    local buf = buffer.create(32)
+    local testString = "Hello Zero-Copy Buffers!"
+    local bytesCopied = NativeMod.processBuffer(buf, testString)
+    print("[Zero-Copy Buffer] Copied", bytesCopied, "bytes from string into buffer")
+    local readStr = buffer.readstring(buf, 0, bytesCopied)
+    print("[Zero-Copy Buffer] Content read back from native buffer:", readStr)
+end
+
 print("=== All Integration Tests Passed Successfully! ===")

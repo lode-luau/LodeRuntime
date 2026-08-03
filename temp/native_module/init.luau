@@ -12,6 +12,7 @@ export type Vector3Statics = {
 export type NativeModule = {
     greet: (name: string?) -> string,
     square: (x: number) -> number,
+    processBuffer: (buf: buffer, str: string) -> number,
     getSystemInfo: () -> { platform: string, arch: string },
     Vector3: Vector3Statics
 }

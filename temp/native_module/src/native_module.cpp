@@ -42,28 +42,46 @@ LODE_MODULE(vm)
     // the same way it does from an init.luau-based package.
     auto sibling = vm.Require("./sibling_module").AsTable();
 
-    // 1. High-level functions
-    exports.Set("greet", vm.CreateFunction([utils](Lode::State& vm, const std::vector<Lode::Value>& args) mutable -> Lode::Value {
-        std::string name = (args.size() > 0 && args[0].IsString()) ? args[0].AsString() : "Lode User";
+    // 1. High-level functions (Optimized with Zero-Copy StackArgs)
+    exports.Set("greet", vm.CreateFastFunction([utils](Lode::State& vm, Lode::StackArgs args) mutable -> Lode::Value {
+        std::string_view name = (args.Size() > 0 && args[0].IsString()) ? args[0].AsStringView() : "Lode User";
 
         // Delegate to utils.formatGreeting loaded from @self/utils.
-        // Look how clean it is now! We can just call CallFunctionSingle without even passing the vm.
-        auto result = utils.CallFunctionSingle("formatGreeting", Lode::Value(name));
+        auto result = utils.CallFunctionSingle("formatGreeting", Lode::Value(std::string(name)));
         
         if (result.IsOk())
             return result.GetValue();
 
-        // Debug: surface the exact error so we can diagnose it.
         if (result.IsError())
             return Lode::Value("Call error: " + std::string(result.GetError().GetMessage()));
+        return Lode::Value();
     }));
 
-    exports.Set("square", vm.CreateFunction([](Lode::State& vm, const std::vector<Lode::Value>& args) -> Lode::Value {
-        double x = (args.size() > 0 && args[0].IsNumber()) ? args[0].AsNumber() : 0.0;
+    exports.Set("square", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
+        double x = (args.Size() > 0 && args[0].IsNumber()) ? args[0].AsNumber() : 0.0;
         return Lode::Value(x * x);
     }));
 
-    exports.Set("getSystemInfo", vm.CreateFunction([](Lode::State& vm, const std::vector<Lode::Value>&) -> Lode::Value {
+    // --- Test 4: Zero-Copy Buffer Manipulation ---
+    exports.Set("processBuffer", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
+        if (args.Size() < 2 || !args[0].IsBuffer() || !args[1].IsString()) {
+            vm.RaiseError("Expected (buffer, string) as arguments");
+            return Lode::Value();
+        }
+
+        // Zero-copy read from Lua stack
+        std::span<uint8_t> buf = args[0].AsSpan();
+        std::string_view str = args[1].AsStringView();
+
+        size_t copyCount = (buf.size() < str.size()) ? buf.size() : str.size();
+        if (copyCount > 0) {
+            std::memcpy(buf.data(), str.data(), copyCount);
+        }
+        
+        return Lode::Value(static_cast<int>(copyCount));
+    }));
+
+    exports.Set("getSystemInfo", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs) -> Lode::Value {
         Lode::Table info = vm.CreateTable();
 #if defined(_WIN32)
         info.Set("platform", Lode::Value("Windows"));
