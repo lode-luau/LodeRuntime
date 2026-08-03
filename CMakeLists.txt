@@ -181,3 +181,7 @@ endif()
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/modules/stdio/CMakeLists.txt")
     add_subdirectory(modules/stdio)
 endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/modules/path/CMakeLists.txt")
+    add_subdirectory(modules/path)
+endif()

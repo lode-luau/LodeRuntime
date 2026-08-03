@@ -1,0 +1,69 @@
+# CMakeLists.txt for Lode path module
+set(MODULE_NAME path)
+
+file(GLOB SOURCES "src/*.cpp")
+
+add_library(${MODULE_NAME} SHARED ${SOURCES})
+target_compile_definitions(${MODULE_NAME} PRIVATE LODE_MODULE_BUILD)
+
+target_include_directories(${MODULE_NAME} PRIVATE 
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/include
+    ${json_SOURCE_DIR}/include
+    ${luau_SOURCE_DIR}/VM/include
+    ${luau_SOURCE_DIR}/Compiler/include
+    ${luau_SOURCE_DIR}/Ast/include
+    ${luau_SOURCE_DIR}/Require/include
+)
+
+target_link_libraries(${MODULE_NAME} PRIVATE 
+    LodeCore
+)
+
+# Size Optimization Flags (consistent with stdio)
+if(MSVC)
+    target_compile_options(${MODULE_NAME} PRIVATE $<$<NOT:$<CONFIG:Debug>>:/O1> /GR- /GL)
+    target_link_options(${MODULE_NAME} PRIVATE $<$<NOT:$<CONFIG:Debug>>:/OPT:REF> $<$<NOT:$<CONFIG:Debug>>:/OPT:ICF> $<$<NOT:$<CONFIG:Debug>>:/LTCG>)
+else()
+    target_compile_options(${MODULE_NAME} PRIVATE -Os -fno-rtti -fvisibility=hidden -flto)
+    target_link_options(${MODULE_NAME} PRIVATE -flto -Wl,--gc-sections)
+endif()
+
+# Output the DLL to the same bin directory as the executable
+set_target_properties(${MODULE_NAME} PROPERTIES 
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/$<CONFIG>"
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/$<CONFIG>"
+    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/$<CONFIG>"
+)
+
+# 1. Universal Platform Detection
+if(WIN32)
+    set(TARGET_PLATFORM "windows")
+    set(TARGET_LIB_NAME "${MODULE_NAME}.dll")
+elseif(APPLE)
+    set(TARGET_PLATFORM "macos")
+    set(TARGET_LIB_NAME "${MODULE_NAME}.dylib")
+else()
+    set(TARGET_PLATFORM "linux")
+    set(TARGET_LIB_NAME "${MODULE_NAME}.so")
+endif()
+
+# 2. Universal Architecture Detection
+if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm|ARM|aarch64|AARCH64")
+        set(TARGET_ARCH "arm64")
+    else()
+        set(TARGET_ARCH "x64")
+    endif()
+else()
+    set(TARGET_ARCH "x86")
+endif()
+
+# 3. Dynamic Output Directory
+set(NATIVE_OUTPUT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/libs/${TARGET_PLATFORM}/${TARGET_ARCH}")
+
+add_custom_command(TARGET ${MODULE_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${NATIVE_OUTPUT_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:${MODULE_NAME}> "${NATIVE_OUTPUT_DIR}/${TARGET_LIB_NAME}"
+    COMMENT "Copying native binary to libs/${TARGET_PLATFORM}/${TARGET_ARCH}/${TARGET_LIB_NAME}"
+)
