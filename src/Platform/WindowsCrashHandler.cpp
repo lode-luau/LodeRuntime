@@ -3,9 +3,10 @@
 #if defined(_WIN32)
 
 #include "CrashHandler.hpp"
+#include "Lode/Logger.hpp"
 #include <windows.h>
 #include <dbghelp.h>
-#include <iostream>
+#include <sstream>
 #include <iomanip>
 
 #pragma comment(lib, "dbghelp.lib")
@@ -51,22 +52,18 @@ static LONG WINAPI WindowsUnhandledExceptionFilter(PEXCEPTION_POINTERS exception
     DWORD code = exceptionInfo->ExceptionRecord->ExceptionCode;
     PVOID addr = exceptionInfo->ExceptionRecord->ExceptionAddress;
 
-    std::cerr << "\n=======================================================\n";
-    std::cerr << "         [LODERUNTIME CRASH DETECTED]                  \n";
-    std::cerr << "=======================================================\n";
-    std::cerr << "Exception Code    : " << GetExceptionCodeString(code) << "\n";
-    std::cerr << "Faulting Address  : 0x" << std::hex << reinterpret_cast<uintptr_t>(addr) << std::dec << "\n";
-
+    std::string details = "";
     if (code == EXCEPTION_ACCESS_VIOLATION && exceptionInfo->ExceptionRecord->NumberParameters >= 2)
     {
         ULONG_PTR accessType = exceptionInfo->ExceptionRecord->ExceptionInformation[0];
         ULONG_PTR targetAddr = exceptionInfo->ExceptionRecord->ExceptionInformation[1];
-        std::cerr << "Access Violation  : Attempted to " 
-                  << (accessType == 0 ? "READ" : (accessType == 1 ? "WRITE" : "EXECUTE"))
-                  << " memory address 0x" << std::hex << targetAddr << std::dec << "\n";
+        std::stringstream ss;
+        ss << "Attempted to " << (accessType == 0 ? "READ" : (accessType == 1 ? "WRITE" : "EXECUTE"))
+           << " memory address 0x" << std::hex << targetAddr;
+        details = ss.str();
     }
 
-    std::cerr << "\n--- Stack Trace (DbgHelp.dll) ---\n";
+    std::vector<std::string> stackTrace;
 
     STACKFRAME64 stackFrame = {};
     #if defined(_M_X64) || defined(__x86_64__)
@@ -89,7 +86,6 @@ static LONG WINAPI WindowsUnhandledExceptionFilter(PEXCEPTION_POINTERS exception
 
     CONTEXT contextRecord = *exceptionInfo->ContextRecord;
 
-    int frameNum = 0;
     while (StackWalk64(
         machineType,
         process,
@@ -110,24 +106,26 @@ static LONG WINAPI WindowsUnhandledExceptionFilter(PEXCEPTION_POINTERS exception
         symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
         symbol->MaxNameLen = MAX_SYM_NAME;
 
-        std::cerr << "  [" << frameNum++ << "] 0x" << std::hex << stackFrame.AddrPC.Offset << std::dec;
+        std::stringstream frameSs;
+        frameSs << "0x" << std::hex << stackFrame.AddrPC.Offset << std::dec;
 
         if (SymFromAddr(process, stackFrame.AddrPC.Offset, &displacement, symbol))
         {
-            std::cerr << " -> " << symbol->Name;
+            frameSs << " -> " << symbol->Name;
 
             IMAGEHLP_LINE64 line;
             DWORD lineDisplacement;
             line.SizeOfStruct = sizeof(IMAGEHLP_LINE64);
             if (SymGetLineFromAddr64(process, stackFrame.AddrPC.Offset, &lineDisplacement, &line))
             {
-                std::cerr << " (" << line.FileName << ":" << line.LineNumber << ")";
+                frameSs << " (" << line.FileName << ":" << line.LineNumber << ")";
             }
         }
-        std::cerr << "\n";
+        stackTrace.push_back(frameSs.str());
     }
 
-    std::cerr << "=======================================================\n\n";
+    Logger::EmitCrashReport("Native Execution Exception", GetExceptionCodeString(code), addr, stackTrace, details);
+
     SymCleanup(process);
 
     return EXCEPTION_EXECUTE_HANDLER;

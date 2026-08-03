@@ -3,12 +3,13 @@
 #if !defined(_WIN32)
 
 #include "CrashHandler.hpp"
+#include "Lode/Logger.hpp"
 #include <signal.h>
 #include <execinfo.h>
 #include <dlfcn.h>
 #include <cxxabi.h>
 #include <unistd.h>
-#include <iostream>
+#include <sstream>
 #include <iomanip>
 #include <cstdlib>
 
@@ -31,17 +32,9 @@ static const char* GetSignalName(int sig)
 
 static void PosixSignalHandler(int sig, siginfo_t* info, void* ucontext)
 {
-    std::cerr << "\n=======================================================\n";
-    std::cerr << "         [LODERUNTIME CRASH DETECTED]                  \n";
-    std::cerr << "=======================================================\n";
-    std::cerr << "Signal Received   : " << GetSignalName(sig) << "\n";
+    void* addr = (info && info->si_addr) ? info->si_addr : nullptr;
 
-    if (info && info->si_addr)
-    {
-        std::cerr << "Faulting Address  : 0x" << std::hex << reinterpret_cast<uintptr_t>(info->si_addr) << std::dec << "\n";
-    }
-
-    std::cerr << "\n--- Stack Trace (backtrace / dladdr) ---\n";
+    std::vector<std::string> stackTrace;
 
     void* callstack[128];
     int frames = backtrace(callstack, 128);
@@ -49,8 +42,9 @@ static void PosixSignalHandler(int sig, siginfo_t* info, void* ucontext)
 
     for (int i = 0; i < frames; ++i)
     {
+        std::stringstream frameSs;
         Dl_info dlinfo;
-        std::cerr << "  [" << i << "] 0x" << std::hex << reinterpret_cast<uintptr_t>(callstack[i]) << std::dec;
+        frameSs << "0x" << std::hex << reinterpret_cast<uintptr_t>(callstack[i]) << std::dec;
 
         if (dladdr(callstack[i], &dlinfo) && dlinfo.dli_sname)
         {
@@ -58,11 +52,11 @@ static void PosixSignalHandler(int sig, siginfo_t* info, void* ucontext)
             char* demangled = abi::__cxa_demangle(dlinfo.dli_sname, nullptr, nullptr, &status);
             const char* name = (status == 0 && demangled) ? demangled : dlinfo.dli_sname;
 
-            std::cerr << " -> " << name;
+            frameSs << " -> " << name;
 
             if (dlinfo.dli_fname)
             {
-                std::cerr << " (" << dlinfo.dli_fname << ")";
+                frameSs << " (" << dlinfo.dli_fname << ")";
             }
 
             if (demangled)
@@ -72,9 +66,9 @@ static void PosixSignalHandler(int sig, siginfo_t* info, void* ucontext)
         }
         else if (strs && strs[i])
         {
-            std::cerr << " -> " << strs[i];
+            frameSs << " -> " << strs[i];
         }
-        std::cerr << "\n";
+        stackTrace.push_back(frameSs.str());
     }
 
     if (strs)
@@ -82,7 +76,7 @@ static void PosixSignalHandler(int sig, siginfo_t* info, void* ucontext)
         free(strs);
     }
 
-    std::cerr << "=======================================================\n\n";
+    Logger::EmitCrashReport("POSIX Signal Exception", GetSignalName(sig), addr, stackTrace);
 
     // Reset signal handler to default and re-raise signal for core dumps
     struct sigaction sa;
