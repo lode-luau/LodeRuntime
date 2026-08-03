@@ -134,6 +134,18 @@ public:
     void SetUserdataMetatable(int index, const Table& metatable);
     void SetUserdataGC(const Table& metatable, void(*destructor)(void* ptr));
 
+    /**
+     * @brief Yields the current executing Luau coroutine.
+     * 
+     * @warning **CRITICAL C++ INTERACTION**: This method internally calls `lua_yield`, 
+     * which typically performs a `longjmp` or throws a C++ exception depending on the 
+     * Luau compilation flags. This means that **execution will NOT return to the caller**.
+     * Any C++ code below this function call will be skipped. Ensure all local objects 
+     * with important destructors (e.g. locks, smart pointers) are destructed BEFORE 
+     * calling this method.
+     * 
+     * @return Never returns natively.
+     */
     int YieldThread();
 
     // Require a module — raises a Lua error on failure, identical to Luau's built-in require().
