@@ -177,3 +177,7 @@ endif()
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/temp/simd_module/CMakeLists.txt")
     add_subdirectory(temp/simd_module)
 endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/modules/stdio/CMakeLists.txt")
+    add_subdirectory(modules/stdio)
+endif()

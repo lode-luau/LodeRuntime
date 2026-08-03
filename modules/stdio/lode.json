@@ -1,0 +1,22 @@
+{
+  "name": "stdio",
+  "version": "1.0.0",
+  "description": "Lode standard I/O module (Async/LibUV)",
+  "author": "Lode Team",
+  "license": "MIT",
+  "libraries": {
+    "windows": {
+      "x64": "libs/windows/x64/stdio.dll",
+      "arm64": "libs/windows/arm64/stdio.dll",
+      "x86": "libs/windows/x86/stdio.dll"
+    },
+    "linux": {
+      "x64": "libs/linux/x64/stdio.so",
+      "arm64": "libs/linux/arm64/stdio.so"
+    },
+    "macos": {
+      "x64": "libs/macos/x64/stdio.dylib",
+      "arm64": "libs/macos/arm64/stdio.dylib"
+    }
+  }
+}
