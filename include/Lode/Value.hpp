@@ -67,6 +67,8 @@ public:
     [[nodiscard]] int AsInteger() const;
     [[nodiscard]] std::string AsString() const;
     [[nodiscard]] void* AsLightUserdata() const;
+    // Converts to a Table. Returns an empty Table if the value is not of table type.
+    [[nodiscard]] Table AsTable() const;
 
     [[nodiscard]] Result<bool> TryAsBoolean() const;
     [[nodiscard]] Result<double> TryAsNumber() const;
@@ -75,6 +77,7 @@ public:
 
     // Invoke if value is a function
     Result<std::vector<Value>> Call(State& vm, const std::vector<Value>& args = {}) const;
+    Result<std::vector<Value>> Call(const std::vector<Value>& args = {}) const;
 
     // Internal creation for Luau stack values
     static Value FromLuaState(lua_State* L, int index);

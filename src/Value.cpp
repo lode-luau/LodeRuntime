@@ -73,6 +73,19 @@ int Value::AsInteger() const { return intVal_; }
 std::string Value::AsString() const { return stringVal_; }
 void* Value::AsLightUserdata() const { return lightUserdataVal_; }
 
+Table Value::AsTable() const
+{
+    if (type_ != ValueType::Table || !refData_ || !refData_->L)
+        return Table();
+    // Push the table ref onto the stack and wrap it as a Lode::Table.
+    // This is the same mechanism used by PushToLuaState internally.
+    lua_State* L = refData_->L;
+    lua_getref(L, refData_->refId);
+    Table t(L, -1);
+    lua_pop(L, 1);
+    return t;
+}
+
 Result<bool> Value::TryAsBoolean() const
 {
     if (type_ == ValueType::Boolean) return boolVal_;
@@ -106,6 +119,10 @@ Result<std::vector<Value>> Value::Call(State& vm, const std::vector<Value>& args
         return Error::Type("Value is not callable");
     }
 
+    // Record the stack top before pushing anything so we can calculate how many
+    // values the function actually returned after lua_pcall with LUA_MULTRET.
+    int topBefore = lua_gettop(L);
+
     PushToLuaState(L);
     for (const auto& arg : args)
     {
@@ -120,14 +137,53 @@ Result<std::vector<Value>> Value::Call(State& vm, const std::vector<Value>& args
         return Error::Runtime("Function execution failed: " + errStr);
     }
 
-    int top = lua_gettop(L);
+    // Collect only the values that the function pushed onto the stack.
+    int nresults = lua_gettop(L) - topBefore;
     std::vector<Value> results;
-    results.reserve(top);
-    for (int i = 1; i <= top; ++i)
+    results.reserve(nresults);
+    for (int i = topBefore + 1; i <= topBefore + nresults; ++i)
     {
         results.push_back(Value::FromLuaState(L, i));
     }
-    lua_pop(L, top);
+    lua_pop(L, nresults);
+    return results;
+}
+
+Result<std::vector<Value>> Value::Call(const std::vector<Value>& args) const
+{
+    lua_State* L = refData_ ? refData_->L : nullptr;
+    if (!L || type_ != ValueType::Function)
+    {
+        return Error::Type("Value is not callable");
+    }
+
+    // Record the stack top before pushing anything so we can calculate how many
+    // values the function actually returned after lua_pcall with LUA_MULTRET.
+    int topBefore = lua_gettop(L);
+
+    PushToLuaState(L);
+    for (const auto& arg : args)
+    {
+        arg.PushToLuaState(L);
+    }
+
+    int status = lua_pcall(L, static_cast<int>(args.size()), LUA_MULTRET, 0);
+    if (status != LUA_OK)
+    {
+        std::string errStr = lua_tostring(L, -1);
+        lua_pop(L, 1);
+        return Error::Runtime("Function execution failed: " + errStr);
+    }
+
+    // Collect only the values that the function pushed onto the stack.
+    int nresults = lua_gettop(L) - topBefore;
+    std::vector<Value> results;
+    results.reserve(nresults);
+    for (int i = topBefore + 1; i <= topBefore + nresults; ++i)
+    {
+        results.push_back(Value::FromLuaState(L, i));
+    }
+    lua_pop(L, nresults);
     return results;
 }
 
