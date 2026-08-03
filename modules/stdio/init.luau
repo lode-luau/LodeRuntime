@@ -18,6 +18,13 @@ export type WritableStream = {
     --- @param self The stream instance
     --- @param data The text to write
     writeLine: (self: WritableStream, data: string) -> (),
+    
+    --- Returns whether the stream is connected to a TTY (terminal).
+    isTTY: (self: WritableStream) -> boolean,
+    
+    --- Gets the dimensions of the terminal.
+    --- @return The width (columns) and height (rows) of the terminal. Returns 0, 0 if not a TTY.
+    getWindowSize: (self: WritableStream) -> (number, number),
 }
 
 --- Interface for readable streams like standard input.
@@ -55,6 +62,14 @@ export type ReadableStream = {
     --- @param length The maximum number of bytes to read (defaults to remaining buffer space)
     --- @return The number of bytes actually read
     readInto: (self: ReadableStream, buf: buffer, offset: number?, length: number?) -> number,
+    
+    --- Returns whether the stream is connected to a TTY (terminal).
+    isTTY: (self: ReadableStream) -> boolean,
+    
+    --- Enables or disables Raw Mode for the terminal.
+    --- In Raw Mode, input is received immediately without waiting for the Enter key.
+    --- @param enable True to enable raw mode, false to restore normal mode.
+    setRawMode: (self: ReadableStream, enable: boolean) -> (),
 
     -- =======================================================
     -- Callback-Based Methods
@@ -107,6 +122,13 @@ export type StdioModule = {
     
     --- Clears the console screen.
     clear: () -> (),
+    
+    --- Displays an interactive selection menu using the arrow keys.
+    --- Requires a TTY terminal.
+    --- @param prompt The question to ask the user.
+    --- @param options An array of string options to choose from.
+    --- @return The 1-based index of the chosen option, and the option string itself.
+    select: (prompt: string, options: {string}) -> (number, string),
 }
 
 return {} :: StdioModule
