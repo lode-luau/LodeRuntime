@@ -27,10 +27,37 @@ LODE_MODULE(vm)
 {
     Lode::Table exports = vm.CreateTable();
 
+    // --- Test 1: require("@self/utils") ---
+    // Loads native_module/utils/init.luau — internal to this package.
+    // @self always resolves to the package directory (the folder containing lode.json),
+    // so @self/utils finds: native_module/utils/init.luau  (or native_module/utils.luau).
+    //
+    // vm.Require() raises a Lua error if the module is not found, exactly like
+    // a plain require() call from Luau. No Result unwrapping or pcall needed here.
+    auto utils = vm.Require("@self/utils").AsTable();
+
+    // --- Test 2: require("./sibling_module") ---
+    // Loads temp/sibling_module.luau — one level above this package folder.
+    // ./X from a native module resolves relative to the parent of the package folder,
+    // the same way it does from an init.luau-based package.
+    auto sibling = vm.Require("./sibling_module").AsTable();
+
     // 1. High-level functions
-    exports.Set("greet", vm.CreateFunction([](Lode::State& vm, const std::vector<Lode::Value>& args) -> Lode::Value {
+    exports.Set("greet", vm.CreateFunction([utils](Lode::State& vm, const std::vector<Lode::Value>& args) mutable -> Lode::Value {
         std::string name = (args.size() > 0 && args[0].IsString()) ? args[0].AsString() : "Lode User";
-        return Lode::Value("Hello from Native C++ DLL! Welcome, " + name + "!");
+
+        // Delegate to utils.formatGreeting loaded from @self/utils.
+        // Look how clean it is now! We can just call CallFunction without even passing the vm.
+        auto result = utils.CallFunction("formatGreeting", { Lode::Value(name) });
+        
+        if (result.IsOk() && !result.GetValue().empty())
+            return result.GetValue()[0];
+
+        // Debug: surface the exact error so we can diagnose it.
+        if (result.IsError())
+            return Lode::Value("Call error: " + std::string(result.GetError().GetMessage()));
+
+        return Lode::Value("Hello, " + name + "! (utils.formatGreeting returned empty)");
     }));
 
     exports.Set("square", vm.CreateFunction([](Lode::State& vm, const std::vector<Lode::Value>& args) -> Lode::Value {
@@ -56,7 +83,11 @@ LODE_MODULE(vm)
         return Lode::Value(info);
     }));
 
-    // 2. Class Binding: Vector3 using full ClassBuilder 4-Phase capabilities!
+    // Expose utils and sibling so the Luau caller can verify both were loaded.
+    exports.Set("utils", Lode::Value(utils));
+    exports.Set("sibling", Lode::Value(sibling));
+
+    // 2. Class Binding: Vector3
     Lode::ClassBuilder<Vector3> vec3Builder(vm, "Vector3");
     vec3Builder.CustomConstructor([](Lode::State&, const std::vector<Lode::Value>& args) -> std::shared_ptr<Vector3> {
         double x = (args.size() > 0 && args[0].IsNumber()) ? args[0].AsNumber() : 0.0;
@@ -84,6 +115,6 @@ LODE_MODULE(vm)
     metaInfo.Set("moduleName", Lode::Value("NativeModule"));
     metaInfo.Set("version", Lode::Value("2.0.0"));
 
-    // Returns multiple values directly to require: local NativeMod, MetaInfo = require(...)
+    // Returns multiple values to require: local NativeMod, MetaInfo = require(...)
     return { exports, metaInfo };
 }
