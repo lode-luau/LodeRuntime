@@ -272,8 +272,30 @@ int State::YieldThread()
     return lua_yield(L_, 0);
 }
 
-Result<Value> State::Require(std::string_view moduleName)
+Value State::Require(std::string_view moduleName)
 {
+    // Mirrors Luau's built-in require(): if the module is not found or fails to load,
+    // a Lua error is raised and propagates naturally through the call stack.
+    // The caller does not need to check a Result or wrap the call in a pcall equivalent.
+    if (!L_) luaL_error(L_, "State is null");
+    lua_getglobal(L_, "require");
+    if (!lua_isfunction(L_, -1))
+    {
+        lua_pop(L_, 1);
+        luaL_error(L_, "Global require function is not available");
+    }
+    lua_pushlstring(L_, moduleName.data(), moduleName.size());
+    // lua_call propagates errors via longjmp, identical to calling require() from Luau.
+    lua_call(L_, 1, 1);
+    Value val = Value::FromLuaState(L_, -1);
+    lua_pop(L_, 1);
+    return val;
+}
+
+Result<Value> State::TryRequire(std::string_view moduleName)
+{
+    // Protected variant: catches any Lua error and returns it as a Result.
+    // Use this when you want to inspect or recover from a missing module.
     if (!L_) return Error::Runtime("State is null");
     lua_getglobal(L_, "require");
     if (!lua_isfunction(L_, -1))
