@@ -401,6 +401,7 @@ bool State::IsFunction(int index) const { return L_ ? (lua_isfunction(L_, index)
 bool State::IsThread(int index) const { return L_ ? (lua_isthread(L_, index) != 0) : false; }
 bool State::IsUserdata(int index) const { return L_ ? (lua_isuserdata(L_, index) != 0) : false; }
 bool State::IsLightUserdata(int index) const { return L_ ? (lua_islightuserdata(L_, index) != 0) : false; }
+bool State::IsBuffer(int index) const { return L_ ? (lua_type(L_, index) == LUA_TBUFFER) : false; }
 
 // --- Stack Reading API ---
 Value State::GetValue(int index) const { return L_ ? Value::FromLuaState(L_, index) : Value(); }
@@ -408,8 +409,24 @@ std::string State::GetString(int index) const { return L_ ? lua_tostring(L_, ind
 double State::GetNumber(int index) const { return L_ ? lua_tonumber(L_, index) : 0.0; }
 int State::GetInteger(int index) const { return L_ ? static_cast<int>(lua_tonumber(L_, index)) : 0; }
 bool State::GetBoolean(int index) const { return L_ ? (lua_toboolean(L_, index) != 0) : false; }
+void* State::GetBuffer(int index, size_t* sizeOut) const { return (L_ && lua_type(L_, index) == LUA_TBUFFER) ? lua_tobuffer(L_, index, sizeOut) : (sizeOut ? (*sizeOut = 0, nullptr) : nullptr); }
 void* State::GetUserdata(int index) const { return L_ ? lua_touserdata(L_, index) : nullptr; }
 void* State::GetLightUserdata(int index) const { return L_ ? lua_touserdata(L_, index) : nullptr; }
+
+std::span<uint8_t> State::GetBufferSpan(int index) const
+{
+    size_t size = 0;
+    void* ptr = GetBuffer(index, &size);
+    return ptr ? std::span<uint8_t>(static_cast<uint8_t*>(ptr), size) : std::span<uint8_t>();
+}
+
+std::string_view State::GetStringView(int index) const
+{
+    if (!L_ || !lua_isstring(L_, index)) return std::string_view();
+    size_t len = 0;
+    const char* str = lua_tolstring(L_, index, &len);
+    return str ? std::string_view(str, len) : std::string_view();
+}
 
 // --- Stack Table & Field API ---
 void State::GetField(int index, const char* name) { if (L_) lua_getfield(L_, index, name); }

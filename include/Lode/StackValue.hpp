@@ -3,6 +3,9 @@
 #include "Lode/Export.hpp"
 #include "Lode/Value.hpp"
 #include "Lode/Result.hpp"
+#include <span>
+#include <string_view>
+#include <cstdint>
 
 struct lua_State;
 
@@ -49,8 +52,12 @@ public:
     [[nodiscard]] int AsInteger() const;
     /** @brief Fast unsafe cast to string. */
     [[nodiscard]] std::string AsString() const;
+    /** @brief Zero-copy view into the string on the stack. */
+    [[nodiscard]] std::string_view AsStringView() const;
     /** @brief Fast unsafe cast to Buffer pointer. */
     [[nodiscard]] void* AsBuffer(size_t* sizeOut = nullptr) const;
+    /** @brief Zero-copy view into the buffer on the stack. */
+    [[nodiscard]] std::span<uint8_t> AsSpan() const;
 
     /** @brief Safely attempts to read the value as a number. */
     [[nodiscard]] Result<double> TryAsNumber() const;

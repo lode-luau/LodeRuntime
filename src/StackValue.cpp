@@ -52,6 +52,13 @@ std::string StackValue::AsString() const
     return lua_tostring(L_, index_);
 }
 
+std::string_view StackValue::AsStringView() const
+{
+    size_t len = 0;
+    const char* str = lua_tolstring(L_, index_, &len);
+    return str ? std::string_view(str, len) : std::string_view();
+}
+
 void* StackValue::AsBuffer(size_t* sizeOut) const
 {
     if (lua_type(L_, index_) == LUA_TBUFFER)
@@ -60,6 +67,14 @@ void* StackValue::AsBuffer(size_t* sizeOut) const
     }
     if (sizeOut) *sizeOut = 0;
     return nullptr;
+}
+
+std::span<uint8_t> StackValue::AsSpan() const
+{
+    size_t size = 0;
+    void* ptr = AsBuffer(&size);
+    if (ptr) return std::span<uint8_t>(static_cast<uint8_t*>(ptr), size);
+    return std::span<uint8_t>();
 }
 
 Result<double> StackValue::TryAsNumber() const

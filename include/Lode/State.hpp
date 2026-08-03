@@ -11,6 +11,7 @@
 #include "Lode/StackValue.hpp"
 #include <string>
 #include <string_view>
+#include <span>
 #include <vector>
 #include <memory>
 #include <functional>
@@ -174,6 +175,7 @@ public:
     [[nodiscard]] bool IsThread(int index = -1) const;
     [[nodiscard]] bool IsUserdata(int index = -1) const;
     [[nodiscard]] bool IsLightUserdata(int index = -1) const;
+    [[nodiscard]] bool IsBuffer(int index = -1) const;
 
     // --- Stack Reading API ---
     [[nodiscard]] Value GetValue(int index) const;
@@ -181,8 +183,11 @@ public:
     [[nodiscard]] double GetNumber(int index) const;
     [[nodiscard]] int GetInteger(int index) const;
     [[nodiscard]] bool GetBoolean(int index) const;
+    [[nodiscard]] void* GetBuffer(int index = -1, size_t* sizeOut = nullptr) const;
     [[nodiscard]] void* GetUserdata(int index = -1) const;
     [[nodiscard]] void* GetLightUserdata(int index = -1) const;
+    [[nodiscard]] std::span<uint8_t> GetBufferSpan(int index = -1) const;
+    [[nodiscard]] std::string_view GetStringView(int index = -1) const;
 
     // --- Stack Table & Field API ---
     void GetField(int index, const char* name);

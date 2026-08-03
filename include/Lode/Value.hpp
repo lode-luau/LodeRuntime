@@ -9,6 +9,8 @@
 #include <memory>
 #include <vector>
 #include <variant>
+#include <span>
+#include <cstdint>
 
 struct lua_State;
 
@@ -36,6 +38,7 @@ enum class ValueType
 class State;
 class Table;
 class Coroutine;
+class Buffer;
 
 /**
  * @brief Represents a generic Luau value that can hold any primitive or reference type.
@@ -65,6 +68,8 @@ public:
     Value(const Table& table);
     /** @brief Constructs a Value wrapping a Coroutine. */
     Value(const Coroutine& coroutine);
+    /** @brief Constructs a Value wrapping a Buffer. */
+    Value(const Buffer& buffer);
 
     ~Value();
     Value(const Value& other);
@@ -106,12 +111,20 @@ public:
     [[nodiscard]] void* AsLightUserdata() const;
     /** @brief Casts the value to a Buffer pointer and outputs its size. */
     [[nodiscard]] void* AsBuffer(size_t* sizeOut = nullptr) const;
+    /** @brief Returns a zero-copy span if the value is a Buffer, otherwise empty. */
+    [[nodiscard]] std::span<uint8_t> AsSpan() const;
     
     /**
      * @brief Converts to a Table.
      * @return The Table, or an empty Table if the value is not of table type.
      */
     [[nodiscard]] Table AsTable() const;
+
+    /**
+     * @brief Converts to a Buffer object.
+     * @return The Buffer, or an empty Buffer if the value is not of buffer type.
+     */
+    [[nodiscard]] Buffer AsBufferObj() const;
 
     /** @brief Safely attempts to cast to boolean. */
     [[nodiscard]] Result<bool> TryAsBoolean() const;
@@ -123,6 +136,8 @@ public:
     [[nodiscard]] Result<std::string> TryAsString() const;
     /** @brief Safely attempts to cast to Buffer pointer. */
     [[nodiscard]] Result<void*> TryAsBuffer(size_t* sizeOut = nullptr) const;
+    /** @brief Safely attempts to convert to a Buffer object. */
+    [[nodiscard]] Result<Buffer> TryAsBufferObj() const;
 
     /**
      * @brief Calls the value if it's a function, explicitly providing a State.

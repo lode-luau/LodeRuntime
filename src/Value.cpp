@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 #include "Lode/Value.hpp"
 #include "Lode/Table.hpp"
+#include "Lode/Buffer.hpp"
 #include "Lode/State.hpp"
 #include "Lode/Coroutine.hpp"
 #include "lua.h"
@@ -58,6 +59,21 @@ Value::Value(const Coroutine& coroutine)
     }
 }
 
+Value::Value(const Buffer& buffer)
+{
+    lua_State* L = buffer.GetLuaState();
+    if (L && buffer.IsValid())
+    {
+        buffer.PushToLuaState(L);
+        type_ = ValueType::Buffer;
+        auto ref = std::make_shared<RefData>();
+        ref->L = L;
+        ref->refId = lua_ref(L, -1);
+        data_ = ref;
+        lua_pop(L, 1);
+    }
+}
+
 Value::~Value() = default;
 Value::Value(const Value& other) = default;
 Value::Value(Value&& other) noexcept = default;
@@ -111,6 +127,14 @@ void* Value::AsBuffer(size_t* sizeOut) const
     return nullptr;
 }
 
+std::span<uint8_t> Value::AsSpan() const
+{
+    size_t size = 0;
+    void* ptr = AsBuffer(&size);
+    if (ptr) return std::span<uint8_t>(static_cast<uint8_t*>(ptr), size);
+    return std::span<uint8_t>();
+}
+
 Table Value::AsTable() const
 {
     if (type_ == ValueType::Table)
@@ -128,6 +152,25 @@ Table Value::AsTable() const
         }
     }
     return Table();
+}
+
+Buffer Value::AsBufferObj() const
+{
+    if (type_ == ValueType::Buffer)
+    {
+        if (auto* ref = std::get_if<std::shared_ptr<RefData>>(&data_))
+        {
+            if (*ref && (*ref)->L)
+            {
+                lua_State* L = (*ref)->L;
+                lua_getref(L, (*ref)->refId);
+                Buffer b(L, -1);
+                lua_pop(L, 1);
+                return b;
+            }
+        }
+    }
+    return Buffer();
 }
 
 Result<bool> Value::TryAsBoolean() const
@@ -159,6 +202,12 @@ Result<std::string> Value::TryAsString() const
 Result<void*> Value::TryAsBuffer(size_t* sizeOut) const
 {
     if (type_ == ValueType::Buffer) return AsBuffer(sizeOut);
+    return Error::Type("Value is not a buffer");
+}
+
+Result<Buffer> Value::TryAsBufferObj() const
+{
+    if (type_ == ValueType::Buffer) return AsBufferObj();
     return Error::Type("Value is not a buffer");
 }
 
