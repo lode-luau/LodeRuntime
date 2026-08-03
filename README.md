@@ -16,25 +16,25 @@ A modular runtime environment for executing Luau scripts.
 
 **Debug Build:**
 ```bash
-cmake -B build
+cmake -B build -G "Visual Studio 17 2022"
 cmake --build build --config Debug
 ```
 **Release Build:**
 ```bash
-cmake -B build
+cmake -B build -G "Visual Studio 17 2022"
 cmake --build build --config Release
 ```
 ---
 ### Linux
 **Debug Build:**
 ```bash
-cmake -B build
-cmake --build build --config Debug
+cmake -B build -DCMAKE_BUILD_TYPE=Debug
+cmake --build build
 ```
 **Release Build:**
 ```bash
-cmake -B build
-cmake --build build --config Release
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
 ```
 ---
 
