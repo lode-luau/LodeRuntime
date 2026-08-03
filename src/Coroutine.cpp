@@ -1,6 +1,7 @@
 // Copyright (c) 2026 yanlvl99, Lode Runtime Contributors
 // SPDX-License-Identifier: MIT
 #include "Lode/Coroutine.hpp"
+#include "Lode/State.hpp"
 #include "lua.h"
 #include "lualib.h"
 #include <stdexcept>
@@ -36,6 +37,40 @@ Coroutine::Coroutine(lua_State* L, int fnRef)
 
     lua_getref(L, fnRef);
     lua_xmove(L, refData_->coL, 1);
+}
+
+Coroutine::Coroutine(State& vm, const Value& fn)
+{
+    lua_State* L = vm.GetLuaState();
+    if (!L) return;
+
+    fn.PushToLuaState(L);
+    int fnRef = lua_ref(L, -1);
+    lua_pop(L, 1);
+
+    refData_ = std::make_shared<RefData>();
+    refData_->mainL = L;
+    refData_->coL = lua_newthread(L);
+    refData_->threadRef = lua_ref(L, -1);
+    lua_pop(L, 1);
+
+    lua_getref(L, fnRef);
+    lua_xmove(L, refData_->coL, 1);
+    lua_unref(L, fnRef);
+}
+
+Coroutine::Coroutine(lua_State* threadState)
+{
+    if (!threadState) return;
+    refData_ = std::make_shared<RefData>();
+    refData_->mainL = threadState;
+    refData_->coL = threadState;
+    refData_->threadRef = LUA_NOREF;
+}
+
+bool Coroutine::IsValid() const
+{
+    return refData_ && refData_->coL != nullptr;
 }
 
 Coroutine::~Coroutine() = default;

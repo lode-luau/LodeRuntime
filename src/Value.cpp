@@ -3,6 +3,7 @@
 #include "Lode/Value.hpp"
 #include "Lode/Table.hpp"
 #include "Lode/State.hpp"
+#include "Lode/Coroutine.hpp"
 #include "lua.h"
 #include "lualib.h"
 #include <stdexcept>
@@ -38,6 +39,20 @@ Value::Value(const Table& table)
         refData_->L = L;
         refData_->refId = lua_ref(L, -1);
         lua_pop(L, 1);
+    }
+}
+
+Value::Value(const Coroutine& coroutine)
+{
+    lua_State* co = coroutine.GetThreadState();
+    if (co)
+    {
+        lua_pushthread(co);
+        type_ = ValueType::Thread;
+        refData_ = std::make_shared<RefData>();
+        refData_->L = co;
+        refData_->refId = lua_ref(co, -1);
+        lua_pop(co, 1);
     }
 }
 

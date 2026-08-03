@@ -30,6 +30,7 @@ enum class ValueType
 
 class State;
 class Table;
+class Coroutine;
 
 class LODE_API Value
 {
@@ -42,6 +43,7 @@ public:
     Value(const std::string& str);
     Value(void* lightUserdata);
     Value(const Table& table);
+    Value(const Coroutine& coroutine);
 
     ~Value();
     Value(const Value& other);

@@ -28,6 +28,8 @@ class LODE_API Coroutine
 public:
     Coroutine();
     Coroutine(lua_State* L, int fnRef);
+    Coroutine(State& vm, const Value& fn);
+    explicit Coroutine(lua_State* threadState);
     ~Coroutine();
 
     Coroutine(const Coroutine& other);
@@ -37,6 +39,7 @@ public:
 
     Result<std::vector<Value>> Resume(const std::vector<Value>& args = {});
     [[nodiscard]] CoroutineStatus GetStatus() const;
+    [[nodiscard]] bool IsValid() const;
 
     [[nodiscard]] lua_State* GetThreadState() const;
 
