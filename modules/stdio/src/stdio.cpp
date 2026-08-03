@@ -572,7 +572,7 @@ LODE_MODULE(vm)
         return Lode::Value();
     }));
 
-    auto selectFactory = vm.Require("@self/select");
+    auto selectFactory = vm.Require("@self/utils/selectFactory");
     auto selectFn = vm.CallFunction(selectFactory, {stdinVal, stdoutVal}).GetValue()[0];
     exports.Set("select", selectFn);
 
