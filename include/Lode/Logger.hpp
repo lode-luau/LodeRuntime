@@ -39,6 +39,7 @@ struct Diagnostic
     int length = 1;
     std::string message;
     std::string code; // e.g. "E0001" or "SyntaxError"
+    bool isWarning = false; // if true, diagnostic is non-blocking (warning); if false, it is a hard error
     std::vector<DiagnosticLabel> labels;
     std::vector<std::string> notes;
     std::vector<std::string> helps;

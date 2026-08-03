@@ -98,7 +98,9 @@ void Logger::EmitDiagnostic(const Diagnostic& diag)
 {
     Initialize();
 
-    bool isWarn = (diag.code.rfind("Warning", 0) != std::string::npos || diag.code.rfind("Lint", 0) != std::string::npos);
+    bool isWarn = diag.isWarning
+                || (diag.code.rfind("Warning", 0) != std::string::npos)
+                || (diag.code.rfind("Lint", 0) != std::string::npos);
 
     if (isWarn)
     {
@@ -163,7 +165,8 @@ void Logger::EmitDiagnostic(const Diagnostic& diag)
                 std::cerr << " ";
         }
 
-        std::cerr << Color::RedBold;
+        // Cor dos carets: vermelho para error, amarelo para warning
+        std::cerr << (isWarn ? Color::YellowBold : Color::RedBold);
         for (int i = 0; i < len; ++i) std::cerr << "^";
         std::cerr << Color::Reset;
 
