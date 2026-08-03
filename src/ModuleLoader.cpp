@@ -27,6 +27,9 @@ struct LodeNavigationContext
     std::vector<std::string> modulePaths;
     fs::path currentPath;
     fs::path rootPath;
+    // Root directory of the current package (the folder that contains init.luau or lode.json).
+    // Used to resolve @self aliases to the package's own internal files.
+    fs::path packagePath;
 };
 
 typedef int (*LodeModuleInitFn)(lua_State* L);
@@ -73,18 +76,23 @@ static luarequire_NavigateResult reset(lua_State* L, void* ctx, const char* requ
         {
             if (canonicalP.filename() == "init.luau")
             {
-                // Para pacotes baseados em init.luau, o diretório base para require relativo "./mod"
-                // é o diretório contendo a pasta do pacote (parent_path do pacote).
+                // For init.luau-based packages, the base directory for relative requires ("./mod")
+                // is the directory that *contains* the package folder, not the package folder itself.
+                // This mirrors Luau's standard package resolution semantics.
                 nav->currentPath = canonicalP.parent_path().parent_path();
+                // packagePath points to the package folder so @self can resolve internal files.
+                nav->packagePath = canonicalP.parent_path();
             }
             else
             {
                 nav->currentPath = canonicalP.parent_path();
+                nav->packagePath = canonicalP.parent_path();
             }
         }
         else
         {
             nav->currentPath = canonicalP;
+            nav->packagePath = canonicalP;
         }
 
         nav->rootPath = nav->currentPath;
@@ -104,10 +112,12 @@ static luarequire_NavigateResult jump_to_alias(lua_State* L, void* ctx, const ch
     {
         if (aliasStr == "@self" || aliasStr == "self")
         {
-            // @self resolve diretamente para a pasta interna onde o arquivo atual se encontra
-            if (nav->currentPath.filename() != "init.luau")
+            // @self always resolves to the package's own directory (the folder containing
+            // init.luau or lode.json), allowing native and Luau modules to require their
+            // own internal files regardless of where the caller is located.
+            if (!nav->packagePath.empty())
             {
-                // se já estiver no nível da pasta pai do pacote, ajusta para o diretório real do arquivo
+                nav->currentPath = nav->packagePath;
             }
             return NAVIGATE_SUCCESS;
         }
@@ -308,7 +318,22 @@ static int LoadModuleImpl(lua_State* L, void* ctx, const char* path, const char*
                         if (symResult.IsOk())
                         {
                             LodeModuleInitFn initFn = reinterpret_cast<LodeModuleInitFn>(symResult.GetValue());
-                            return initFn(L);
+
+                            // Inject the native module's directory into the Lua registry before
+                            // calling its init function. Any require() call made from inside the
+                            // native module will read this value to determine the correct base path,
+                            // replicating the resolution semantics of an init.luau-based package.
+                            lua_pushstring(L, dirPath.string().c_str());
+                            lua_setfield(L, LUA_REGISTRYINDEX, "_LODE_NATIVE_MODULE_PATH");
+
+                            int nret = initFn(L);
+
+                            // Remove the injected path after initialization so it does not leak
+                            // into unrelated require() calls from other modules.
+                            lua_pushnil(L);
+                            lua_setfield(L, LUA_REGISTRYINDEX, "_LODE_NATIVE_MODULE_PATH");
+
+                            return nret;
                         }
                         else
                         {
@@ -389,9 +414,42 @@ static int MultiReturnLodeRequire(lua_State* L)
 {
     lua_Debug ar;
     const char* requirerChunkname = "";
-    if (lua_getinfo(L, 1, "s", &ar) && ar.what[0] != 'C')
+    // syntheticChunkname must outlive requirerChunkname since it may point into it.
+    std::string syntheticChunkname;
+
+    // Priority 1: if we are inside a native module's LodeModuleInit, LoadModuleImpl
+    // will have injected the module's directory into the registry. This takes
+    // precedence over any Luau frame on the stack, because the Luau frame would
+    // belong to the outer script that triggered the native module load — not to the
+    // native module itself.
+    lua_getfield(L, LUA_REGISTRYINDEX, "_LODE_NATIVE_MODULE_PATH");
+    if (lua_isstring(L, -1))
     {
-        requirerChunkname = ar.source;
+        // Build a synthetic chunkname as if the native module were an init.luau file
+        // sitting inside its package directory. reset() already handles the init.luau
+        // special case by applying parent_path().parent_path(), which gives the same
+        // resolution semantics: "./X" resolves as a sibling of the package folder,
+        // and "@self/X" resolves inside the package folder via jump_to_alias.
+        syntheticChunkname = "@" + (fs::path(lua_tostring(L, -1)) / "init.luau").string();
+        requirerChunkname = syntheticChunkname.c_str();
+    }
+    lua_pop(L, 1);
+
+    // Priority 2: walk the call stack to find the first Luau (non-C) frame.
+    // This handles both the direct case (Luau calls require directly) and the indirect
+    // case where require is wrapped in a C function such as pcall(require, "./mod") —
+    // level 1 would be the C pcall frame, but a higher level holds the Luau script.
+    if (requirerChunkname[0] == '\0')
+    {
+        for (int level = 1; level <= 10; ++level)
+        {
+            if (!lua_getinfo(L, level, "s", &ar)) break;
+            if (ar.what[0] != 'C')
+            {
+                requirerChunkname = ar.source;
+                break;
+            }
+        }
     }
 
     const char* pathStr = luaL_checkstring(L, 1);
@@ -405,14 +463,41 @@ static int MultiReturnLodeRequire(lua_State* L)
         return 0;
     }
 
-    // Process relative path components
+    // Navigate to the target module, handling three distinct path forms:
+    //   "@alias/sub/path" — jump to the alias root, then descend into the remainder
+    //   "./relative"      — descend relative to the requirer's base directory
+    //   "plain/name"      — descend from the requirer's base directory as-is
     std::string relPath(pathStr);
-    if (relPath.rfind("./", 0) == 0)
+    if (!relPath.empty() && relPath[0] == '@')
     {
-        relPath = relPath.substr(2);
-    }
+        // Split "@alias" from "sub/path" at the first slash after the '@'.
+        size_t slashPos = relPath.find('/', 1);
+        std::string aliasName = (slashPos != std::string::npos)
+            ? relPath.substr(0, slashPos)  // e.g. "@self"
+            : relPath;                      // e.g. "@self" with no sub-path
+        std::string remainder = (slashPos != std::string::npos)
+            ? relPath.substr(slashPos + 1) // e.g. "utils" or "sub/module"
+            : "";
 
-    config->to_child(L, ctx, relPath.c_str());
+        if (config->jump_to_alias(L, ctx, aliasName.c_str()) != NAVIGATE_SUCCESS)
+        {
+            luaL_error(L, "Unknown module alias: %s", aliasName.c_str());
+            return 0;
+        }
+
+        if (!remainder.empty())
+        {
+            config->to_child(L, ctx, remainder.c_str());
+        }
+    }
+    else
+    {
+        if (relPath.rfind("./", 0) == 0)
+        {
+            relPath = relPath.substr(2);
+        }
+        config->to_child(L, ctx, relPath.c_str());
+    }
 
     char loadnameBuf[1024];
     size_t loadnameSize = 0;
