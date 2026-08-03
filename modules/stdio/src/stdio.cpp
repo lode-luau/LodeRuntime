@@ -1,3 +1,7 @@
+#ifdef _WIN32
+#define NOMINMAX
+#endif
+
 #include <uv.h>
 
 #ifdef _WIN32
@@ -13,6 +17,7 @@
 #include "Lode/Task.hpp"
 #include "Lode/Coroutine.hpp"
 #include "Lode/Buffer.hpp"
+#include "Lode/Compiler.hpp"
 #include <string>
 #include <vector>
 #include <deque>
@@ -85,6 +90,27 @@ public:
             }
         }
         return Lode::Value();
+    }
+
+    Lode::Value isTTY(Lode::State& vm, const std::vector<Lode::Value>& args) const {
+        return Lode::Value(stream && stream->type == UV_TTY);
+    }
+
+    Lode::Value getWindowSize(Lode::State& vm, const std::vector<Lode::Value>& args) {
+        if (!stream || stream->type != UV_TTY) {
+            Lode::Table t = vm.CreateTable();
+            t.Set(1, Lode::Value(0));
+            t.Set(2, Lode::Value(0));
+            return Lode::Value(t);
+        }
+        
+        int width = 0, height = 0;
+        uv_tty_get_winsize(reinterpret_cast<uv_tty_t*>(stream), &width, &height);
+        
+        Lode::Table t = vm.CreateTable();
+        t.Set(1, Lode::Value(width));
+        t.Set(2, Lode::Value(height));
+        return Lode::Value(t);
     }
 };
 
@@ -382,6 +408,17 @@ public:
         queueRequest(req);
         return Lode::Value();
     }
+
+    Lode::Value isTTY(Lode::State& vm, const std::vector<Lode::Value>& args) const {
+        return Lode::Value(stream && stream->type == UV_TTY);
+    }
+
+    Lode::Value setRawMode(Lode::State& vm, const std::vector<Lode::Value>& args) {
+        if (!stream || stream->type != UV_TTY) return Lode::Value();
+        bool enable = args.empty() ? false : args[0].AsBoolean();
+        uv_tty_set_mode(reinterpret_cast<uv_tty_t*>(stream), enable ? UV_TTY_MODE_RAW : UV_TTY_MODE_NORMAL);
+        return Lode::Value();
+    }
 };
 
 LODE_MODULE(vm)
@@ -438,6 +475,8 @@ LODE_MODULE(vm)
     readableBuilder.Method("readAsync", &ReadableStream::readAsync);
     readableBuilder.Method("readBufferAsync", &ReadableStream::readBufferAsync);
     readableBuilder.Method("readIntoAsync", &ReadableStream::readIntoAsync);
+    readableBuilder.Method("isTTY", &ReadableStream::isTTY);
+    readableBuilder.Method("setRawMode", &ReadableStream::setRawMode);
 
     Lode::ClassBuilder<WritableStream> writableBuilder(vm, "WritableStream");
     writableBuilder.CustomConstructor([cppStdout, cppStderr](Lode::State&, const std::vector<Lode::Value>& args) {
@@ -448,6 +487,8 @@ LODE_MODULE(vm)
     
     writableBuilder.Method("write", &WritableStream::write);
     writableBuilder.Method("writeLine", &WritableStream::writeLine);
+    writableBuilder.Method("isTTY", &WritableStream::isTTY);
+    writableBuilder.Method("getWindowSize", &WritableStream::getWindowSize);
 
     auto stdinVal = readableBuilder.Build().CallFunctionSingle("new").GetValue();
     
@@ -530,6 +571,10 @@ LODE_MODULE(vm)
         cppStdout->writeData(clearCmd, std::strlen(clearCmd));
         return Lode::Value();
     }));
+
+    auto selectFactory = vm.Require("@self/select");
+    auto selectFn = vm.CallFunction(selectFactory, {stdinVal, stdoutVal}).GetValue()[0];
+    exports.Set("select", selectFn);
 
     return { Lode::Value(exports) };
 }
