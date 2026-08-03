@@ -224,6 +224,36 @@ Value State::CreateFunction(const std::function<Value(State& vm, const std::vect
     return val;
 }
 
+Value State::CreateFastFunction(const std::function<Value(State& vm, StackArgs args)>& fn)
+{
+    if (!L_) return Value();
+
+    struct ClosureData
+    {
+        std::function<Value(State& vm, StackArgs args)> func;
+    };
+    auto* data = new ClosureData{ fn };
+
+    auto cfunc = [](lua_State* L) -> int {
+        auto* data = static_cast<ClosureData*>(lua_touserdata(L, lua_upvalueindex(1)));
+        StackArgs args(L);
+        State vm(L);
+        Value res = data->func(vm, args);
+        if (lua_status(L) == LUA_YIELD)
+        {
+            return lua_yield(L, 0);
+        }
+        res.PushToLuaState(L);
+        return 1;
+    };
+
+    lua_pushlightuserdata(L_, data);
+    lua_pushcclosure(L_, cfunc, "CFunctionFast", 1);
+    Value val = Value::FromLuaState(L_, -1);
+    lua_pop(L_, 1);
+    return val;
+}
+
 Coroutine State::CreateCoroutine(const Value& fn)
 {
     if (!L_) return Coroutine();
@@ -239,6 +269,15 @@ Coroutine State::CreateCoroutine(const Value& fn)
 void* State::CreateUserdata(size_t size)
 {
     return L_ ? lua_newuserdata(L_, size) : nullptr;
+}
+
+Value State::CreateBuffer(size_t size)
+{
+    if (!L_) return Value();
+    lua_newbuffer(L_, size);
+    Value v = Value::FromLuaState(L_, -1);
+    lua_pop(L_, 1);
+    return v;
 }
 
 void State::SetUserdataMetatable(int index, const Table& metatable)

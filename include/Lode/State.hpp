@@ -8,6 +8,7 @@
 #include "Lode/Value.hpp"
 #include "Lode/Table.hpp"
 #include "Lode/Coroutine.hpp"
+#include "Lode/StackValue.hpp"
 #include <string>
 #include <string_view>
 #include <vector>
@@ -48,9 +49,11 @@ public:
     [[nodiscard]] Table CreateTable();
     [[nodiscard]] Metatable CreateMetatable();
     [[nodiscard]] Value CreateFunction(const std::function<Value(State& vm, const std::vector<Value>& args)>& fn);
+    [[nodiscard]] Value CreateFastFunction(const std::function<Value(State& vm, StackArgs args)>& fn);
     [[nodiscard]] Coroutine CreateCoroutine(const Value& fn);
 
     void* CreateUserdata(size_t size);
+    [[nodiscard]] Value CreateBuffer(size_t size);
     void SetUserdataMetatable(int index, const Table& metatable);
     void SetUserdataGC(const Table& metatable, void(*destructor)(void* ptr));
 
