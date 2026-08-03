@@ -79,6 +79,13 @@ public:
     Result<std::vector<Value>> Call(State& vm, const std::vector<Value>& args = {}) const;
     Result<std::vector<Value>> Call(const std::vector<Value>& args = {}) const;
 
+    // Fast zero-allocation Call overloads (Returns single Value)
+    Result<Value> CallSingle() const;
+    Result<Value> CallSingle(const Value& arg1) const;
+    Result<Value> CallSingle(const Value& arg1, const Value& arg2) const;
+    Result<Value> CallSingle(const Value& arg1, const Value& arg2, const Value& arg3) const;
+
+
     // Internal creation for Luau stack values
     static Value FromLuaState(lua_State* L, int index);
     void PushToLuaState(lua_State* L) const;

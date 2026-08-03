@@ -187,6 +187,80 @@ Result<std::vector<Value>> Value::Call(const std::vector<Value>& args) const
     return results;
 }
 
+Result<Value> Value::CallSingle() const
+{
+    lua_State* L = refData_ ? refData_->L : nullptr;
+    if (!L || type_ != ValueType::Function) return Error::Type("Value is not callable");
+
+    PushToLuaState(L);
+    if (lua_pcall(L, 0, 1, 0) != LUA_OK)
+    {
+        std::string errStr = lua_tostring(L, -1);
+        lua_pop(L, 1);
+        return Error::Runtime("Function execution failed: " + errStr);
+    }
+    Value result = Value::FromLuaState(L, -1);
+    lua_pop(L, 1);
+    return result;
+}
+
+Result<Value> Value::CallSingle(const Value& arg1) const
+{
+    lua_State* L = refData_ ? refData_->L : nullptr;
+    if (!L || type_ != ValueType::Function) return Error::Type("Value is not callable");
+
+    PushToLuaState(L);
+    arg1.PushToLuaState(L);
+    if (lua_pcall(L, 1, 1, 0) != LUA_OK)
+    {
+        std::string errStr = lua_tostring(L, -1);
+        lua_pop(L, 1);
+        return Error::Runtime("Function execution failed: " + errStr);
+    }
+    Value result = Value::FromLuaState(L, -1);
+    lua_pop(L, 1);
+    return result;
+}
+
+Result<Value> Value::CallSingle(const Value& arg1, const Value& arg2) const
+{
+    lua_State* L = refData_ ? refData_->L : nullptr;
+    if (!L || type_ != ValueType::Function) return Error::Type("Value is not callable");
+
+    PushToLuaState(L);
+    arg1.PushToLuaState(L);
+    arg2.PushToLuaState(L);
+    if (lua_pcall(L, 2, 1, 0) != LUA_OK)
+    {
+        std::string errStr = lua_tostring(L, -1);
+        lua_pop(L, 1);
+        return Error::Runtime("Function execution failed: " + errStr);
+    }
+    Value result = Value::FromLuaState(L, -1);
+    lua_pop(L, 1);
+    return result;
+}
+
+Result<Value> Value::CallSingle(const Value& arg1, const Value& arg2, const Value& arg3) const
+{
+    lua_State* L = refData_ ? refData_->L : nullptr;
+    if (!L || type_ != ValueType::Function) return Error::Type("Value is not callable");
+
+    PushToLuaState(L);
+    arg1.PushToLuaState(L);
+    arg2.PushToLuaState(L);
+    arg3.PushToLuaState(L);
+    if (lua_pcall(L, 3, 1, 0) != LUA_OK)
+    {
+        std::string errStr = lua_tostring(L, -1);
+        lua_pop(L, 1);
+        return Error::Runtime("Function execution failed: " + errStr);
+    }
+    Value result = Value::FromLuaState(L, -1);
+    lua_pop(L, 1);
+    return result;
+}
+
 Value Value::FromLuaState(lua_State* L, int index)
 {
     Value val;
