@@ -343,7 +343,7 @@ static int LoadModuleImpl(lua_State* L, void* ctx, const char* path, const char*
                     }
                     else
                     {
-                        vm.RaiseError(libResult.GetError().GetMessage());
+                        vm.RaiseError(libResult.GetError().ErrorMessage());
                         return 0;
                     }
                 }
@@ -403,7 +403,7 @@ static int LoadModuleImpl(lua_State* L, void* ctx, const char* path, const char*
 
     if (execResult.IsError())
     {
-        vm.RaiseError(execResult.GetError().GetMessage());
+        vm.RaiseError(execResult.GetError().ErrorMessage());
         return 0;
     }
 

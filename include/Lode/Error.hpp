@@ -36,7 +36,7 @@ public:
     /** @brief Gets the category of the error. */
     [[nodiscard]] ErrorType GetType() const { return type_; }
     /** @brief Gets the detailed error message. */
-    [[nodiscard]] const std::string& GetMessage() const { return message_; }
+    [[nodiscard]] const std::string& ErrorMessage() const { return message_; }
     /** @brief Checks if this is an actual error (not None). */
     [[nodiscard]] bool HasError() const { return type_ != ErrorType::None; }
 

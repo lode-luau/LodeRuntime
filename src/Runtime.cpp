@@ -84,7 +84,7 @@ int main(int argc, char* argv[])
     if (stateResult.IsError())
     {
         Lode::Diagnostic diag;
-        diag.message = "Error initializing runtime state: " + stateResult.GetError().GetMessage();
+        diag.message = "Error initializing runtime state: " + stateResult.GetError().ErrorMessage();
         diag.code = "VMInitError";
         Lode::Logger::EmitDiagnostic(diag);
         return 1;
@@ -103,7 +103,7 @@ int main(int argc, char* argv[])
     auto execResult = vm.ExecuteBytecode(bytecode, chunkName);
     if (execResult.IsError())
     {
-        Lode::Diagnostic diag = Lode::Logger::ParseLuauError(execResult.GetError().GetMessage(), absPath.string());
+        Lode::Diagnostic diag = Lode::Logger::ParseLuauError(execResult.GetError().ErrorMessage(), absPath.string());
         diag.code = "RuntimeError";
         Lode::Logger::EmitDiagnostic(diag);
         return 1;

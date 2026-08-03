@@ -41,7 +41,7 @@ public:
     [[nodiscard]] const T& GetValue() const
     {
         if (IsError())
-            throw std::runtime_error("Attempted to access value on error Result: " + GetError().GetMessage());
+            throw std::runtime_error("Attempted to access value on error Result: " + GetError().ErrorMessage());
         return std::get<T>(data_);
     }
 
@@ -52,7 +52,7 @@ public:
     [[nodiscard]] T& GetValue()
     {
         if (IsError())
-            throw std::runtime_error("Attempted to access value on error Result: " + GetError().GetMessage());
+            throw std::runtime_error("Attempted to access value on error Result: " + GetError().ErrorMessage());
         return std::get<T>(data_);
     }
 

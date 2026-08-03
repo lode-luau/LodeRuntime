@@ -54,7 +54,7 @@ LODE_MODULE(vm)
             return result.GetValue();
 
         if (result.IsError())
-            return Lode::Value("Call error: " + std::string(result.GetError().GetMessage()));
+            return Lode::Value("Call error: " + std::string(result.GetError().ErrorMessage()));
         return Lode::Value();
     }));
 
