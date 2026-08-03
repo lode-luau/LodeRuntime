@@ -2,8 +2,6 @@
 // SPDX-License-Identifier: MIT
 #include "Lode/Task.hpp"
 #include "Lode/EventLoop.hpp"
-#include "lua.h"
-#include "lualib.h"
 #include "uv.h"
 #include <unordered_map>
 #include <atomic>
@@ -17,8 +15,9 @@ static std::atomic<int> g_nextTimerId{ 1 };
 struct TimerData
 {
     int timerId = 0;
-    lua_State* L = nullptr;
-    int callbackRef = LUA_NOREF;
+    State* vm = nullptr;
+    Value callback;
+    Coroutine coroutine;
     bool recurring = false;
     std::vector<Value> args;
     uv_timer_t handle{};
@@ -26,16 +25,9 @@ struct TimerData
 
 static std::unordered_map<int, TimerData*> g_activeTimers;
 
-// Callback de encerramento seguro de memória da Libuv
 static void SafeDestroyTimer(TimerData* data)
 {
     if (!data) return;
-
-    if (data->L && data->callbackRef != LUA_NOREF)
-    {
-        lua_unref(data->L, data->callbackRef);
-        data->callbackRef = LUA_NOREF;
-    }
 
     if (!uv_is_closing(reinterpret_cast<uv_handle_t*>(&data->handle)))
     {
@@ -50,19 +42,12 @@ static void SafeDestroyTimer(TimerData* data)
     }
 }
 
-void Task::Wait(State& vm, double delayMs)
+int Task::Wait(State& vm, double seconds)
 {
-    lua_State* L = vm.GetLuaState();
-    if (!L) return;
-
-    // Garante referência da thread no Registry para evitar coleta pelo Garbage Collector
-    lua_pushthread(L);
-    int coRef = lua_ref(L, LUA_REGISTRYINDEX);
-
     auto* timerData = new TimerData();
     timerData->timerId = g_nextTimerId++;
-    timerData->L = L;
-    timerData->callbackRef = coRef;
+    timerData->vm = &vm;
+    timerData->coroutine = Coroutine(vm.GetLuaState());
     timerData->recurring = false;
 
     uv_loop_t* loop = EventLoop::Default().GetUVLoop();
@@ -71,40 +56,27 @@ void Task::Wait(State& vm, double delayMs)
 
     auto onTimer = [](uv_timer_t* handle) {
         auto* data = static_cast<TimerData*>(handle->data);
-        if (data && data->L)
+        if (data && data->coroutine.IsValid())
         {
-            lua_State* co = data->L;
-            
-            // Retoma a corrotina suspensa
-            int status = lua_resume(co, nullptr, 0);
-            if (status != LUA_OK && status != LUA_YIELD)
-            {
-                // Trata erros de execução na retomada da corrotina se necessário
-            }
+            data->coroutine.Resume();
         }
         uv_timer_stop(handle);
         SafeDestroyTimer(data);
     };
 
-    uint64_t timeout = static_cast<uint64_t>(delayMs > 0 ? delayMs : 1);
+    uint64_t timeout = static_cast<uint64_t>(seconds > 0 ? seconds * 1000.0 : 1);
     uv_timer_start(&timerData->handle, onTimer, timeout, 0);
 
-    vm.YieldThread();
+    return vm.YieldThread();
 }
 
 int Task::SetTimeout(State& vm, const Value& callback, double delayMs, const std::vector<Value>& args)
 {
-    lua_State* L = vm.GetLuaState();
-    if (!L) return -1;
-
-    callback.PushToLuaState(L);
-    int cbRef = lua_ref(L, LUA_REGISTRYINDEX);
-
     int id = g_nextTimerId++;
     auto* timerData = new TimerData();
     timerData->timerId = id;
-    timerData->L = L;
-    timerData->callbackRef = cbRef;
+    timerData->vm = &vm;
+    timerData->callback = callback;
     timerData->recurring = false;
     timerData->args = args;
 
@@ -116,18 +88,10 @@ int Task::SetTimeout(State& vm, const Value& callback, double delayMs, const std
 
     auto onTimer = [](uv_timer_t* handle) {
         auto* data = static_cast<TimerData*>(handle->data);
-        if (data && data->L)
+        if (data && data->vm)
         {
-            lua_State* L = data->L;
-            lua_getref(L, data->callbackRef);
-
-            // Empurra os argumentos guardados para a chamada da função
-            for (const auto& arg : data->args)
-            {
-                arg.PushToLuaState(L);
-            }
-
-            lua_pcall(L, static_cast<int>(data->args.size()), 0, 0);
+            Coroutine co(*data->vm, data->callback);
+            co.Resume(data->args);
             g_activeTimers.erase(data->timerId);
         }
         uv_timer_stop(handle);
@@ -154,17 +118,11 @@ void Task::ClearTimeout(State& vm, int timerId)
 
 int Task::SetInterval(State& vm, const Value& callback, double intervalMs, const std::vector<Value>& args)
 {
-    lua_State* L = vm.GetLuaState();
-    if (!L) return -1;
-
-    callback.PushToLuaState(L);
-    int cbRef = lua_ref(L, LUA_REGISTRYINDEX);
-
     int id = g_nextTimerId++;
     auto* timerData = new TimerData();
     timerData->timerId = id;
-    timerData->L = L;
-    timerData->callbackRef = cbRef;
+    timerData->vm = &vm;
+    timerData->callback = callback;
     timerData->recurring = true;
     timerData->args = args;
 
@@ -176,17 +134,10 @@ int Task::SetInterval(State& vm, const Value& callback, double intervalMs, const
 
     auto onTimer = [](uv_timer_t* handle) {
         auto* data = static_cast<TimerData*>(handle->data);
-        if (data && data->L)
+        if (data && data->vm)
         {
-            lua_State* L = data->L;
-            lua_getref(L, data->callbackRef);
-
-            for (const auto& arg : data->args)
-            {
-                arg.PushToLuaState(L);
-            }
-
-            lua_pcall(L, static_cast<int>(data->args.size()), 0, 0);
+            Coroutine co(*data->vm, data->callback);
+            co.Resume(data->args);
         }
     };
 
@@ -201,19 +152,26 @@ void Task::ClearInterval(State& vm, int timerId)
     ClearTimeout(vm, timerId);
 }
 
+Coroutine Task::Spawn(State& vm, const Value& fnOrCo, const std::vector<Value>& args)
+{
+    Coroutine co(vm, fnOrCo);
+    co.Resume(args);
+    return co;
+}
+
 void Task::Defer(State& vm, const Value& fnOrCo, const std::vector<Value>& args)
 {
     SetTimeout(vm, fnOrCo, 0, args);
 }
 
-void Task::Delay(State& vm, double delayMs, const Value& fnOrCo, const std::vector<Value>& args)
+void Task::Delay(State& vm, double seconds, const Value& fnOrCo, const std::vector<Value>& args)
 {
-    SetTimeout(vm, fnOrCo, delayMs, args);
+    SetTimeout(vm, fnOrCo, seconds * 1000.0, args);
 }
 
 void Task::Cancel(State& vm, const Value& target)
 {
-    if (target.GetType() == ValueType::Number || target.GetType() == ValueType::Integer)
+    if (target.IsNumber() || target.IsInteger())
     {
         ClearTimeout(vm, static_cast<int>(target.AsNumber()));
     }

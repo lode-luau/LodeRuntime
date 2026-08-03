@@ -15,8 +15,8 @@ namespace Lode
 class LODE_API Task
 {
 public:
-    // Yields the current calling coroutine for delayMs milliseconds
-    static void Wait(State& vm, double delayMs);
+    // Yields the current calling coroutine for seconds
+    static int Wait(State& vm, double seconds);
 
     // Schedules a single callback execution after delayMs milliseconds (OS-level setTimeout)
     static int SetTimeout(State& vm, const Value& callback, double delayMs, const std::vector<Value>& args = {});
@@ -32,8 +32,8 @@ public:
     // Defers a function/coroutine execution to the next event loop tick
     static void Defer(State& vm, const Value& fnOrCo, const std::vector<Value>& args = {});
 
-    // Executes a function/coroutine after delayMs milliseconds
-    static void Delay(State& vm, double delayMs, const Value& fnOrCo, const std::vector<Value>& args = {});
+    // Executes a function/coroutine after seconds
+    static void Delay(State& vm, double seconds, const Value& fnOrCo, const std::vector<Value>& args = {});
 
     // Cancels a scheduled task or coroutine
     static void Cancel(State& vm, const Value& target);
