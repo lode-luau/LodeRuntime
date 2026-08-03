@@ -429,6 +429,121 @@ public:
     }
 
     /**
+     * @brief Automatically binds a C++ member function to Luau (Non-const) with State injection.
+     * @param name The name of the method in Luau.
+     * @param methodPtr Pointer to the C++ member function receiving Lode::State& as first parameter.
+     */
+    template <typename Ret, typename... Args>
+    ClassBuilder& Method(const std::string& name, Ret (T::* methodPtr)(State&, Args...))
+    {
+        std::string className = className_;
+
+        methodsTable_.Set(name, vm_.CreateFunction([methodPtr, name, className](State& vm, const std::vector<Value>& args) -> Value {
+            auto instance = ObjectWrap<T>::Unwrap(vm, 1);
+            if (!instance)
+            {
+                vm.RaiseError("Invalid self object passed to method " + className + ":" + name);
+                return Value();
+            }
+
+            try
+            {
+                return InvokeMemberFunctionWithState<Ret, Args...>(vm, instance.get(), methodPtr, args, std::index_sequence_for<Args...>{});
+            }
+            catch (const std::exception& e)
+            {
+                vm.RaiseError("C++ Exception in method " + className + ":" + name + ": " + e.what());
+                return Value();
+            }
+            catch (...)
+            {
+                vm.RaiseError("Unknown C++ Exception in method " + className + ":" + name);
+                return Value();
+            }
+        }));
+        return *this;
+    }
+
+    /**
+     * @brief Automatically binds a C++ member function to Luau (Const) with State injection.
+     * @param name The name of the method in Luau.
+     * @param methodPtr Pointer to the C++ const member function receiving Lode::State& as first parameter.
+     */
+    template <typename Ret, typename... Args>
+    ClassBuilder& Method(const std::string& name, Ret (T::* methodPtr)(State&, Args...) const)
+    {
+        std::string className = className_;
+
+        methodsTable_.Set(name, vm_.CreateFunction([methodPtr, name, className](State& vm, const std::vector<Value>& args) -> Value {
+            auto instance = ObjectWrap<T>::Unwrap(vm, 1);
+            if (!instance)
+            {
+                vm.RaiseError("Invalid self object passed to method " + className + ":" + name);
+                return Value();
+            }
+
+            try
+            {
+                return InvokeConstMemberFunctionWithState<Ret, Args...>(vm, instance.get(), methodPtr, args, std::index_sequence_for<Args...>{});
+            }
+            catch (const std::exception& e)
+            {
+                vm.RaiseError("C++ Exception in method " + className + ":" + name + ": " + e.what());
+                return Value();
+            }
+            catch (...)
+            {
+                vm.RaiseError("Unknown C++ Exception in method " + className + ":" + name);
+                return Value();
+            }
+        }));
+        return *this;
+    }
+
+    /**
+     * @brief Binds a C++ member function receiving exact raw Lua arguments natively (State& and vector<Value>).
+     */
+    template <typename Ret>
+    ClassBuilder& Method(const std::string& name, Ret (T::* methodPtr)(State&, const std::vector<Value>&))
+    {
+        std::string className = className_;
+
+        methodsTable_.Set(name, vm_.CreateFunction([methodPtr, name, className](State& vm, const std::vector<Value>& args) -> Value {
+            auto instance = ObjectWrap<T>::Unwrap(vm, 1);
+            if (!instance)
+            {
+                vm.RaiseError("Invalid self object passed to method " + className + ":" + name);
+                return Value();
+            }
+
+            try
+            {
+                std::vector<Value> methodArgs(args.begin() + 1, args.end());
+                if constexpr (std::is_same_v<Ret, void>)
+                {
+                    (instance.get()->*methodPtr)(vm, methodArgs);
+                    return Value();
+                }
+                else
+                {
+                    auto res = (instance.get()->*methodPtr)(vm, methodArgs);
+                    return Detail::ValueReturner<Ret>::ToValue(&vm, std::move(res));
+                }
+            }
+            catch (const std::exception& e)
+            {
+                vm.RaiseError("C++ Exception in method " + className + ":" + name + ": " + e.what());
+                return Value();
+            }
+            catch (...)
+            {
+                vm.RaiseError("Unknown C++ Exception in method " + className + ":" + name);
+                return Value();
+            }
+        }));
+        return *this;
+    }
+    /**
      * @brief Binds a property with custom getters and setters.
      * @param name The name of the property.
      * @param getter The lambda to get the property value.
@@ -520,6 +635,36 @@ private:
         else
         {
             auto res = (instance->*methodPtr)(Detail::ValueConverter<Args>::FromValue(&vm, Is + 1 < args.size() ? args[Is + 1] : Value(), static_cast<int>(Is + 2))...);
+            return Detail::ValueReturner<Ret>::ToValue(&vm, std::move(res));
+        }
+    }
+
+    template <typename Ret, typename... Args, size_t... Is>
+    static Value InvokeMemberFunctionWithState(State& vm, T* instance, Ret (T::* methodPtr)(State&, Args...), const std::vector<Value>& args, std::index_sequence<Is...>)
+    {
+        if constexpr (std::is_same_v<Ret, void>)
+        {
+            (instance->*methodPtr)(vm, Detail::ValueConverter<Args>::FromValue(&vm, Is + 1 < args.size() ? args[Is + 1] : Value(), static_cast<int>(Is + 2))...);
+            return Value();
+        }
+        else
+        {
+            auto res = (instance->*methodPtr)(vm, Detail::ValueConverter<Args>::FromValue(&vm, Is + 1 < args.size() ? args[Is + 1] : Value(), static_cast<int>(Is + 2))...);
+            return Detail::ValueReturner<Ret>::ToValue(&vm, std::move(res));
+        }
+    }
+
+    template <typename Ret, typename... Args, size_t... Is>
+    static Value InvokeConstMemberFunctionWithState(State& vm, const T* instance, Ret (T::* methodPtr)(State&, Args...) const, const std::vector<Value>& args, std::index_sequence<Is...>)
+    {
+        if constexpr (std::is_same_v<Ret, void>)
+        {
+            (instance->*methodPtr)(vm, Detail::ValueConverter<Args>::FromValue(&vm, Is + 1 < args.size() ? args[Is + 1] : Value(), static_cast<int>(Is + 2))...);
+            return Value();
+        }
+        else
+        {
+            auto res = (instance->*methodPtr)(vm, Detail::ValueConverter<Args>::FromValue(&vm, Is + 1 < args.size() ? args[Is + 1] : Value(), static_cast<int>(Is + 2))...);
             return Detail::ValueReturner<Ret>::ToValue(&vm, std::move(res));
         }
     }
