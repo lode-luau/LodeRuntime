@@ -21,12 +21,12 @@ Value::RefData::~RefData()
 
 Value::Value() = default;
 
-Value::Value(bool b) : type_(ValueType::Boolean), boolVal_(b) {}
-Value::Value(double n) : type_(ValueType::Number), numberVal_(n) {}
-Value::Value(int i) : type_(ValueType::Integer), intVal_(i), numberVal_(static_cast<double>(i)) {}
-Value::Value(const char* str) : type_(ValueType::String), stringVal_(str ? str : "") {}
-Value::Value(const std::string& str) : type_(ValueType::String), stringVal_(str) {}
-Value::Value(void* lightUserdata) : type_(ValueType::LightUserdata), lightUserdataVal_(lightUserdata) {}
+Value::Value(bool b) : type_(ValueType::Boolean), data_(b) {}
+Value::Value(double n) : type_(ValueType::Number), data_(n) {}
+Value::Value(int i) : type_(ValueType::Integer), data_(i) {}
+Value::Value(const char* str) : type_(ValueType::String), data_(std::string(str ? str : "")) {}
+Value::Value(const std::string& str) : type_(ValueType::String), data_(str) {}
+Value::Value(void* lightUserdata) : type_(ValueType::LightUserdata), data_(lightUserdata) {}
 
 Value::Value(const Table& table)
 {
@@ -35,9 +35,10 @@ Value::Value(const Table& table)
     {
         table.PushToLuaState(L);
         type_ = ValueType::Table;
-        refData_ = std::make_shared<RefData>();
-        refData_->L = L;
-        refData_->refId = lua_ref(L, -1);
+        auto ref = std::make_shared<RefData>();
+        ref->L = L;
+        ref->refId = lua_ref(L, -1);
+        data_ = ref;
         lua_pop(L, 1);
     }
 }
@@ -49,9 +50,10 @@ Value::Value(const Coroutine& coroutine)
     {
         lua_pushthread(co);
         type_ = ValueType::Thread;
-        refData_ = std::make_shared<RefData>();
-        refData_->L = co;
-        refData_->refId = lua_ref(co, -1);
+        auto ref = std::make_shared<RefData>();
+        ref->L = co;
+        ref->refId = lua_ref(co, -1);
+        data_ = ref;
         lua_pop(co, 1);
     }
 }
@@ -67,48 +69,97 @@ ValueType Value::GetType() const
     return type_;
 }
 
-bool Value::AsBoolean() const { return boolVal_; }
-double Value::AsNumber() const { return numberVal_; }
-int Value::AsInteger() const { return intVal_; }
-std::string Value::AsString() const { return stringVal_; }
-void* Value::AsLightUserdata() const { return lightUserdataVal_; }
+bool Value::AsBoolean() const {
+    if (auto* b = std::get_if<bool>(&data_)) return *b;
+    return false;
+}
+double Value::AsNumber() const {
+    if (auto* n = std::get_if<double>(&data_)) return *n;
+    if (auto* i = std::get_if<int>(&data_)) return static_cast<double>(*i);
+    return 0.0;
+}
+int Value::AsInteger() const {
+    if (auto* i = std::get_if<int>(&data_)) return *i;
+    if (auto* n = std::get_if<double>(&data_)) return static_cast<int>(*n);
+    return 0;
+}
+std::string Value::AsString() const {
+    if (auto* s = std::get_if<std::string>(&data_)) return *s;
+    return "";
+}
+void* Value::AsLightUserdata() const {
+    if (auto* ptr = std::get_if<void*>(&data_)) return *ptr;
+    return nullptr;
+}
+
+void* Value::AsBuffer(size_t* sizeOut) const
+{
+    if (type_ == ValueType::Buffer)
+    {
+        if (auto* ref = std::get_if<std::shared_ptr<RefData>>(&data_))
+        {
+            if (*ref && (*ref)->L)
+            {
+                lua_getref((*ref)->L, (*ref)->refId);
+                void* ptr = lua_tobuffer((*ref)->L, -1, sizeOut);
+                lua_pop((*ref)->L, 1);
+                return ptr;
+            }
+        }
+    }
+    if (sizeOut) *sizeOut = 0;
+    return nullptr;
+}
 
 Table Value::AsTable() const
 {
-    if (type_ != ValueType::Table || !refData_ || !refData_->L)
-        return Table();
-    // Push the table ref onto the stack and wrap it as a Lode::Table.
-    // This is the same mechanism used by PushToLuaState internally.
-    lua_State* L = refData_->L;
-    lua_getref(L, refData_->refId);
-    Table t(L, -1);
-    lua_pop(L, 1);
-    return t;
+    if (type_ == ValueType::Table)
+    {
+        if (auto* ref = std::get_if<std::shared_ptr<RefData>>(&data_))
+        {
+            if (*ref && (*ref)->L)
+            {
+                lua_State* L = (*ref)->L;
+                lua_getref(L, (*ref)->refId);
+                Table t(L, -1);
+                lua_pop(L, 1);
+                return t;
+            }
+        }
+    }
+    return Table();
 }
 
 Result<bool> Value::TryAsBoolean() const
 {
-    if (type_ == ValueType::Boolean) return boolVal_;
+    if (auto* b = std::get_if<bool>(&data_)) return *b;
     return Error::Type("Value is not a boolean");
 }
 
 Result<double> Value::TryAsNumber() const
 {
-    if (type_ == ValueType::Number || type_ == ValueType::Integer) return numberVal_;
+    if (auto* n = std::get_if<double>(&data_)) return *n;
+    if (auto* i = std::get_if<int>(&data_)) return static_cast<double>(*i);
     return Error::Type("Value is not a number");
 }
 
 Result<int> Value::TryAsInteger() const
 {
-    if (type_ == ValueType::Integer) return intVal_;
-    if (type_ == ValueType::Number) return static_cast<int>(numberVal_);
+    if (auto* i = std::get_if<int>(&data_)) return *i;
+    if (auto* n = std::get_if<double>(&data_)) return static_cast<int>(*n);
     return Error::Type("Value is not an integer");
 }
 
 Result<std::string> Value::TryAsString() const
 {
-    if (type_ == ValueType::String) return stringVal_;
+    if (auto* s = std::get_if<std::string>(&data_)) return *s;
     return Error::Type("Value is not a string");
+}
+
+Result<void*> Value::TryAsBuffer(size_t* sizeOut) const
+{
+    if (type_ == ValueType::Buffer) return AsBuffer(sizeOut);
+    return Error::Type("Value is not a buffer");
 }
 
 Result<std::vector<Value>> Value::Call(State& vm, const std::vector<Value>& args) const
@@ -151,7 +202,11 @@ Result<std::vector<Value>> Value::Call(State& vm, const std::vector<Value>& args
 
 Result<std::vector<Value>> Value::Call(const std::vector<Value>& args) const
 {
-    lua_State* L = refData_ ? refData_->L : nullptr;
+    lua_State* L = nullptr;
+    if (auto* ref = std::get_if<std::shared_ptr<RefData>>(&data_))
+    {
+        if (*ref) L = (*ref)->L;
+    }
     if (!L || type_ != ValueType::Function)
     {
         return Error::Type("Value is not callable");
@@ -189,7 +244,11 @@ Result<std::vector<Value>> Value::Call(const std::vector<Value>& args) const
 
 Result<Value> Value::CallSingle() const
 {
-    lua_State* L = refData_ ? refData_->L : nullptr;
+    lua_State* L = nullptr;
+    if (auto* ref = std::get_if<std::shared_ptr<RefData>>(&data_))
+    {
+        if (*ref) L = (*ref)->L;
+    }
     if (!L || type_ != ValueType::Function) return Error::Type("Value is not callable");
 
     PushToLuaState(L);
@@ -206,7 +265,11 @@ Result<Value> Value::CallSingle() const
 
 Result<Value> Value::CallSingle(const Value& arg1) const
 {
-    lua_State* L = refData_ ? refData_->L : nullptr;
+    lua_State* L = nullptr;
+    if (auto* ref = std::get_if<std::shared_ptr<RefData>>(&data_))
+    {
+        if (*ref) L = (*ref)->L;
+    }
     if (!L || type_ != ValueType::Function) return Error::Type("Value is not callable");
 
     PushToLuaState(L);
@@ -224,7 +287,11 @@ Result<Value> Value::CallSingle(const Value& arg1) const
 
 Result<Value> Value::CallSingle(const Value& arg1, const Value& arg2) const
 {
-    lua_State* L = refData_ ? refData_->L : nullptr;
+    lua_State* L = nullptr;
+    if (auto* ref = std::get_if<std::shared_ptr<RefData>>(&data_))
+    {
+        if (*ref) L = (*ref)->L;
+    }
     if (!L || type_ != ValueType::Function) return Error::Type("Value is not callable");
 
     PushToLuaState(L);
@@ -243,7 +310,11 @@ Result<Value> Value::CallSingle(const Value& arg1, const Value& arg2) const
 
 Result<Value> Value::CallSingle(const Value& arg1, const Value& arg2, const Value& arg3) const
 {
-    lua_State* L = refData_ ? refData_->L : nullptr;
+    lua_State* L = nullptr;
+    if (auto* ref = std::get_if<std::shared_ptr<RefData>>(&data_))
+    {
+        if (*ref) L = (*ref)->L;
+    }
     if (!L || type_ != ValueType::Function) return Error::Type("Value is not callable");
 
     PushToLuaState(L);
@@ -272,34 +343,38 @@ Value Value::FromLuaState(lua_State* L, int index)
         break;
     case LUA_TBOOLEAN:
         val.type_ = ValueType::Boolean;
-        val.boolVal_ = (lua_toboolean(L, index) != 0);
+        val.data_ = (lua_toboolean(L, index) != 0);
         break;
     case LUA_TNUMBER:
         val.type_ = ValueType::Number;
-        val.numberVal_ = lua_tonumber(L, index);
-        val.intVal_ = static_cast<int>(val.numberVal_);
+        val.data_ = lua_tonumber(L, index);
         break;
     case LUA_TSTRING:
         val.type_ = ValueType::String;
-        val.stringVal_ = lua_tostring(L, index);
+        val.data_ = std::string(lua_tostring(L, index));
         break;
     case LUA_TLIGHTUSERDATA:
         val.type_ = ValueType::LightUserdata;
-        val.lightUserdataVal_ = lua_touserdata(L, index);
+        val.data_ = lua_touserdata(L, index);
         break;
     case LUA_TTABLE:
     case LUA_TFUNCTION:
     case LUA_TTHREAD:
     case LUA_TUSERDATA:
+    case LUA_TBUFFER:
+    {
         val.type_ = (type == LUA_TTABLE) ? ValueType::Table :
                     (type == LUA_TFUNCTION) ? ValueType::Function :
-                    (type == LUA_TTHREAD) ? ValueType::Thread : ValueType::Userdata;
-        val.refData_ = std::make_shared<RefData>();
-        val.refData_->L = L;
+                    (type == LUA_TTHREAD) ? ValueType::Thread : 
+                    (type == LUA_TBUFFER) ? ValueType::Buffer : ValueType::Userdata;
+        auto ref = std::make_shared<RefData>();
+        ref->L = L;
         lua_pushvalue(L, index);
-        val.refData_->refId = lua_ref(L, -1);
+        ref->refId = lua_ref(L, -1);
         lua_pop(L, 1);
+        val.data_ = ref;
         break;
+    }
     default:
         val.type_ = ValueType::Nil;
         break;
@@ -315,27 +390,40 @@ void Value::PushToLuaState(lua_State* L) const
         lua_pushnil(L);
         break;
     case ValueType::Boolean:
-        lua_pushboolean(L, boolVal_ ? 1 : 0);
+        if (auto* b = std::get_if<bool>(&data_)) lua_pushboolean(L, *b ? 1 : 0);
+        else lua_pushboolean(L, 0);
         break;
     case ValueType::Number:
-        lua_pushnumber(L, numberVal_);
+        if (auto* n = std::get_if<double>(&data_)) lua_pushnumber(L, *n);
+        else lua_pushnumber(L, 0.0);
         break;
     case ValueType::Integer:
-        lua_pushinteger(L, intVal_);
+        if (auto* i = std::get_if<int>(&data_)) lua_pushinteger(L, *i);
+        else lua_pushinteger(L, 0);
         break;
     case ValueType::String:
-        lua_pushlstring(L, stringVal_.data(), stringVal_.size());
+        if (auto* s = std::get_if<std::string>(&data_)) lua_pushlstring(L, s->data(), s->size());
+        else lua_pushstring(L, "");
         break;
     case ValueType::LightUserdata:
-        lua_pushlightuserdata(L, lightUserdataVal_);
+        if (auto* ptr = std::get_if<void*>(&data_)) lua_pushlightuserdata(L, *ptr);
+        else lua_pushlightuserdata(L, nullptr);
         break;
     case ValueType::Table:
     case ValueType::Function:
     case ValueType::Thread:
     case ValueType::Userdata:
-        if (refData_ && refData_->refId != LUA_NOREF)
+    case ValueType::Buffer:
+        if (auto* ref = std::get_if<std::shared_ptr<RefData>>(&data_))
         {
-            lua_getref(L, refData_->refId);
+            if (*ref && (*ref)->refId != LUA_NOREF)
+            {
+                lua_getref(L, (*ref)->refId);
+            }
+            else
+            {
+                lua_pushnil(L);
+            }
         }
         else
         {

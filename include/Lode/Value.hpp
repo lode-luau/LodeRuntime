@@ -8,6 +8,7 @@
 #include <string>
 #include <memory>
 #include <vector>
+#include <variant>
 
 struct lua_State;
 
@@ -25,7 +26,8 @@ enum class ValueType
     Function,
     Thread,
     Userdata,
-    LightUserdata
+    LightUserdata,
+    Buffer
 };
 
 class State;
@@ -61,12 +63,14 @@ public:
     [[nodiscard]] bool IsFunction() const { return GetType() == ValueType::Function; }
     [[nodiscard]] bool IsThread() const { return GetType() == ValueType::Thread; }
     [[nodiscard]] bool IsUserdata() const { return GetType() == ValueType::Userdata; }
+    [[nodiscard]] bool IsBuffer() const { return GetType() == ValueType::Buffer; }
 
     [[nodiscard]] bool AsBoolean() const;
     [[nodiscard]] double AsNumber() const;
     [[nodiscard]] int AsInteger() const;
     [[nodiscard]] std::string AsString() const;
     [[nodiscard]] void* AsLightUserdata() const;
+    [[nodiscard]] void* AsBuffer(size_t* sizeOut = nullptr) const;
     // Converts to a Table. Returns an empty Table if the value is not of table type.
     [[nodiscard]] Table AsTable() const;
 
@@ -74,6 +78,7 @@ public:
     [[nodiscard]] Result<double> TryAsNumber() const;
     [[nodiscard]] Result<int> TryAsInteger() const;
     [[nodiscard]] Result<std::string> TryAsString() const;
+    [[nodiscard]] Result<void*> TryAsBuffer(size_t* sizeOut = nullptr) const;
 
     // Invoke if value is a function
     Result<std::vector<Value>> Call(State& vm, const std::vector<Value>& args = {}) const;
@@ -99,12 +104,7 @@ private:
     };
 
     ValueType type_ = ValueType::Nil;
-    bool boolVal_ = false;
-    double numberVal_ = 0.0;
-    int intVal_ = 0;
-    std::string stringVal_;
-    void* lightUserdataVal_ = nullptr;
-    std::shared_ptr<RefData> refData_;
+    std::variant<std::monostate, bool, double, int, std::string, void*, std::shared_ptr<RefData>> data_;
 };
 
 } // namespace Lode
