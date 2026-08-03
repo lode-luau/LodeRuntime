@@ -8,6 +8,15 @@ add_library(native_module SHARED src/native_module.cpp)
 
 target_link_libraries(native_module PRIVATE LodeCore)
 
+# Size Optimization Flags (Option C)
+if(MSVC)
+    target_compile_options(native_module PRIVATE $<$<NOT:$<CONFIG:Debug>>:/O1> /GR- /GL)
+    target_link_options(native_module PRIVATE $<$<NOT:$<CONFIG:Debug>>:/OPT:REF> $<$<NOT:$<CONFIG:Debug>>:/OPT:ICF> $<$<NOT:$<CONFIG:Debug>>:/LTCG>)
+else()
+    target_compile_options(native_module PRIVATE -Os -fno-rtti -fvisibility=hidden -flto)
+    target_link_options(native_module PRIVATE -flto -Wl,--gc-sections)
+endif()
+
 # 1. Universal Platform Detection
 if(WIN32)
     set(TARGET_PLATFORM "windows")

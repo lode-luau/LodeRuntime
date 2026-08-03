@@ -11,6 +11,15 @@ add_library(task SHARED src/task.cpp)
 
 target_link_libraries(task PRIVATE LodeCore)
 
+# Size Optimization Flags (Option C)
+if(MSVC)
+    target_compile_options(task PRIVATE $<$<NOT:$<CONFIG:Debug>>:/O1> /GR- /GL)
+    target_link_options(task PRIVATE $<$<NOT:$<CONFIG:Debug>>:/OPT:REF> $<$<NOT:$<CONFIG:Debug>>:/OPT:ICF> $<$<NOT:$<CONFIG:Debug>>:/LTCG>)
+else()
+    target_compile_options(task PRIVATE -Os -fno-rtti -fvisibility=hidden -flto)
+    target_link_options(task PRIVATE -flto -Wl,--gc-sections)
+endif()
+
 # 1. Universal Platform Detection
 if(WIN32)
     set(TARGET_PLATFORM "windows")
