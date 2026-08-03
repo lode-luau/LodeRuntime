@@ -4,6 +4,7 @@
 #include "Luau/Compiler.h"
 #include "Luau/ParseOptions.h"
 #include "Luau/Config.h"
+#include "Luau/LuauConfig.h"
 #include <cstdlib>
 #include <cstring>
 #include <sstream>
@@ -54,28 +55,136 @@ namespace
         std::string source_;
     };
 
-    class SimpleConfigResolver : public Luau::ConfigResolver
+    // Reads the entire contents of a file into a string. Returns nullopt on failure.
+    static std::optional<std::string> readTextFile(const fs::path& path)
+    {
+        std::ifstream file(path);
+        if (!file.is_open())
+            return std::nullopt;
+        return std::string(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+    }
+
+    // ConfigResolver that walks up the directory tree searching for .luaurc / .config.luau,
+    // mirroring the behavior of the official luau-analyze CLI.
+    class FileConfigResolver : public Luau::ConfigResolver
     {
     public:
-        SimpleConfigResolver(std::string_view source)
+        // outExplicitMode: mode declared via hotcomment in the script (nullopt = no hotcomment)
+        FileConfigResolver(std::string_view source, std::string_view filePath, std::optional<Luau::Mode>& outExplicitMode)
         {
+            // Parse the hotcomment mode from the script source
             Luau::Allocator allocator;
             Luau::AstNameTable names(allocator);
             Luau::ParseOptions parseOptions;
             Luau::ParseResult parseResult = Luau::Parser::parse(source.data(), source.size(), names, allocator, parseOptions);
+            outExplicitMode = Luau::parseMode(parseResult.hotcomments);
 
-            config_.mode = Luau::parseMode(parseResult.hotcomments).value_or(Luau::Mode::Nonstrict);
+            // Default config follows the user's runtime preference (typeErrors off by default).
+            // A .luaurc or .config.luau found in the directory tree can override both.
+            defaultConfig_.typeErrors = false;
+            defaultConfig_.mode = Luau::Mode::Nonstrict;
+
+            // Resolve the script's directory to start the upward config search
+            if (!filePath.empty())
+            {
+                std::error_code ec;
+                fs::path scriptDir = fs::absolute(fs::path(filePath), ec).parent_path();
+                if (!ec)
+                    scriptDir_ = scriptDir.string();
+            }
         }
 
         const Luau::Config& getConfig(const Luau::ModuleName& name, const Luau::TypeCheckLimits& limits) const override
         {
-            return config_;
+            // Determine the directory of the requested module
+            std::string dir;
+            if (!name.empty())
+            {
+                std::error_code ec;
+                fs::path p = fs::absolute(fs::path(name), ec);
+                if (!ec && fs::exists(p, ec))
+                    dir = p.parent_path().string();
+            }
+            if (dir.empty())
+                dir = scriptDir_;
+
+            if (dir.empty())
+                return defaultConfig_;
+
+            return readConfigRec(dir);
+        }
+
+        // Returns the effective config for the script file (valid after frontend.check() has
+        // populated the cache via getConfig).
+        const Luau::Config& getScriptConfig() const
+        {
+            if (!scriptDir_.empty())
+            {
+                auto it = configCache_.find(scriptDir_);
+                if (it != configCache_.end())
+                    return it->second;
+            }
+            return defaultConfig_;
         }
 
     private:
-        Luau::Config config_;
+        std::string scriptDir_;
+        Luau::Config defaultConfig_;
+        mutable std::unordered_map<std::string, Luau::Config> configCache_;
+
+        const Luau::Config& readConfigRec(const std::string& dir) const
+        {
+            auto it = configCache_.find(dir);
+            if (it != configCache_.end())
+                return it->second;
+
+            // Walk up to the parent directory
+            std::error_code ec;
+            fs::path parentPath = fs::path(dir).parent_path();
+            bool hasParent = (parentPath != fs::path(dir)) && !parentPath.empty();
+
+            // Inherit config from the parent (recursive)
+            Luau::Config result = hasParent ? readConfigRec(parentPath.string()) : defaultConfig_;
+
+            fs::path luaurcPath = fs::path(dir) / Luau::kConfigName;       // .luaurc
+            fs::path luauConfigPath = fs::path(dir) / Luau::kLuauConfigName; // .config.luau
+
+            bool luaurcExists = fs::exists(luaurcPath, ec) && !ec;
+            bool luauConfigExists = fs::exists(luauConfigPath, ec) && !ec;
+
+            if (luaurcExists && luauConfigExists)
+            {
+                // Ambiguity: both files exist — skip both (mirrors official CLI behavior)
+            }
+            else if (luaurcExists)
+            {
+                if (std::optional<std::string> contents = readTextFile(luaurcPath))
+                {
+                    Luau::ConfigOptions::AliasOptions aliasOpts;
+                    aliasOpts.configLocation = luaurcPath.string();
+                    aliasOpts.overwriteAliases = true;
+                    Luau::ConfigOptions opts;
+                    opts.aliasOptions = std::move(aliasOpts);
+                    Luau::parseConfig(*contents, result, opts); // silently ignore parse errors
+                }
+            }
+            else if (luauConfigExists)
+            {
+                if (std::optional<std::string> contents = readTextFile(luauConfigPath))
+                {
+                    Luau::ConfigOptions::AliasOptions aliasOpts;
+                    aliasOpts.configLocation = luauConfigPath.string();
+                    aliasOpts.overwriteAliases = true;
+                    Luau::InterruptCallbacks callbacks{};
+                    Luau::extractLuauConfig(*contents, result, aliasOpts, std::move(callbacks));
+                }
+            }
+
+            return configCache_[dir] = result;
+        }
     };
 }
+
 
 namespace Lode
 {
@@ -95,7 +204,7 @@ lua_CompileOptions Compiler::ParseOptionsFromSource(std::string_view source, std
 {
     lua_CompileOptions opts = GetDefaultOptions();
 
-    // Analisar comentários de diretivas de cabeçalho (--!native, --!optimize, --!debug)
+    // Parse header directive hotcomments (--!native, --!optimize N, --!debug N)
     std::istringstream stream((std::string(source)));
     std::string line;
     while (std::getline(stream, line))
@@ -170,8 +279,10 @@ std::string Compiler::CompileWithResult(std::string_view source, std::vector<Dia
 {
     std::string moduleName = filePath.empty() ? "main" : std::string(filePath);
 
+    // explicitMode: mode declared via hotcomment in the script (nullopt = no hotcomment)
+    std::optional<Luau::Mode> explicitMode;
     SimpleFileResolver fileResolver(moduleName, source);
-    SimpleConfigResolver configResolver(source);
+    FileConfigResolver configResolver(source, filePath, explicitMode);
 
     Luau::FrontendOptions frontendOptions;
     frontendOptions.runLintChecks = true;
@@ -180,7 +291,7 @@ std::string Compiler::CompileWithResult(std::string_view source, std::vector<Dia
     Luau::registerBuiltinGlobals(frontend, frontend.globals);
     Luau::freeze(frontend.globals.globalTypes);
 
-    // Carregar fonte diretamente na Frontend
+    // Check for parse errors before running the frontend
     Luau::SourceModule* sm = frontend.getSourceModule(moduleName);
     if (!sm)
     {
@@ -192,9 +303,7 @@ std::string Compiler::CompileWithResult(std::string_view source, std::vector<Dia
         if (!parseResult.errors.empty())
         {
             for (const auto& err : parseResult.errors)
-            {
                 outDiagnostics.push_back(Logger::FromParseError(err, filePath));
-            }
             return "";
         }
     }
@@ -202,42 +311,65 @@ std::string Compiler::CompileWithResult(std::string_view source, std::vector<Dia
     Luau::CheckResult checkResult = frontend.check(moduleName);
     bool hasErrors = false;
 
-    // Coletar Type Errors do Frontend do Luau (--!strict, etc.)
+    // -------------------------------------------------------------------------
+    // Mode resolution and type error emission rules:
+    //
+    //  Priority: hotcomment > config languageMode > Nonstrict (default)
+    //
+    //  - Strict   -> type errors BLOCK execution  (error[], red)
+    //  - Nonstrict -> type errors do NOT block     (warning[], yellow), script still runs
+    //  - NoCheck  -> type errors suppressed entirely
+    //
+    //  config.typeErrors (default: false) enables emission in Nonstrict mode.
+    //  --!strict always enables and blocks; --!nocheck always suppresses.
+    // -------------------------------------------------------------------------
+    const Luau::Config& scriptConfig = configResolver.getScriptConfig();
+    Luau::Mode effectiveMode = explicitMode.value_or(scriptConfig.mode);
+    bool isStrictMode = (effectiveMode == Luau::Mode::Strict);
+
+    bool emitTypeErrors;
+    if (effectiveMode == Luau::Mode::NoCheck)
+        emitTypeErrors = false;                                      // nocheck: suppress all type errors
+    else if (explicitMode.has_value() && *explicitMode == Luau::Mode::Strict)
+        emitTypeErrors = true;                                       // --!strict: always emit and block
+    else
+        emitTypeErrors = scriptConfig.typeErrors;                    // otherwise: follow config (default: false)
+
     for (const auto& err : checkResult.errors)
     {
         if (const Luau::SyntaxError* syntaxError = Luau::get_if<Luau::SyntaxError>(&err.data))
         {
+            // Syntax errors always block — without valid parse there is no bytecode
             Diagnostic diag;
             diag.filePath = std::string(filePath);
             diag.line = err.location.begin.line + 1;
             diag.column = err.location.begin.column + 1;
-            diag.length = (err.location.end.column > err.location.begin.column) ? (err.location.end.column - err.location.begin.column) : 1;
+            diag.length = (err.location.end.column > err.location.begin.column)
+                ? (err.location.end.column - err.location.begin.column) : 1;
             diag.message = syntaxError->message;
             diag.code = "SyntaxError";
+            diag.isWarning = false;
             outDiagnostics.push_back(diag);
             hasErrors = true;
         }
-        else
+        else if (emitTypeErrors)
         {
-            outDiagnostics.push_back(Logger::FromTypeError(err, filePath, &fileResolver));
-            hasErrors = true;
+            Diagnostic diag = Logger::FromTypeError(err, filePath, &fileResolver);
+            diag.isWarning = !isStrictMode; // strict -> blocking error; nonstrict -> non-blocking warning
+            outDiagnostics.push_back(diag);
+            if (isStrictMode)
+                hasErrors = true;
         }
     }
 
-    // Coletar Lint Warnings do Frontend
+    // Lint warnings: never block execution
     for (const auto& warn : checkResult.lintResult.warnings)
-    {
         outDiagnostics.push_back(Logger::FromLintWarning(warn, filePath));
-    }
     for (const auto& errWarn : checkResult.lintResult.errors)
-    {
         outDiagnostics.push_back(Logger::FromLintWarning(errWarn, filePath));
-    }
 
     if (hasErrors)
-    {
         return "";
-    }
 
     return Compile(source, options, filePath);
 }
