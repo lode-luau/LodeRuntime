@@ -1,11 +1,10 @@
 // Copyright (c) 2026 yanlvl99, Lode Runtime Contributors
 // SPDX-License-Identifier: MIT
 #include "Lode/State.hpp"
+#include "Lode/Compiler.hpp"
 #include "Lode/Result.hpp"
 #include "Lode/EventLoop.hpp"
 #include "Platform/CrashHandler.hpp"
-#include "Luau/Compiler.h"
-#include "luacode.h"
 
 #include <iostream>
 #include <fstream>
@@ -47,15 +46,12 @@ int main(int argc, char* argv[])
     std::string bytecode;
     if (filePath.size() >= 5 && filePath.substr(filePath.size() - 5) == ".luau")
     {
-        size_t bytecodeSize = 0;
-        char* compiled = luau_compile(content.c_str(), content.length(), nullptr, &bytecodeSize);
-        if (!compiled)
+        bytecode = Lode::Compiler::CompileWithCache(content, filePath);
+        if (bytecode.empty())
         {
             std::cerr << "Error: Failed to compile Luau source file: " << filePath << "\n";
             return 1;
         }
-        bytecode.assign(compiled, bytecodeSize);
-        free(compiled);
     }
     else
     {

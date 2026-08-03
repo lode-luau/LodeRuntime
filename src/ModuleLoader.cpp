@@ -1,6 +1,7 @@
 // Copyright (c) 2026 yanlvl99, Lode Runtime Contributors
 // SPDX-License-Identifier: MIT
 #include "ModuleLoader.hpp"
+#include "Lode/Compiler.hpp"
 #include "Platform/Platform.hpp"
 #include "Luau/Require.h"
 #include "Luau/Compiler.h"
@@ -70,7 +71,16 @@ static luarequire_NavigateResult reset(lua_State* L, void* ctx, const char* requ
 
         if (fs::is_regular_file(canonicalP))
         {
-            nav->currentPath = canonicalP.parent_path();
+            if (canonicalP.filename() == "init.luau")
+            {
+                // Para pacotes baseados em init.luau, o diretório base para require relativo "./mod"
+                // é o diretório contendo a pasta do pacote (parent_path do pacote).
+                nav->currentPath = canonicalP.parent_path().parent_path();
+            }
+            else
+            {
+                nav->currentPath = canonicalP.parent_path();
+            }
         }
         else
         {
@@ -89,9 +99,19 @@ static luarequire_NavigateResult reset(lua_State* L, void* ctx, const char* requ
 static luarequire_NavigateResult jump_to_alias(lua_State* L, void* ctx, const char* path)
 {
     LodeNavigationContext* nav = static_cast<LodeNavigationContext*>(ctx);
+    std::string aliasStr = path ? path : "";
     try
     {
-        fs::path p(path ? path : "");
+        if (aliasStr == "@self" || aliasStr == "self")
+        {
+            // @self resolve diretamente para a pasta interna onde o arquivo atual se encontra
+            if (nav->currentPath.filename() != "init.luau")
+            {
+                // se já estiver no nível da pasta pai do pacote, ajusta para o diretório real do arquivo
+            }
+            return NAVIGATE_SUCCESS;
+        }
+        fs::path p(aliasStr);
         if (p.is_relative())
         {
             p = nav->rootPath / p;
@@ -121,7 +141,21 @@ static luarequire_NavigateResult to_child(lua_State* L, void* ctx, const char* n
     LodeNavigationContext* nav = static_cast<LodeNavigationContext*>(ctx);
     std::string childName = name ? name : "";
     nav->currentPath /= childName;
+    try
+    {
+        nav->currentPath = fs::weakly_canonical(nav->currentPath);
+    }
+    catch (...) {}
     return NAVIGATE_SUCCESS;
+}
+
+static bool check_path_exists(const fs::path& p)
+{
+    if (fs::is_regular_file(p)) return true;
+    if (fs::is_regular_file(p.string() + ".luau")) return true;
+    if (fs::is_regular_file(p / "init.luau")) return true;
+    if (fs::is_regular_file(p / "lode.json")) return true;
+    return false;
 }
 
 static bool is_module_present(lua_State* L, void* ctx)
@@ -129,21 +163,18 @@ static bool is_module_present(lua_State* L, void* ctx)
     LodeNavigationContext* nav = static_cast<LodeNavigationContext*>(ctx);
     fs::path p = nav->currentPath;
 
-    if (fs::is_regular_file(p))
+    if (check_path_exists(p))
         return true;
 
-    fs::path withLuau = p;
-    withLuau += ".luau";
-    if (fs::is_regular_file(withLuau))
-        return true;
-
-    fs::path initLuau = p / "init.luau";
-    if (fs::is_regular_file(initLuau))
-        return true;
-
-    fs::path lodeJson = p / "lode.json";
-    if (fs::is_regular_file(lodeJson))
-        return true;
+    for (const auto& searchDir : nav->modulePaths)
+    {
+        fs::path searchPath = fs::path(searchDir) / p.filename();
+        if (check_path_exists(searchPath))
+        {
+            nav->currentPath = fs::weakly_canonical(searchPath);
+            return true;
+        }
+    }
 
     return false;
 }
@@ -236,7 +267,11 @@ static int LoadModuleImpl(lua_State* L, void* ctx, const char* path, const char*
     fs::path targetPath(loadname ? loadname : (path ? path : ""));
 
     fs::path dirPath = targetPath;
-    if (fs::is_regular_file(targetPath))
+    if (fs::is_directory(targetPath))
+    {
+        dirPath = targetPath;
+    }
+    else if (fs::is_regular_file(targetPath))
     {
         dirPath = targetPath.parent_path();
     }
@@ -331,18 +366,15 @@ static int LoadModuleImpl(lua_State* L, void* ctx, const char* path, const char*
     }
     std::string source((std::istreambuf_iterator<char>(srcFile)), std::istreambuf_iterator<char>());
 
-    size_t bytecodeSize = 0;
-    char* bytecode = luau_compile(source.c_str(), source.length(), nullptr, &bytecodeSize);
-    if (!bytecode)
+    std::string bytecode = Compiler::CompileWithCache(source, scriptToLoad.string());
+    if (bytecode.empty())
     {
         vm.RaiseError("Failed to compile module: " + scriptToLoad.string());
         return 0;
     }
 
     std::string modChunkName = "@" + scriptToLoad.string();
-    std::string_view bcView(bytecode, bytecodeSize);
-    auto execResult = vm.ExecuteBytecodeWithResults(bcView, modChunkName);
-    free(bytecode);
+    auto execResult = vm.ExecuteBytecodeWithResults(bytecode, modChunkName);
 
     if (execResult.IsError())
     {

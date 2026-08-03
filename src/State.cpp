@@ -7,6 +7,7 @@
 #include "lua.h"
 #include "lualib.h"
 #include "Luau/Compiler.h"
+#include "Luau/CodeGen.h"
 #include <stdexcept>
 #include <iostream>
 
@@ -25,6 +26,11 @@ State::State() : L_(luaL_newstate()), ownsState_(true), impl_(std::make_unique<I
     {
         luaL_openlibs(L_);
         SetupModuleLoader(L_, &impl_->registry, impl_->modulePaths);
+
+        if (Luau::CodeGen::isSupported())
+        {
+            Luau::CodeGen::create(L_);
+        }
     }
 }
 
@@ -99,6 +105,11 @@ Result<int> State::ExecuteBytecodeWithResults(std::string_view bytecode, std::st
         lua_pop(co, 1);
         lua_unref(L_, coRef);
         return Error::Syntax("Bytecode load failed: " + errStr);
+    }
+
+    if (Luau::CodeGen::isSupported())
+    {
+        Luau::CodeGen::compile(co, -1, Luau::CodeGen::CodeGen_OnlyNativeModules);
     }
 
     int resStatus = lua_resume(co, nullptr, 0);
@@ -198,6 +209,10 @@ Value State::CreateFunction(const std::function<Value(State& vm, const std::vect
         }
         State vm(L);
         Value res = data->func(vm, args);
+        if (lua_status(L) == LUA_YIELD)
+        {
+            return lua_yield(L, 0);
+        }
         res.PushToLuaState(L);
         return 1;
     };

@@ -98,6 +98,7 @@ set(LODE_CORE_SOURCES
     src/Registry.cpp
     src/ModuleLoader.cpp
     src/State.cpp
+    src/Compiler.cpp
     src/Platform/Platform.cpp
     src/Platform/WindowsDll.cpp
     src/Platform/UnixDlopen.cpp
@@ -119,6 +120,7 @@ set(LODE_CORE_HEADERS
     include/Lode/Coroutine.hpp
     include/Lode/Module.hpp
     include/Lode/State.hpp
+    include/Lode/Compiler.hpp
     src/Platform/Platform.hpp
     src/Platform/CrashHandler.hpp
     src/Platform/WindowsCrashHandler.hpp
@@ -139,6 +141,7 @@ target_link_libraries(LodeCore PRIVATE
     Luau.Compiler
     Luau.Ast
     Luau.Require
+    Luau.CodeGen
     uv_a
 )
 
@@ -152,4 +155,8 @@ target_link_libraries(lode_runtime PRIVATE LodeCore Luau.Compiler Luau.Ast)
 # Add subdirectories for optional/test modules
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/temp/native_module/CMakeLists.txt")
     add_subdirectory(temp/native_module)
+endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/temp/task_module/CMakeLists.txt")
+    add_subdirectory(temp/task_module)
 endif()
