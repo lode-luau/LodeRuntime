@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: MIT
 #include "Lode/Task.hpp"
 #include "Lode/EventLoop.hpp"
+#define NOMINMAX
 #include "uv.h"
+#include "Lode/Logger.hpp"
 #include <unordered_map>
 #include <atomic>
 #include <vector>
@@ -58,7 +60,14 @@ int Task::Wait(State& vm, double seconds)
         auto* data = static_cast<TimerData*>(handle->data);
         if (data && data->coroutine.IsValid())
         {
-            data->coroutine.Resume();
+            auto res = data->coroutine.Resume();
+            if (res.IsError())
+            {
+                Diagnostic diag;
+                diag.message = "Unhandled exception in Wait timer: " + res.GetError().ErrorMessage();
+                diag.code = "TaskError";
+                Logger::EmitDiagnostic(diag);
+            }
         }
         uv_timer_stop(handle);
         SafeDestroyTimer(data);
@@ -92,7 +101,14 @@ int Task::SetTimeout(State& vm, const Value& callback, double delayMs, const std
         {
             State localVm(data->L);
             Coroutine co(localVm, data->callback);
-            co.Resume(data->args);
+            auto res = co.Resume(data->args);
+            if (res.IsError())
+            {
+                Diagnostic diag;
+                diag.message = "Unhandled exception in SetTimeout: " + res.GetError().ErrorMessage();
+                diag.code = "TaskError";
+                Logger::EmitDiagnostic(diag);
+            }
             g_activeTimers.erase(data->timerId);
         }
         uv_timer_stop(handle);
@@ -139,7 +155,14 @@ int Task::SetInterval(State& vm, const Value& callback, double intervalMs, const
         {
             State localVm(data->L);
             Coroutine co(localVm, data->callback);
-            co.Resume(data->args);
+            auto res = co.Resume(data->args);
+            if (res.IsError())
+            {
+                Diagnostic diag;
+                diag.message = "Unhandled exception in SetInterval: " + res.GetError().ErrorMessage();
+                diag.code = "TaskError";
+                Logger::EmitDiagnostic(diag);
+            }
         }
     };
 
@@ -157,7 +180,14 @@ void Task::ClearInterval(State& vm, int timerId)
 Coroutine Task::Spawn(State& vm, const Value& fnOrCo, const std::vector<Value>& args)
 {
     Coroutine co(vm, fnOrCo);
-    co.Resume(args);
+    auto res = co.Resume(args);
+    if (res.IsError())
+    {
+        Diagnostic diag;
+        diag.message = "Unhandled exception in Spawn task: " + res.GetError().ErrorMessage();
+        diag.code = "TaskError";
+        Logger::EmitDiagnostic(diag);
+    }
     return co;
 }
 
