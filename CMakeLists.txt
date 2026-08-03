@@ -99,6 +99,7 @@ set(LODE_CORE_SOURCES
     src/ModuleLoader.cpp
     src/State.cpp
     src/Compiler.cpp
+    src/Logger.cpp
     src/Platform/Platform.cpp
     src/Platform/WindowsDll.cpp
     src/Platform/UnixDlopen.cpp
@@ -121,6 +122,7 @@ set(LODE_CORE_HEADERS
     include/Lode/Module.hpp
     include/Lode/State.hpp
     include/Lode/Compiler.hpp
+    include/Lode/Logger.hpp
     src/Platform/Platform.hpp
     src/Platform/CrashHandler.hpp
     src/Platform/WindowsCrashHandler.hpp
@@ -136,10 +138,11 @@ target_include_directories(LodeCore PUBLIC
     $<INSTALL_INTERFACE:include>
 )
 
-target_link_libraries(LodeCore PRIVATE
+target_link_libraries(LodeCore PUBLIC
     Luau.VM
     Luau.Compiler
     Luau.Ast
+    Luau.Analysis
     Luau.Require
     Luau.CodeGen
     uv_a
@@ -150,7 +153,7 @@ add_executable(lode_runtime
     src/Runtime.cpp
 )
 
-target_link_libraries(lode_runtime PRIVATE LodeCore Luau.Compiler Luau.Ast)
+target_link_libraries(lode_runtime PRIVATE LodeCore Luau.Compiler Luau.Ast Luau.Analysis)
 
 # Add subdirectories for optional/test modules
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/temp/native_module/CMakeLists.txt")
