@@ -89,6 +89,7 @@ include_directories(
 set(LODE_CORE_SOURCES
     src/Error.cpp
     src/Value.cpp
+    src/StackValue.cpp
     src/Table.cpp
     src/Coroutine.cpp
     src/Metatable.cpp
@@ -120,6 +121,7 @@ set(LODE_CORE_HEADERS
     include/Lode/Task.hpp
     include/Lode/Coroutine.hpp
     include/Lode/Module.hpp
+    include/Lode/StackValue.hpp
     include/Lode/State.hpp
     include/Lode/Compiler.hpp
     include/Lode/Logger.hpp
@@ -162,4 +164,8 @@ endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/temp/task_module/CMakeLists.txt")
     add_subdirectory(temp/task_module)
+endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/temp/simd_module/CMakeLists.txt")
+    add_subdirectory(temp/simd_module)
 endif()
