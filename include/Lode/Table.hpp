@@ -51,6 +51,17 @@ public:
     Result<std::vector<Value>> CallMethod(State& vm, const std::string& methodName, const std::vector<Value>& args = {}) const;
     Result<std::vector<Value>> CallMethod(const std::string& methodName, const std::vector<Value>& args = {}) const;
 
+    // Fast zero-allocation Call overloads (Returns single Value)
+    Result<Value> CallFunctionSingle(const std::string& funcName) const;
+    Result<Value> CallFunctionSingle(const std::string& funcName, const Value& arg1) const;
+    Result<Value> CallFunctionSingle(const std::string& funcName, const Value& arg1, const Value& arg2) const;
+    Result<Value> CallFunctionSingle(const std::string& funcName, const Value& arg1, const Value& arg2, const Value& arg3) const;
+
+    Result<Value> CallMethodSingle(const std::string& methodName) const;
+    Result<Value> CallMethodSingle(const std::string& methodName, const Value& arg1) const;
+    Result<Value> CallMethodSingle(const std::string& methodName, const Value& arg1, const Value& arg2) const;
+    Result<Value> CallMethodSingle(const std::string& methodName, const Value& arg1, const Value& arg2, const Value& arg3) const;
+
     void PushToLuaState(lua_State* L) const;
     [[nodiscard]] lua_State* GetLuaState() const;
 

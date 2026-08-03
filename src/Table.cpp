@@ -204,6 +204,66 @@ Result<std::vector<Value>> Table::CallMethod(const std::string& methodName, cons
     return fn.Call(callArgs);
 }
 
+Result<Value> Table::CallFunctionSingle(const std::string& funcName) const
+{
+    auto fnRes = Get(funcName);
+    if (fnRes.IsError()) return fnRes.GetError();
+    return fnRes.GetValue().CallSingle();
+}
+
+Result<Value> Table::CallFunctionSingle(const std::string& funcName, const Value& arg1) const
+{
+    auto fnRes = Get(funcName);
+    if (fnRes.IsError()) return fnRes.GetError();
+    return fnRes.GetValue().CallSingle(arg1);
+}
+
+Result<Value> Table::CallFunctionSingle(const std::string& funcName, const Value& arg1, const Value& arg2) const
+{
+    auto fnRes = Get(funcName);
+    if (fnRes.IsError()) return fnRes.GetError();
+    return fnRes.GetValue().CallSingle(arg1, arg2);
+}
+
+Result<Value> Table::CallFunctionSingle(const std::string& funcName, const Value& arg1, const Value& arg2, const Value& arg3) const
+{
+    auto fnRes = Get(funcName);
+    if (fnRes.IsError()) return fnRes.GetError();
+    return fnRes.GetValue().CallSingle(arg1, arg2, arg3);
+}
+
+Result<Value> Table::CallMethodSingle(const std::string& methodName) const
+{
+    auto fnRes = Get(methodName);
+    if (fnRes.IsError()) return fnRes.GetError();
+    return fnRes.GetValue().CallSingle(Value(*this));
+}
+
+Result<Value> Table::CallMethodSingle(const std::string& methodName, const Value& arg1) const
+{
+    auto fnRes = Get(methodName);
+    if (fnRes.IsError()) return fnRes.GetError();
+    return fnRes.GetValue().CallSingle(Value(*this), arg1);
+}
+
+Result<Value> Table::CallMethodSingle(const std::string& methodName, const Value& arg1, const Value& arg2) const
+{
+    auto fnRes = Get(methodName);
+    if (fnRes.IsError()) return fnRes.GetError();
+    return fnRes.GetValue().CallSingle(Value(*this), arg1, arg2);
+}
+
+Result<Value> Table::CallMethodSingle(const std::string& methodName, const Value& arg1, const Value& arg2, const Value& arg3) const
+{
+    // For 4 arguments (self + 3 args), we fall back to std::vector since CallSingle only supports up to 3 args right now
+    auto fnRes = Get(methodName);
+    if (fnRes.IsError()) return fnRes.GetError();
+    auto results = fnRes.GetValue().Call({ Value(*this), arg1, arg2, arg3 });
+    if (results.IsError()) return results.GetError();
+    if (results.GetValue().empty()) return Value();
+    return results.GetValue()[0];
+}
+
 void Table::PushToLuaState(lua_State* L) const
 {
     if (refData_ && refData_->refId != LUA_NOREF)
