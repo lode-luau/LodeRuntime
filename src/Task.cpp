@@ -15,7 +15,7 @@ static std::atomic<int> g_nextTimerId{ 1 };
 struct TimerData
 {
     int timerId = 0;
-    State* vm = nullptr;
+    lua_State* L = nullptr;
     Value callback;
     Coroutine coroutine;
     bool recurring = false;
@@ -46,7 +46,7 @@ int Task::Wait(State& vm, double seconds)
 {
     auto* timerData = new TimerData();
     timerData->timerId = g_nextTimerId++;
-    timerData->vm = &vm;
+    timerData->L = vm.GetLuaState();
     timerData->coroutine = Coroutine(vm.GetLuaState());
     timerData->recurring = false;
 
@@ -75,7 +75,7 @@ int Task::SetTimeout(State& vm, const Value& callback, double delayMs, const std
     int id = g_nextTimerId++;
     auto* timerData = new TimerData();
     timerData->timerId = id;
-    timerData->vm = &vm;
+    timerData->L = vm.GetLuaState();
     timerData->callback = callback;
     timerData->recurring = false;
     timerData->args = args;
@@ -88,9 +88,10 @@ int Task::SetTimeout(State& vm, const Value& callback, double delayMs, const std
 
     auto onTimer = [](uv_timer_t* handle) {
         auto* data = static_cast<TimerData*>(handle->data);
-        if (data && data->vm)
+        if (data && data->L)
         {
-            Coroutine co(*data->vm, data->callback);
+            State localVm(data->L);
+            Coroutine co(localVm, data->callback);
             co.Resume(data->args);
             g_activeTimers.erase(data->timerId);
         }
@@ -121,7 +122,7 @@ int Task::SetInterval(State& vm, const Value& callback, double intervalMs, const
     int id = g_nextTimerId++;
     auto* timerData = new TimerData();
     timerData->timerId = id;
-    timerData->vm = &vm;
+    timerData->L = vm.GetLuaState();
     timerData->callback = callback;
     timerData->recurring = true;
     timerData->args = args;
@@ -134,9 +135,10 @@ int Task::SetInterval(State& vm, const Value& callback, double intervalMs, const
 
     auto onTimer = [](uv_timer_t* handle) {
         auto* data = static_cast<TimerData*>(handle->data);
-        if (data && data->vm)
+        if (data && data->L)
         {
-            Coroutine co(*data->vm, data->callback);
+            State localVm(data->L);
+            Coroutine co(localVm, data->callback);
             co.Resume(data->args);
         }
     };
