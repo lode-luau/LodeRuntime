@@ -53,3 +53,59 @@ if greeting:find("@self/utils") then
 else
     print("  FAIL: greet did not route through utils (fallback active)")
 end
+
+-- Test 4: Native Signal Integration
+print("")
+print("--- Test 4: Signal & Task Integration ---")
+local onTick = NativeMod.onTick
+if type(onTick) == "table" and onTick.Connect then
+    print("  PASS: onTick signal exposed")
+    local fired = false
+    onTick:Connect(function(message)
+        print("  SIGNAL FIRED! Message:", message)
+        fired = true
+    end)
+    
+    print("  Waiting 1 second for signal...")
+    local task = require("./task_module")
+    task.wait(1.0)
+    
+    if fired then
+        print("  PASS: Signal was successfully fired by native module delayed task")
+    else
+        print("  FAIL: Signal was not fired in time")
+    end
+end
+
+-- Test 5: Overhead Benchmarks
+print("")
+print("--- Test 5: Overhead Benchmarks ---")
+local ITERATIONS = 1000000
+local t0, t1
+
+-- Benchmark 1: Pure Luau Function
+local double = NativeMod.utils.double
+t0 = os.clock()
+for i = 1, ITERATIONS do
+    double(10)
+end
+t1 = os.clock()
+print(string.format("  [Luau -> Luau]        %d calls: %.4f seconds", ITERATIONS, t1 - t0))
+
+-- Benchmark 2: Native C++ Function
+local square = NativeMod.square
+t0 = os.clock()
+for i = 1, ITERATIONS do
+    square(10)
+end
+t1 = os.clock()
+print(string.format("  [Luau -> C++]         %d calls: %.4f seconds", ITERATIONS, t1 - t0))
+
+-- Benchmark 3: Native C++ Function that delegates to Luau
+local greet = NativeMod.greet
+t0 = os.clock()
+for i = 1, ITERATIONS do
+    greet("Bench")
+end
+t1 = os.clock()
+print(string.format("  [Luau -> C++ -> Luau] %d calls: %.4f seconds", ITERATIONS, t1 - t0))

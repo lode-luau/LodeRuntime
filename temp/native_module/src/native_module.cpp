@@ -47,17 +47,15 @@ LODE_MODULE(vm)
         std::string name = (args.size() > 0 && args[0].IsString()) ? args[0].AsString() : "Lode User";
 
         // Delegate to utils.formatGreeting loaded from @self/utils.
-        // Look how clean it is now! We can just call CallFunction without even passing the vm.
-        auto result = utils.CallFunction("formatGreeting", { Lode::Value(name) });
+        // Look how clean it is now! We can just call CallFunctionSingle without even passing the vm.
+        auto result = utils.CallFunctionSingle("formatGreeting", Lode::Value(name));
         
-        if (result.IsOk() && !result.GetValue().empty())
-            return result.GetValue()[0];
+        if (result.IsOk())
+            return result.GetValue();
 
         // Debug: surface the exact error so we can diagnose it.
         if (result.IsError())
             return Lode::Value("Call error: " + std::string(result.GetError().GetMessage()));
-
-        return Lode::Value("Hello, " + name + "! (utils.formatGreeting returned empty)");
     }));
 
     exports.Set("square", vm.CreateFunction([](Lode::State& vm, const std::vector<Lode::Value>& args) -> Lode::Value {
@@ -86,6 +84,18 @@ LODE_MODULE(vm)
     // Expose utils and sibling so the Luau caller can verify both were loaded.
     exports.Set("utils", Lode::Value(utils));
     exports.Set("sibling", Lode::Value(sibling));
+
+    // --- Test 3: Native Signal Integration ---
+    // Loads temp/signal_module.luau, instantiates a Signal, and schedules a C++ task to fire it.
+    auto signalMod = vm.Require("./signal_module").AsTable();
+    auto mySignal = signalMod.CallFunctionSingle("new").GetValue().AsTable();
+    
+    // Expose the public interface of the signal so Luau can connect to it (but not Fire it directly)
+    exports.Set("onTick", mySignal.CallMethodSingle("Public").GetValue());
+
+    // Schedule a native delay task to fire this signal after 0.5 seconds
+    Lode::Value fireMethod = mySignal.Get("Fire").GetValue();
+    Lode::Task::Delay(vm, 0.5, fireMethod, { Lode::Value(mySignal), Lode::Value("Ticked from native C++ after 0.5s!") });
 
     // 2. Class Binding: Vector3
     Lode::ClassBuilder<Vector3> vec3Builder(vm, "Vector3");
