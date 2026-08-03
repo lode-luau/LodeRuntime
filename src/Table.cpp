@@ -154,6 +154,24 @@ Result<Table> Table::GetMetatable() const
     return Error::Runtime("Table has no metatable");
 }
 
+Result<std::vector<Value>> Table::CallFunction(State& vm, const std::string& funcName, const std::vector<Value>& args) const
+{
+    auto fnRes = Get(funcName);
+    if (fnRes.IsError()) return fnRes.GetError();
+
+    Value fn = fnRes.GetValue();
+    return fn.Call(vm, args);
+}
+
+Result<std::vector<Value>> Table::CallFunction(const std::string& funcName, const std::vector<Value>& args) const
+{
+    auto fnRes = Get(funcName);
+    if (fnRes.IsError()) return fnRes.GetError();
+
+    Value fn = fnRes.GetValue();
+    return fn.Call(args);
+}
+
 Result<std::vector<Value>> Table::CallMethod(State& vm, const std::string& methodName, const std::vector<Value>& args) const
 {
     auto fnRes = Get(methodName);
@@ -168,6 +186,22 @@ Result<std::vector<Value>> Table::CallMethod(State& vm, const std::string& metho
         callArgs.push_back(arg);
     }
     return fn.Call(vm, callArgs);
+}
+
+Result<std::vector<Value>> Table::CallMethod(const std::string& methodName, const std::vector<Value>& args) const
+{
+    auto fnRes = Get(methodName);
+    if (fnRes.IsError()) return fnRes.GetError();
+
+    Value fn = fnRes.GetValue();
+    std::vector<Value> callArgs;
+    callArgs.reserve(args.size() + 1);
+    callArgs.push_back(Value(*this));
+    for (const auto& arg : args)
+    {
+        callArgs.push_back(arg);
+    }
+    return fn.Call(callArgs);
 }
 
 void Table::PushToLuaState(lua_State* L) const

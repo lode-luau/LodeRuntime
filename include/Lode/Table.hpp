@@ -43,7 +43,13 @@ public:
     void SetMetatable(const Metatable& metatable);
     [[nodiscard]] Result<Table> GetMetatable() const;
 
+    // Calls a function stored in this table (like table.funcName(args))
+    Result<std::vector<Value>> CallFunction(State& vm, const std::string& funcName, const std::vector<Value>& args = {}) const;
+    Result<std::vector<Value>> CallFunction(const std::string& funcName, const std::vector<Value>& args = {}) const;
+
+    // Calls a method stored in this table (like table:methodName(args)), injecting 'self' automatically
     Result<std::vector<Value>> CallMethod(State& vm, const std::string& methodName, const std::vector<Value>& args = {}) const;
+    Result<std::vector<Value>> CallMethod(const std::string& methodName, const std::vector<Value>& args = {}) const;
 
     void PushToLuaState(lua_State* L) const;
     [[nodiscard]] lua_State* GetLuaState() const;
