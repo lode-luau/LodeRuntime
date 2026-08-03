@@ -5,6 +5,7 @@
 #include "Lode/Task.hpp"
 #include "Lode/Metatable.hpp"
 #include "Lode/ClassBuilder.hpp"
+#include <cstring>
 #include <string>
 #include <cmath>
 
