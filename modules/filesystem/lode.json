@@ -1,0 +1,22 @@
+{
+  "name": "filesystem",
+  "version": "1.0.0",
+  "description": "Lode standard filesystem module",
+  "author": "Lode Team",
+  "license": "MIT",
+  "libraries": {
+    "windows": {
+      "x64": "libs/windows/x64/filesystem.dll",
+      "arm64": "libs/windows/arm64/filesystem.dll",
+      "x86": "libs/windows/x86/filesystem.dll"
+    },
+    "linux": {
+      "x64": "libs/linux/x64/filesystem.so",
+      "arm64": "libs/linux/arm64/filesystem.so"
+    },
+    "macos": {
+      "x64": "libs/macos/x64/filesystem.dylib",
+      "arm64": "libs/macos/arm64/filesystem.dylib"
+    }
+  }
+}
