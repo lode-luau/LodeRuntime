@@ -5,6 +5,8 @@
 #include "Platform/Platform.hpp"
 #include "Luau/Require.h"
 #include "Luau/Compiler.h"
+#include "Luau/Config.h"
+#include "Luau/LuauConfig.h"
 #include "nlohmann/json.hpp"
 
 #include "lua.h"
@@ -119,6 +121,78 @@ static luarequire_NavigateResult reset(lua_State* L, void* ctx, const char* requ
     }
 }
 
+static std::optional<fs::path> ResolveAliasRecursively(const fs::path& startDir, const std::string& aliasName)
+{
+    fs::path current = startDir;
+    while (true)
+    {
+        fs::path luauConfigPath = current / ".config.luau";
+        fs::path luaurcPath = current / ".luaurc";
+        
+        std::string configPathToUse;
+        bool isLuau = false;
+        
+        if (fs::exists(luauConfigPath))
+        {
+            configPathToUse = luauConfigPath.string();
+            isLuau = true;
+        }
+        else if (fs::exists(luaurcPath))
+        {
+            configPathToUse = luaurcPath.string();
+        }
+        
+        if (!configPathToUse.empty())
+        {
+            std::ifstream file(configPathToUse);
+            if (file.is_open())
+            {
+                std::string contents((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+                Luau::Config result;
+                Luau::ConfigOptions::AliasOptions aliasOpts;
+                aliasOpts.configLocation = configPathToUse;
+                aliasOpts.overwriteAliases = true;
+                
+                if (isLuau)
+                {
+                    Luau::InterruptCallbacks callbacks{};
+                    std::optional<std::string> err = Luau::extractLuauConfig(contents, result, aliasOpts, std::move(callbacks));
+                    if (err)
+                    {
+                        Lode::Logger::Info("Failed to extract config in " + configPathToUse + ": " + *err);
+                    }
+                }
+                else
+                {
+                    Luau::ConfigOptions opts;
+                    opts.aliasOptions = std::move(aliasOpts);
+                    Luau::parseConfig(contents, result, opts);
+                }
+                
+                std::string lowerAlias = aliasName;
+                for (char& c : lowerAlias)
+                {
+                    if (c >= 'A' && c <= 'Z')
+                        c += ('a' - 'A');
+                }
+
+                auto it = result.aliases.find(lowerAlias);
+                if (it != nullptr)
+                {
+                    return fs::path(std::string(it->configLocation)).parent_path() / it->value;
+                }
+            }
+        }
+        
+        if (!current.has_parent_path() || current.parent_path() == current)
+            break;
+            
+        current = current.parent_path();
+    }
+    
+    return std::nullopt;
+}
+
 static luarequire_NavigateResult jump_to_alias(lua_State* L, void* ctx, const char* path)
 {
     LodeNavigationContext* nav = static_cast<LodeNavigationContext*>(ctx);
@@ -136,6 +210,18 @@ static luarequire_NavigateResult jump_to_alias(lua_State* L, void* ctx, const ch
             }
             return NAVIGATE_SUCCESS;
         }
+        
+        std::string lookupName = aliasStr;
+        if (!lookupName.empty() && lookupName[0] == '@')
+            lookupName = lookupName.substr(1);
+            
+        auto resolvedAlias = ResolveAliasRecursively(nav->rootPath, lookupName);
+        if (resolvedAlias)
+        {
+            nav->currentPath = fs::weakly_canonical(*resolvedAlias);
+            return NAVIGATE_SUCCESS;
+        }
+
         fs::path p(aliasStr);
         if (p.is_relative())
         {
@@ -305,69 +391,64 @@ static int LoadModuleImpl(lua_State* L, void* ctx, const char* path, const char*
     fs::path lodeJsonPath = dirPath / "lode.json";
     if (fs::exists(lodeJsonPath))
     {
+        nlohmann::json jsonDoc;
         try
         {
             std::ifstream f(lodeJsonPath);
-            nlohmann::json jsonDoc = nlohmann::json::parse(f);
-
-            if (jsonDoc.contains("libraries") && jsonDoc["libraries"].is_object())
-            {
-                std::string platform = std::string(Platform::GetOSName());
-                std::string arch = std::string(Platform::GetArchitectureName());
-
-                if (jsonDoc["libraries"].contains(platform) && jsonDoc["libraries"][platform].contains(arch))
-                {
-                    std::string relLibPath = jsonDoc["libraries"][platform][arch];
-                    fs::path fullLibPath = dirPath / relLibPath;
-
-                    auto libResult = Platform::DynamicLibrary::Open(fullLibPath.string());
-                    if (libResult.IsOk())
-                    {
-                        auto lib = libResult.GetValue();
-                        if (loaderCtx && loaderCtx->registry)
-                        {
-                            loaderCtx->registry->RegisterModule(loadname ? loadname : path, lib);
-                        }
-
-                        auto symResult = lib->GetSymbol("LodeModuleInit");
-                        if (symResult.IsOk())
-                        {
-                            LodeModuleInitFn initFn = reinterpret_cast<LodeModuleInitFn>(symResult.GetValue());
-
-                            // Inject the native module's directory into the Lua registry before
-                            // calling its init function. Any require() call made from inside the
-                            // native module will read this value to determine the correct base path,
-                            // replicating the resolution semantics of an init.luau-based package.
-                            lua_pushstring(L, dirPath.string().c_str());
-                            lua_setfield(L, LUA_REGISTRYINDEX, "_LODE_NATIVE_MODULE_PATH");
-
-                            int nret = initFn(L);
-
-                            // Remove the injected path after initialization so it does not leak
-                            // into unrelated require() calls from other modules.
-                            lua_pushnil(L);
-                            lua_setfield(L, LUA_REGISTRYINDEX, "_LODE_NATIVE_MODULE_PATH");
-
-                            return nret;
-                        }
-                        else
-                        {
-                            vm.RaiseError("Failed to find LodeModuleInit symbol in native library " + fullLibPath.string());
-                            return 0;
-                        }
-                    }
-                    else
-                    {
-                        vm.RaiseError(libResult.GetError().ErrorMessage());
-                        return 0;
-                    }
-                }
-            }
+            jsonDoc = nlohmann::json::parse(f);
         }
         catch (const std::exception& e)
         {
             vm.RaiseError("Failed to parse lode.json in " + dirPath.string() + ": " + e.what());
             return 0;
+        }
+
+        if (jsonDoc.contains("libraries") && jsonDoc["libraries"].is_object())
+        {
+            std::string platform = std::string(Platform::GetOSName());
+            std::string arch = std::string(Platform::GetArchitectureName());
+
+            if (jsonDoc["libraries"].contains(platform) && jsonDoc["libraries"][platform].contains(arch))
+            {
+                std::string relLibPath = jsonDoc["libraries"][platform][arch];
+                fs::path fullLibPath = dirPath / relLibPath;
+
+                auto libResult = Platform::DynamicLibrary::Open(fullLibPath.string());
+                if (libResult.IsOk())
+                {
+                    auto lib = libResult.GetValue();
+                    if (loaderCtx && loaderCtx->registry)
+                    {
+                        loaderCtx->registry->RegisterModule(loadname ? loadname : path, lib);
+                    }
+
+                    auto symResult = lib->GetSymbol("LodeModuleInit");
+                    if (symResult.IsOk())
+                    {
+                        LodeModuleInitFn initFn = reinterpret_cast<LodeModuleInitFn>(symResult.GetValue());
+
+                        lua_pushstring(L, dirPath.string().c_str());
+                        lua_setfield(L, LUA_REGISTRYINDEX, "_LODE_NATIVE_MODULE_PATH");
+
+                        int nret = initFn(L);
+
+                        lua_pushnil(L);
+                        lua_setfield(L, LUA_REGISTRYINDEX, "_LODE_NATIVE_MODULE_PATH");
+
+                        return nret;
+                    }
+                    else
+                    {
+                        vm.RaiseError("Failed to find LodeModuleInit symbol in native library " + fullLibPath.string());
+                        return 0;
+                    }
+                }
+                else
+                {
+                    vm.RaiseError(libResult.GetError().ErrorMessage());
+                    return 0;
+                }
+            }
         }
     }
 
