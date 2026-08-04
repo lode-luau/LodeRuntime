@@ -364,7 +364,14 @@ Diagnostic Logger::FromLintWarning(const Luau::LintWarning& lintWarning, std::st
 Diagnostic Logger::FromTypeError(const Luau::TypeError& typeError, std::string_view filePath, Luau::FileResolver* fileResolver)
 {
     Diagnostic diag;
-    diag.filePath = std::string(filePath);
+    if (!typeError.moduleName.empty())
+    {
+        diag.filePath = typeError.moduleName;
+    }
+    else
+    {
+        diag.filePath = std::string(filePath);
+    }
 
     Luau::Location loc = typeError.location;
     if (const Luau::TypeMismatch* tm = Luau::get_if<Luau::TypeMismatch>(&typeError.data))

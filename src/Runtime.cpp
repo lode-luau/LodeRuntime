@@ -64,7 +64,7 @@ int main(int argc, char* argv[])
         for (const auto& diag : diagnostics)
         {
             Lode::Logger::EmitDiagnostic(diag);
-            if (diag.code.rfind("Lint_", 0) == std::string::npos)
+            if (!diag.isWarning)
             {
                 hasErrors = true;
             }
