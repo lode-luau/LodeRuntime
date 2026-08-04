@@ -31,7 +31,7 @@ Table::Table(lua_State* L, int index)
     if (L && lua_istable(L, index))
     {
         refData_ = std::make_shared<RefData>();
-        refData_->L = L;
+        refData_->L = lua_mainthread(L);
         refData_->refId = lua_ref(L, index);
     }
 }

@@ -14,7 +14,7 @@ Buffer::Buffer(lua_State* L, int index)
 {
     if (lua_type(L, index) == LUA_TBUFFER)
     {
-        L_ = L;
+        L_ = lua_mainthread(L);
         lua_pushvalue(L, index);
         refId_ = lua_ref(L, -1);
         lua_pop(L, 1);

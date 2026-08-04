@@ -207,7 +207,24 @@ public:
     void RawGet(int index, int n);
     void RawSet(int index, int n);
 
+    /**
+     * @brief Returns the current thread being executed.
+     *
+     * @warning The returned thread is a coroutine that the GC can collect once
+     * it is no longer referenced. Do NOT store it across yields or use it from
+     * async callbacks — use GetMainThread() for a GC-safe pointer instead.
+     */
     [[nodiscard]] lua_State* GetLuaState() const { return L_; }
+
+    /**
+     * @brief Returns the VM's root thread, which is anchored and never collected
+     * by the GC until the State is destroyed.
+     *
+     * This is the safe pointer to keep for native async callbacks, timers, and
+     * module-long-lived state: it is always valid for lua_getref/lua_unref and
+     * all registry operations while the State is alive.
+     */
+    [[nodiscard]] lua_State* GetMainThread() const;
 
 private:
     struct Impl;

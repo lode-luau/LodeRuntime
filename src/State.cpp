@@ -38,6 +38,11 @@ State::State(lua_State* L) : L_(L), ownsState_(false), impl_(std::make_unique<Im
 {
 }
 
+lua_State* State::GetMainThread() const
+{
+    return L_ ? lua_mainthread(L_) : nullptr;
+}
+
 State::~State()
 {
     if (ownsState_ && L_)

@@ -63,9 +63,18 @@ Coroutine::Coroutine(lua_State* threadState)
 {
     if (!threadState) return;
     refData_ = std::make_shared<RefData>();
-    refData_->mainL = threadState;
+    refData_->mainL = lua_mainthread(threadState);
     refData_->coL = threadState;
-    refData_->threadRef = LUA_NOREF;
+    if (refData_->mainL)
+    {
+        lua_pushthread(threadState);
+        refData_->threadRef = lua_ref(threadState, -1);
+        lua_pop(threadState, 1);
+    }
+    else
+    {
+        refData_->threadRef = LUA_NOREF;
+    }
 }
 
 bool Coroutine::IsValid() const

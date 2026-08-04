@@ -37,7 +37,7 @@ Value::Value(const Table& table)
         table.PushToLuaState(L);
         type_ = ValueType::Table;
         auto ref = std::make_shared<RefData>();
-        ref->L = L;
+        ref->L = lua_mainthread(L);
         ref->refId = lua_ref(L, -1);
         data_ = ref;
         lua_pop(L, 1);
@@ -52,7 +52,7 @@ Value::Value(const Coroutine& coroutine)
         lua_pushthread(co);
         type_ = ValueType::Thread;
         auto ref = std::make_shared<RefData>();
-        ref->L = co;
+        ref->L = lua_mainthread(co);
         ref->refId = lua_ref(co, -1);
         data_ = ref;
         lua_pop(co, 1);
@@ -67,7 +67,7 @@ Value::Value(const Buffer& buffer)
         buffer.PushToLuaState(L);
         type_ = ValueType::Buffer;
         auto ref = std::make_shared<RefData>();
-        ref->L = L;
+        ref->L = lua_mainthread(L);
         ref->refId = lua_ref(L, -1);
         data_ = ref;
         lua_pop(L, 1);
@@ -417,7 +417,7 @@ Value Value::FromLuaState(lua_State* L, int index)
                     (type == LUA_TTHREAD) ? ValueType::Thread : 
                     (type == LUA_TBUFFER) ? ValueType::Buffer : ValueType::Userdata;
         auto ref = std::make_shared<RefData>();
-        ref->L = L;
+        ref->L = lua_mainthread(L);
         lua_pushvalue(L, index);
         ref->refId = lua_ref(L, -1);
         lua_pop(L, 1);
