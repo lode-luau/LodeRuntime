@@ -57,8 +57,11 @@ int main(int argc, char* argv[])
     std::string bytecode;
     if (filePath.size() >= 5 && filePath.substr(filePath.size() - 5) == ".luau")
     {
+        // Cached compile: on a cache hit the source is not type-checked again,
+        // so warm runs start near-instantly. Diagnostics are only produced on a
+        // cache miss (first run or when the file changed).
         std::vector<Lode::Diagnostic> diagnostics;
-        bytecode = Lode::Compiler::CompileWithResult(content, diagnostics, nullptr, filePath);
+        bytecode = Lode::Compiler::CompileWithCache(content, filePath, nullptr, &diagnostics);
 
         bool hasErrors = false;
         for (const auto& diag : diagnostics)

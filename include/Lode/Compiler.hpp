@@ -10,6 +10,7 @@
 #include "luacode.h"
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace Lode
 {
@@ -60,13 +61,25 @@ public:
     static std::string GetCacheDirectory();
 
     /** 
-     * @brief Compiles source code with caching based on the file's modification timestamp.
+     * @brief Compiles source code with caching based on a SHA-256 of the content.
+     * 
+     * The cache key is derived from the SHA-256 of the source plus a fingerprint
+     * of the effective compile options (which reflect --!native/@native/--!optimize/
+     * --!debug directives parsed from the source), so editing a module or toggling
+     * its directives invalidates the cache deterministically.
+     * 
+     * On a cache hit the compiled bytecode is returned immediately without any
+     * type checking. On a miss the source is compiled (with diagnostics when
+     * `outDiagnostics` is provided) and the bytecode is stored in the cache.
+     * 
      * @param source The Luau source code.
-     * @param filePath The file path (required for cache hashing and timestamps).
+     * @param filePath The file path (used only for the cache file name).
      * @param options Custom compilation options.
+     * @param outDiagnostics Optional vector to populate with diagnostics when the
+     *        cache misses (skips type checking entirely on cache hits).
      * @return The compiled bytecode string.
      */
-    static std::string CompileWithCache(std::string_view source, std::string_view filePath, const lua_CompileOptions* options = nullptr);
+    static std::string CompileWithCache(std::string_view source, std::string_view filePath, const lua_CompileOptions* options = nullptr, std::vector<Diagnostic>* outDiagnostics = nullptr);
 };
 
 } // namespace Lode
