@@ -73,6 +73,7 @@ int Task::Wait(State& vm, double seconds)
         SafeDestroyTimer(data);
     };
 
+    uv_update_time(loop);
     uint64_t timeout = static_cast<uint64_t>(seconds > 0 ? seconds * 1000.0 : 1);
     uv_timer_start(&timerData->handle, onTimer, timeout, 0);
 
@@ -115,6 +116,7 @@ int Task::SetTimeout(State& vm, const Value& callback, double delayMs, const std
         SafeDestroyTimer(data);
     };
 
+    uv_update_time(loop);
     uint64_t timeout = static_cast<uint64_t>(delayMs > 0 ? delayMs : 1);
     uv_timer_start(&timerData->handle, onTimer, timeout, 0);
 
@@ -166,6 +168,7 @@ int Task::SetInterval(State& vm, const Value& callback, double intervalMs, const
         }
     };
 
+    uv_update_time(loop);
     uint64_t repeat = static_cast<uint64_t>(intervalMs > 0 ? intervalMs : 1);
     uv_timer_start(&timerData->handle, onTimer, repeat, repeat);
 
