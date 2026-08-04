@@ -1,60 +1,40 @@
 # LodeRuntime
 
-A modular runtime environment for executing Luau scripts.
+A fast, modular runtime environment for executing Luau scripts.
 
----
+## RFCs
 
-## Building the Project
+* [01 - Module Resolution](rfcs/01-module-resolution.md)
+* [02 - Luau Configuration Files](rfcs/02-luau-configuration.md)
+* [03 - Native Modules Build System](rfcs/03-native-modules-build.md)
+* [04 - C++ API Core](rfcs/04-cpp-api-core.md)
 
-### Prerequisites
-* [CMake](https://cmake.org/) (3.15 or higher recommended)
-* A C++ compiler (MSVC for Windows, GCC or Clang for Linux)
+## Building
 
----
+### Requirements
+* CMake 3.15+
+* C++20 compatible compiler (MSVC, GCC, or Clang)
 
-### Windows
+### Build Commands
 
-**Debug Build:**
-```bash
-cmake -B build -G "Visual Studio 17 2022"
-cmake --build build --config Debug
-```
-**Release Build:**
-```bash
-cmake -B build -G "Visual Studio 17 2022"
-cmake --build build --config Release
-```
----
-### Linux
-**Debug Build:**
-```bash
-cmake -B build -DCMAKE_BUILD_TYPE=Debug
-cmake --build build
-```
-**Release Build:**
-```bash
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build
-```
----
+    # Windows (Visual Studio)
+    cmake -B build -G "Visual Studio 17 2022"
+    cmake --build build --config Release
+
+    # Linux
+    cmake -B build -DCMAKE_BUILD_TYPE=Release
+    cmake --build build
+
+> Change `--config Release` or `-DCMAKE_BUILD_TYPE=Release` to `Debug` for debug builds.
+
+## Usage
+
+    ./build/bin/Release/lode_runtime path/to/script.luau
 
 ### Running Tests
-To run the test scripts using the Debug binary:
-```bash
-./build/bin/Debug/lode_runtime temp/test.luau
-./build/bin/Debug/lode_runtime temp/testBase.luau
-./build/bin/Debug/lode_runtime temp/testTask.luau
-./build/bin/Debug/lode_runtime temp/test_simd.luau
-./build/bin/Debug/lode_runtime temp/test_native_require.luau
-```
----
 
-### Usage
-Run any Luau script by passing its path as an argument to the executable:
-```bash
-./build/bin/Release/lode_runtime path/to/script.luau
-```
----
+    ./build/bin/Release/lode_runtime temp/test.luau
 
-[License](LICENSE)
+## License
 
+This project is available under the terms of the [MIT License](LICENSE).
