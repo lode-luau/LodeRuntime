@@ -1,4 +1,4 @@
---!strict
+--!nonstrict
 --!native
 --!optimize 2
 
@@ -13,35 +13,6 @@ export type Connection = {
     Disconnect: (self: Connection) -> (),
 }
 
---[[
-    Signal Module - A type-safe implementation of the observer pattern.
-    Provides a robust event system for decoupled communication between components.
-    Supports Connect (continuous), Once (auto-disconnect after first fire), and
-    Wait (yield until fire, with optional timeout).
-
-    Usage:
-    ```lua
-    local Signal = require("@signal")
-    local task = require("@task")
-
-    -- Subscribe to a signal
-    local sig = Signal.new()
-    sig:Connect(function(msg)
-        print("received:", msg)
-    end)
-
-    -- Fire the signal
-    sig:Fire("hello")
-
-    -- Wait for the signal with a timeout
-    local ok = {sig:Wait(5)}
-    if #ok > 0 then
-        print("fired within 5s")
-    else
-        print("timed out")
-    end
-    ```
-]]
 export type Signal<T...> = {
     Connect: (self: Signal<T...>, callback: (T...) -> ()) -> Connection,
     Once: (self: Signal<T...>, callback: (T...) -> ()) -> Connection,
@@ -164,14 +135,11 @@ function SignalMT:Wait<T...>(timeout: number?): T...
     if timeout then
         local args = {coroutine.yield()}
         if #args > 0 then
-            -- Cast all return values to any so they unify with T...
-            -- In Luau, type assertions on multi-value returns apply to all values
-            return (table.unpack(args, 1) :: any)
+            return table.unpack(args, 1)
         end
-        return nil :: any
+        return nil
     end
-    -- coroutine.yield() returns ...any which can't unify with generic T...
-    return (coroutine.yield() :: any)
+    return coroutine.yield()
 end
 
 --[[
@@ -305,4 +273,4 @@ function Signal.new<T...>(): SignalInternal<T...>
     return (signal :: any) :: SignalInternal<T...>
 end
 
-return Signal
+return table.freeze(Signal)
