@@ -112,6 +112,36 @@ Result<std::vector<Value>> Coroutine::Resume(const std::vector<Value>& args)
     return results;
 }
 
+Result<std::vector<Value>> Coroutine::ResumeError(const std::string& errorMsg)
+{
+    if (!refData_ || !refData_->coL)
+    {
+        return Error::Runtime("Coroutine is invalid");
+    }
+
+    lua_State* co = refData_->coL;
+    lua_pushstring(co, errorMsg.c_str());
+
+    int res = lua_resumeerror(co, nullptr);
+    if (res != LUA_OK && res != LUA_YIELD)
+    {
+        std::string errStr = lua_tostring(co, -1);
+        lua_pop(co, 1);
+        return Error::Runtime("Coroutine execution error: " + errStr);
+    }
+
+    int top = lua_gettop(co);
+    std::vector<Value> results;
+    results.reserve(top);
+    for (int i = 1; i <= top; ++i)
+    {
+        results.push_back(Value::FromLuaState(co, i));
+    }
+    lua_pop(co, top);
+
+    return results;
+}
+
 CoroutineStatus Coroutine::GetStatus() const
 {
     if (!refData_ || !refData_->coL) return CoroutineStatus::Dead;

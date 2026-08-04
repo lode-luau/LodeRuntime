@@ -31,6 +31,10 @@ bool StackValue::IsNumber() const { return lua_isnumber(L_, index_); }
 bool StackValue::IsInteger() const { return lua_isnumber(L_, index_); }
 bool StackValue::IsString() const { return lua_isstring(L_, index_); }
 bool StackValue::IsBuffer() const { return lua_type(L_, index_) == LUA_TBUFFER; }
+bool StackValue::IsTable() const { return lua_istable(L_, index_); }
+bool StackValue::IsFunction() const { return lua_isfunction(L_, index_); }
+bool StackValue::IsThread() const { return lua_isthread(L_, index_); }
+bool StackValue::IsUserdata() const { return lua_isuserdata(L_, index_); }
 
 bool StackValue::AsBoolean() const
 {

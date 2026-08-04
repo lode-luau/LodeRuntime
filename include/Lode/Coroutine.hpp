@@ -56,6 +56,13 @@ public:
      */
     Result<std::vector<Value>> Resume(const std::vector<Value>& args = {});
     
+    /** 
+     * @brief Resumes the coroutine by throwing a Luau error natively.
+     * @param errorMsg The error message to throw.
+     * @return Result containing yielded/returned values on success, or an Error.
+     */
+    Result<std::vector<Value>> ResumeError(const std::string& errorMsg);
+    
     /** @brief Queries the current state of the coroutine (e.g., Suspended, Dead). */
     [[nodiscard]] CoroutineStatus GetStatus() const;
     /** @brief Checks if the Coroutine is initialized and holds a valid thread. */

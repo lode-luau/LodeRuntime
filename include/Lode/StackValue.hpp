@@ -43,6 +43,14 @@ public:
     [[nodiscard]] bool IsString() const;
     /** @brief Checks if the value is a Buffer. */
     [[nodiscard]] bool IsBuffer() const;
+    /** @brief Checks if the value is a Table. */
+    [[nodiscard]] bool IsTable() const;
+    /** @brief Checks if the value is a Function. */
+    [[nodiscard]] bool IsFunction() const;
+    /** @brief Checks if the value is a Thread (Coroutine). */
+    [[nodiscard]] bool IsThread() const;
+    /** @brief Checks if the value is Userdata. */
+    [[nodiscard]] bool IsUserdata() const;
 
     /** @brief Fast unsafe cast to boolean. */
     [[nodiscard]] bool AsBoolean() const;
