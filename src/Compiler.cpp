@@ -24,8 +24,8 @@ namespace
     class SimpleFileResolver : public Luau::FileResolver
     {
     public:
-        SimpleFileResolver(std::string_view fileName, std::string_view source)
-            : fileName_(fileName), source_(source)
+        SimpleFileResolver(std::string_view fileName, std::string_view source, Luau::ConfigResolver* configResolver = nullptr)
+            : fileName_(fileName), source_(source), configResolver_(configResolver)
         {}
 
         std::optional<Luau::SourceCode> readSource(const Luau::ModuleName& name) override
@@ -37,11 +37,78 @@ namespace
                 sc.type = Luau::SourceCode::Script;
                 return sc;
             }
+            
+            std::ifstream file(name);
+            if (file.is_open())
+            {
+                std::string contents((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+                Luau::SourceCode sc;
+                sc.source = std::move(contents);
+                sc.type = Luau::SourceCode::Module;
+                return sc;
+            }
+
             return std::nullopt;
         }
 
         std::optional<Luau::ModuleInfo> resolveModule(const Luau::ModuleInfo* context, Luau::AstExpr* expr, const Luau::TypeCheckLimits& limits) override
         {
+            if (Luau::AstExprConstantString* exprString = expr->as<Luau::AstExprConstantString>())
+            {
+                std::string path{exprString->value.data, exprString->value.size};
+                
+                if (!path.empty() && path[0] == '@')
+                {
+                    size_t slashPos = path.find('/', 1);
+                    std::string aliasName = (slashPos != std::string::npos) ? path.substr(1, slashPos - 1) : path.substr(1);
+                    std::string remainder = (slashPos != std::string::npos) ? path.substr(slashPos + 1) : "";
+
+                    if (configResolver_)
+                    {
+                        const Luau::Config& config = configResolver_->getConfig(context->name, limits);
+                        auto it = config.aliases.find(aliasName);
+                        if (it != nullptr)
+                        {
+                            fs::path resolvedPath = fs::path(std::string(it->configLocation)).parent_path() / it->value;
+                            if (!remainder.empty())
+                                resolvedPath /= remainder;
+                            
+                            std::string finalPath = resolvedPath.string();
+                            if (!fs::is_regular_file(finalPath) && fs::is_regular_file(finalPath + ".luau"))
+                                finalPath += ".luau";
+                            else if (fs::is_regular_file(resolvedPath / "init.luau"))
+                                finalPath = (resolvedPath / "init.luau").string();
+
+                            try { finalPath = fs::weakly_canonical(finalPath).string(); } catch(...) {}
+                            return Luau::ModuleInfo{finalPath};
+                        }
+                    }
+                }
+                else
+                {
+                    std::string relPath = path;
+                    if (relPath.rfind("./", 0) == 0)
+                        relPath = relPath.substr(2);
+                    
+                    fs::path ctxPath(context->name);
+                    fs::path dirPath = ctxPath.has_parent_path() ? ctxPath.parent_path() : ctxPath;
+                    if (ctxPath.filename() == "init.luau" || ctxPath.filename() == "init.lua")
+                    {
+                        if (dirPath.has_parent_path())
+                            dirPath = dirPath.parent_path();
+                    }
+                    fs::path resolvedPath = dirPath / relPath;
+                    
+                    std::string finalPath = resolvedPath.string();
+                    if (!fs::is_regular_file(finalPath) && fs::is_regular_file(finalPath + ".luau"))
+                        finalPath += ".luau";
+                    else if (fs::is_regular_file(resolvedPath / "init.luau"))
+                        finalPath = (resolvedPath / "init.luau").string();
+
+                    try { finalPath = fs::weakly_canonical(finalPath).string(); } catch(...) {}
+                    return Luau::ModuleInfo{finalPath};
+                }
+            }
             return std::nullopt;
         }
 
@@ -53,6 +120,7 @@ namespace
     private:
         std::string fileName_;
         std::string source_;
+        Luau::ConfigResolver* configResolver_;
     };
 
     // Reads the entire contents of a file into a string. Returns nullopt on failure.
@@ -281,8 +349,8 @@ std::string Compiler::CompileWithResult(std::string_view source, std::vector<Dia
 
     // explicitMode: mode declared via hotcomment in the script (nullopt = no hotcomment)
     std::optional<Luau::Mode> explicitMode;
-    SimpleFileResolver fileResolver(moduleName, source);
     FileConfigResolver configResolver(source, filePath, explicitMode);
+    SimpleFileResolver fileResolver(moduleName, source, &configResolver);
 
     Luau::FrontendOptions frontendOptions;
     frontendOptions.runLintChecks = true;
@@ -341,7 +409,10 @@ std::string Compiler::CompileWithResult(std::string_view source, std::vector<Dia
         {
             // Syntax errors always block — without valid parse there is no bytecode
             Diagnostic diag;
-            diag.filePath = std::string(filePath);
+            if (!err.moduleName.empty())
+                diag.filePath = err.moduleName;
+            else
+                diag.filePath = std::string(filePath);
             diag.line = err.location.begin.line + 1;
             diag.column = err.location.begin.column + 1;
             diag.length = (err.location.end.column > err.location.begin.column)
@@ -352,13 +423,42 @@ std::string Compiler::CompileWithResult(std::string_view source, std::vector<Dia
             outDiagnostics.push_back(diag);
             hasErrors = true;
         }
-        else if (emitTypeErrors)
+        else
         {
-            Diagnostic diag = Logger::FromTypeError(err, filePath, &fileResolver);
-            diag.isWarning = !isStrictMode; // strict -> blocking error; nonstrict -> non-blocking warning
-            outDiagnostics.push_back(diag);
-            if (isStrictMode)
-                hasErrors = true;
+            Luau::Mode errMode = effectiveMode;
+            Luau::ModuleName modName = err.moduleName.empty() ? std::string(filePath) : err.moduleName;
+            
+            if (!err.moduleName.empty())
+            {
+                if (Luau::SourceModule* sm = frontend.getSourceModule(err.moduleName))
+                {
+                    if (sm->mode.has_value())
+                        errMode = *sm->mode;
+                }
+            }
+
+            bool errIsStrictMode = (errMode == Luau::Mode::Strict);
+            bool errEmitTypeErrors = false;
+            
+            if (errMode == Luau::Mode::NoCheck)
+                errEmitTypeErrors = false;
+            else if (errMode == Luau::Mode::Strict)
+                errEmitTypeErrors = true;
+            else
+            {
+                // Check if the specific module has typeErrors enabled via config
+                const Luau::Config& errConfig = configResolver.getConfig(modName, Luau::TypeCheckLimits{});
+                errEmitTypeErrors = errConfig.typeErrors;
+            }
+
+            if (errEmitTypeErrors)
+            {
+                Diagnostic diag = Logger::FromTypeError(err, filePath, &fileResolver);
+                diag.isWarning = !errIsStrictMode;
+                outDiagnostics.push_back(diag);
+                if (errIsStrictMode)
+                    hasErrors = true;
+            }
         }
     }
 
