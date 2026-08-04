@@ -341,7 +341,7 @@ static void SubmitWork(Lode::State& vm, FsWorkContext* ctx) {
 
 // Wrapper for returning Luau functions that yield or take callbacks
 static Lode::Value CreateAsyncMethod(Lode::State& vmOuter, FsOp op, bool isYield, bool isBuffer = false) {
-    lua_State* mainL = vmOuter.GetLuaState();
+    lua_State* mainL = vmOuter.GetMainThread();
     return vmOuter.CreateFastFunction([op, isYield, isBuffer, mainL](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
         if (args.Size() == 0 || !args[0].IsString()) {
             if (isYield) vm.RaiseError("Expected string path as first argument");
