@@ -93,11 +93,7 @@ static luarequire_NavigateResult reset(lua_State* L, void* ctx, const char* requ
         {
             if (canonicalP.filename() == "init.luau")
             {
-                // For init.luau-based packages, the base directory for relative requires ("./mod")
-                // is the directory that *contains* the package folder, not the package folder itself.
-                // This mirrors Luau's standard package resolution semantics.
                 nav->currentPath = canonicalP.parent_path().parent_path();
-                // packagePath points to the package folder so @self can resolve internal files.
                 nav->packagePath = canonicalP.parent_path();
             }
             else
