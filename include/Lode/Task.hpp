@@ -8,6 +8,7 @@
 #include "Lode/Coroutine.hpp"
 #include <vector>
 #include <functional>
+#include <string>
 
 namespace Lode
 {
@@ -48,6 +49,19 @@ public:
 
     /** @brief Cancels a scheduled task or coroutine. */
     static void Cancel(State& vm, const Value& target);
+
+    /**
+     * @brief Registers the top-level script thread.
+     *
+     * When that thread errors while being resumed from a Wait timer (the script
+     * yielded, so it can only continue inside the event loop), the error is
+     * captured instead of being swallowed as a TaskError so the runtime can
+     * surface it as the script's fatal error.
+     */
+    static void SetMainThread(lua_State* L);
+
+    /** @brief Returns the pending main-script error (cleared after retrieval). */
+    static std::string GetMainThreadError();
 };
 
 } // namespace Lode

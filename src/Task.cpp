@@ -14,6 +14,22 @@ namespace Lode
 
 static std::atomic<int> g_nextTimerId{ 1 };
 
+static lua_State* g_mainThread = nullptr;
+static std::string g_mainThreadError;
+
+void Task::SetMainThread(lua_State* L)
+{
+    g_mainThread = L;
+    g_mainThreadError.clear();
+}
+
+std::string Task::GetMainThreadError()
+{
+    std::string error = g_mainThreadError;
+    g_mainThreadError.clear();
+    return error;
+}
+
 struct TimerData
 {
     int timerId = 0;
@@ -63,10 +79,17 @@ int Task::Wait(State& vm, double seconds)
             auto res = data->coroutine.Resume();
             if (res.IsError())
             {
-                Diagnostic diag;
-                diag.message = "Unhandled exception in Wait timer: " + res.GetError().ErrorMessage();
-                diag.code = "TaskError";
-                Logger::EmitDiagnostic(diag);
+                if (g_mainThread && data->coroutine.GetThreadState() == g_mainThread)
+                {
+                    g_mainThreadError = res.GetError().ErrorMessage();
+                }
+                else
+                {
+                    Diagnostic diag;
+                    diag.message = "Unhandled exception in Wait timer: " + res.GetError().ErrorMessage();
+                    diag.code = "TaskError";
+                    Logger::EmitDiagnostic(diag);
+                }
             }
         }
         uv_timer_stop(handle);
