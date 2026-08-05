@@ -39,6 +39,18 @@ public:
     WritableStream() = default;
     explicit WritableStream(uv_stream_t* s) : stream(s) {}
 
+    void Shutdown() {
+        if (!stream) return;
+        uv_stream_t* closing = stream;
+        stream = nullptr;
+        uv_close(reinterpret_cast<uv_handle_t*>(closing), [](uv_handle_t* handle) {
+            if (handle->type == UV_TTY)
+                delete reinterpret_cast<uv_tty_t*>(handle);
+            else
+                delete reinterpret_cast<uv_pipe_t*>(handle);
+        });
+    }
+
     void writeData(const char* data, size_t len) {
         if (!stream || len == 0) return;
         
@@ -119,7 +131,8 @@ public:
     uv_stream_t* stream = nullptr;
     std::vector<uint8_t> buffer;
     bool reading = false;
-    Lode::State* vmPtr = nullptr;
+    lua_State* mainL = nullptr;
+    bool shuttingDown = false;
 
     struct PendingRead {
         bool isLine = false;
@@ -142,8 +155,29 @@ public:
     ReadableStream() = default;
     explicit ReadableStream(uv_stream_t* s) : stream(s) {}
 
+    void Shutdown() {
+        shuttingDown = true;
+        mainL = nullptr;
+        pendingQueue.clear();
+        buffer.clear();
+        if (stream) {
+            uv_stream_t* closing = stream;
+            stream = nullptr;
+            if (reading) {
+                uv_read_stop(closing);
+                reading = false;
+            }
+            uv_close(reinterpret_cast<uv_handle_t*>(closing), [](uv_handle_t* handle) {
+                if (handle->type == UV_TTY)
+                    delete reinterpret_cast<uv_tty_t*>(handle);
+                else
+                    delete reinterpret_cast<uv_pipe_t*>(handle);
+            });
+        }
+    }
+
     void startReadIfNeeded() {
-        if (!stream || reading) return;
+        if (shuttingDown || !stream || reading) return;
         reading = true;
         stream->data = this;
         uv_read_start(stream, alloc_buffer, [](uv_stream_t* s, ssize_t nread, const uv_buf_t* buf) {
@@ -160,7 +194,7 @@ public:
         });
     }
 
-    bool tryResolve(PendingRead& req, Lode::Value& resultValue, bool eof = false) {
+    bool tryResolve(Lode::State& vm, PendingRead& req, Lode::Value& resultValue, bool eof = false) {
         bool satisfied = false;
         size_t bytesToConsume = 0;
         
@@ -206,7 +240,7 @@ public:
                         resultValue = Lode::Value(0.0);
                     }
                 } else if (req.isBuffer) {
-                    Lode::Value bufVal = vmPtr->CreateBuffer(bytesToConsume);
+                    Lode::Value bufVal = vm.CreateBuffer(bytesToConsume);
                     size_t bSize = 0;
                     void* ptr = bufVal.AsBuffer(&bSize);
                     if (ptr) std::memcpy(ptr, buffer.data(), bytesToConsume);
@@ -217,7 +251,7 @@ public:
                 }
             } else if (satisfied && bytesToConsume == 0) {
                 if (req.isInto) resultValue = Lode::Value(0.0);
-                else if (req.isBuffer) resultValue = vmPtr->CreateBuffer(0);
+                else if (req.isBuffer) resultValue = vm.CreateBuffer(0);
                 else resultValue = Lode::Value(std::string(""));
             }
         }
@@ -229,13 +263,14 @@ public:
     }
 
     void processQueue(bool eof = false) {
-        if (!vmPtr) return;
+        if (shuttingDown || !mainL) return;
+        Lode::State vm(mainL);
         
         while (!pendingQueue.empty()) {
             auto& req = pendingQueue.front();
             Lode::Value resultValue;
             
-            if (tryResolve(req, resultValue, eof)) {
+            if (tryResolve(vm, req, resultValue, eof)) {
                 auto currentReq = req;
                 pendingQueue.pop_front();
                 
@@ -250,7 +285,7 @@ public:
                     if (resultValue.IsString() || resultValue.IsBuffer() || resultValue.IsNumber()) {
                         cbArgs.push_back(resultValue);
                     }
-                    Lode::Task::Spawn(*vmPtr, currentReq.callback, cbArgs);
+                    Lode::Task::Spawn(vm, currentReq.callback, cbArgs);
                 }
             } else {
                 break; // Needs more data from libuv
@@ -269,12 +304,12 @@ public:
     }
 
     Lode::Value read(Lode::State& vm, const std::vector<Lode::Value>& args) {
-        vmPtr = &vm;
+        mainL = vm.GetMainThread();
         PendingRead req;
         req.requestedBytes = (args.size() > 0 && args[0].IsNumber()) ? static_cast<size_t>(args[0].AsNumber()) : 0;
         
         Lode::Value resultValue;
-        if (tryResolve(req, resultValue)) return resultValue;
+        if (tryResolve(vm, req, resultValue)) return resultValue;
         
         req.isYield = true;
         req.coroutine = Lode::Coroutine(vm.GetLuaState());
@@ -284,13 +319,13 @@ public:
     }
     
     Lode::Value readBuffer(Lode::State& vm, const std::vector<Lode::Value>& args) {
-        vmPtr = &vm;
+        mainL = vm.GetMainThread();
         PendingRead req;
         req.isBuffer = true;
         req.requestedBytes = (args.size() > 0 && args[0].IsNumber()) ? static_cast<size_t>(args[0].AsNumber()) : 0;
         
         Lode::Value resultValue;
-        if (tryResolve(req, resultValue)) return resultValue;
+        if (tryResolve(vm, req, resultValue)) return resultValue;
         
         req.isYield = true;
         req.coroutine = Lode::Coroutine(vm.GetLuaState());
@@ -300,12 +335,12 @@ public:
     }
     
     Lode::Value readLine(Lode::State& vm, const std::vector<Lode::Value>& args) {
-        vmPtr = &vm;
+        mainL = vm.GetMainThread();
         PendingRead req;
         req.isLine = true;
         
         Lode::Value resultValue;
-        if (tryResolve(req, resultValue)) return resultValue;
+        if (tryResolve(vm, req, resultValue)) return resultValue;
         
         req.isYield = true;
         req.coroutine = Lode::Coroutine(vm.GetLuaState());
@@ -315,7 +350,7 @@ public:
     }
 
     Lode::Value readInto(Lode::State& vm, const std::vector<Lode::Value>& args) {
-        vmPtr = &vm;
+        mainL = vm.GetMainThread();
         if (args.empty() || !args[0].IsBuffer()) return Lode::Value(0.0);
         
         PendingRead req;
@@ -329,7 +364,7 @@ public:
         req.requestedBytes = (std::min)(length, maxAvailable);
         
         Lode::Value resultValue;
-        if (tryResolve(req, resultValue)) return resultValue;
+        if (tryResolve(vm, req, resultValue)) return resultValue;
         
         req.isYield = true;
         req.coroutine = Lode::Coroutine(vm.GetLuaState());
@@ -339,7 +374,7 @@ public:
     }
 
     Lode::Value readAsync(Lode::State& vm, const std::vector<Lode::Value>& args) {
-        vmPtr = &vm;
+        mainL = vm.GetMainThread();
         if (args.empty() || !args[0].IsFunction()) return Lode::Value();
         
         PendingRead req;
@@ -348,7 +383,7 @@ public:
         req.requestedBytes = (args.size() > 1 && args[1].IsNumber()) ? static_cast<size_t>(args[1].AsNumber()) : 0;
         
         Lode::Value resultValue;
-        if (tryResolve(req, resultValue)) {
+        if (tryResolve(vm, req, resultValue)) {
             std::vector<Lode::Value> cbArgs;
             if (resultValue.IsString() || resultValue.IsBuffer() || resultValue.IsNumber()) cbArgs.push_back(resultValue);
             Lode::Task::Spawn(vm, req.callback, cbArgs);
@@ -360,7 +395,7 @@ public:
     }
 
     Lode::Value readBufferAsync(Lode::State& vm, const std::vector<Lode::Value>& args) {
-        vmPtr = &vm;
+        mainL = vm.GetMainThread();
         if (args.empty() || !args[0].IsFunction()) return Lode::Value();
         
         PendingRead req;
@@ -370,7 +405,7 @@ public:
         req.requestedBytes = (args.size() > 1 && args[1].IsNumber()) ? static_cast<size_t>(args[1].AsNumber()) : 0;
         
         Lode::Value resultValue;
-        if (tryResolve(req, resultValue)) {
+        if (tryResolve(vm, req, resultValue)) {
             std::vector<Lode::Value> cbArgs;
             if (resultValue.IsString() || resultValue.IsBuffer() || resultValue.IsNumber()) cbArgs.push_back(resultValue);
             Lode::Task::Spawn(vm, req.callback, cbArgs);
@@ -382,7 +417,7 @@ public:
     }
 
     Lode::Value readIntoAsync(Lode::State& vm, const std::vector<Lode::Value>& args) {
-        vmPtr = &vm;
+        mainL = vm.GetMainThread();
         if (args.size() < 2 || !args[0].IsBuffer() || !args[1].IsFunction()) return Lode::Value();
         
         PendingRead req;
@@ -398,7 +433,7 @@ public:
         req.requestedBytes = (std::min)(length, maxAvailable);
         
         Lode::Value resultValue;
-        if (tryResolve(req, resultValue)) {
+        if (tryResolve(vm, req, resultValue)) {
             std::vector<Lode::Value> cbArgs;
             if (resultValue.IsString() || resultValue.IsBuffer() || resultValue.IsNumber()) cbArgs.push_back(resultValue);
             Lode::Task::Spawn(vm, req.callback, cbArgs);
@@ -461,6 +496,12 @@ LODE_MODULE(vm)
     auto cppStdin = createRead(0);
     auto cppStdout = createWrite(1);
     auto cppStderr = createWrite(2);
+
+    Lode::Task::RegisterShutdownHook(vm, [cppStdin, cppStdout, cppStderr]() {
+        cppStdin->Shutdown();
+        cppStdout->Shutdown();
+        cppStderr->Shutdown();
+    });
 
     Lode::ClassBuilder<ReadableStream> readableBuilder(vm, "ReadableStream");
     readableBuilder.CustomConstructor([cppStdin](Lode::State&, const std::vector<Lode::Value>&) {
@@ -556,7 +597,7 @@ LODE_MODULE(vm)
             cppStdout->writeData(sv.data(), sv.size());
         }
         
-        cppStdin->vmPtr = &vm;
+        cppStdin->mainL = vm.GetMainThread();
         ReadableStream::PendingRead req;
         req.isYield = true;
         req.coroutine = Lode::Coroutine(vm.GetLuaState());
