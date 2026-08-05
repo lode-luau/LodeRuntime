@@ -148,11 +148,15 @@ struct FsWorkContext {
     bool statIsFile = false;
 };
 
-static void SubmitWork(Lode::State& vm, FsWorkContext* ctx) {
+static bool SubmitWork(Lode::State& vm, FsWorkContext* ctx) {
     uv_loop_t* loop = Lode::EventLoop::Default().GetUVLoop();
+    if (!loop) {
+        delete ctx;
+        return false;
+    }
     ctx->req.data = ctx;
-    
-    uv_queue_work(loop, &ctx->req, [](uv_work_t* req) {
+
+    int queueStatus = uv_queue_work(loop, &ctx->req, [](uv_work_t* req) {
         FsWorkContext* ctx = static_cast<FsWorkContext*>(req->data);
         try {
             if (ctx->op == FsOp::ReadFile) {
@@ -282,6 +286,10 @@ static void SubmitWork(Lode::State& vm, FsWorkContext* ctx) {
         }
     }, [](uv_work_t* req, int status) {
         FsWorkContext* ctx = static_cast<FsWorkContext*>(req->data);
+        if (status != 0) {
+            ctx->success = false;
+            ctx->errorMsg = uv_strerror(status);
+        }
         lua_State* L = ctx->L;
         Lode::State vm(L);
         
@@ -338,6 +346,12 @@ static void SubmitWork(Lode::State& vm, FsWorkContext* ctx) {
         
         delete ctx;
     });
+
+    if (queueStatus != 0) {
+        delete ctx;
+        return false;
+    }
+    return true;
 }
 
 // Wrapper for returning Luau functions that yield or take callbacks
@@ -411,11 +425,16 @@ static Lode::Value CreateAsyncMethod(Lode::State& vmOuter, FsOp op, bool isYield
 
         if (isYield) {
             ctx->coroutine = Lode::Coroutine(vm.GetLuaState());
-            SubmitWork(vm, ctx);
+            if (!SubmitWork(vm, ctx)) {
+                vm.RaiseError("Failed to queue filesystem operation");
+                return Lode::Value();
+            }
             vm.YieldThread();
             return Lode::Value();
         } else {
-            SubmitWork(vm, ctx);
+            if (!SubmitWork(vm, ctx)) {
+                return Lode::Value();
+            }
             return Lode::Value();
         }
     });

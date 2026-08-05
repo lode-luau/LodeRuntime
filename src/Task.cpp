@@ -153,10 +153,16 @@ int Task::Wait(State& vm, double seconds)
     timerData->ctx = ctx;
     timerData->coroutine = Coroutine(vm.GetLuaState());
     timerData->recurring = false;
-    ctx->timers[timerData->timerId] = timerData;
-
     uv_loop_t* loop = EventLoop::Default().GetUVLoop();
-    uv_timer_init(loop, &timerData->handle);
+    int initStatus = loop ? uv_timer_init(loop, &timerData->handle) : UV_EINVAL;
+    if (initStatus != 0)
+    {
+        delete timerData;
+        vm.RaiseError(std::string("Failed to initialize wait timer: ") + uv_strerror(initStatus));
+        return 0;
+    }
+
+    ctx->timers[timerData->timerId] = timerData;
     timerData->handle.data = timerData;
 
     auto onTimer = [](uv_timer_t* handle) {
@@ -188,7 +194,14 @@ int Task::Wait(State& vm, double seconds)
 
     uv_update_time(loop);
     uint64_t timeout = static_cast<uint64_t>(seconds > 0 ? seconds * 1000.0 : 1);
-    uv_timer_start(&timerData->handle, onTimer, timeout, 0);
+    int startStatus = uv_timer_start(&timerData->handle, onTimer, timeout, 0);
+    if (startStatus != 0)
+    {
+        ctx->timers.erase(timerData->timerId);
+        SafeDestroyTimer(timerData);
+        vm.RaiseError(std::string("Failed to start wait timer: ") + uv_strerror(startStatus));
+        return 0;
+    }
 
     return vm.YieldThread();
 }
@@ -207,10 +220,15 @@ int Task::SetTimeout(State& vm, const Value& callback, double delayMs, const std
     timerData->recurring = false;
     timerData->args = args;
 
-    ctx->timers[id] = timerData;
-
     uv_loop_t* loop = EventLoop::Default().GetUVLoop();
-    uv_timer_init(loop, &timerData->handle);
+    int initStatus = loop ? uv_timer_init(loop, &timerData->handle) : UV_EINVAL;
+    if (initStatus != 0)
+    {
+        delete timerData;
+        return -1;
+    }
+
+    ctx->timers[id] = timerData;
     timerData->handle.data = timerData;
 
     auto onTimer = [](uv_timer_t* handle) {
@@ -236,7 +254,13 @@ int Task::SetTimeout(State& vm, const Value& callback, double delayMs, const std
 
     uv_update_time(loop);
     uint64_t timeout = static_cast<uint64_t>(delayMs > 0 ? delayMs : 1);
-    uv_timer_start(&timerData->handle, onTimer, timeout, 0);
+    int startStatus = uv_timer_start(&timerData->handle, onTimer, timeout, 0);
+    if (startStatus != 0)
+    {
+        ctx->timers.erase(id);
+        SafeDestroyTimer(timerData);
+        return -1;
+    }
 
     return id;
 }
@@ -269,10 +293,15 @@ int Task::SetInterval(State& vm, const Value& callback, double intervalMs, const
     timerData->recurring = true;
     timerData->args = args;
 
-    ctx->timers[id] = timerData;
-
     uv_loop_t* loop = EventLoop::Default().GetUVLoop();
-    uv_timer_init(loop, &timerData->handle);
+    int initStatus = loop ? uv_timer_init(loop, &timerData->handle) : UV_EINVAL;
+    if (initStatus != 0)
+    {
+        delete timerData;
+        return -1;
+    }
+
+    ctx->timers[id] = timerData;
     timerData->handle.data = timerData;
 
     auto onTimer = [](uv_timer_t* handle) {
@@ -294,7 +323,13 @@ int Task::SetInterval(State& vm, const Value& callback, double intervalMs, const
 
     uv_update_time(loop);
     uint64_t repeat = static_cast<uint64_t>(intervalMs > 0 ? intervalMs : 1);
-    uv_timer_start(&timerData->handle, onTimer, repeat, repeat);
+    int startStatus = uv_timer_start(&timerData->handle, onTimer, repeat, repeat);
+    if (startStatus != 0)
+    {
+        ctx->timers.erase(id);
+        SafeDestroyTimer(timerData);
+        return -1;
+    }
 
     return id;
 }
