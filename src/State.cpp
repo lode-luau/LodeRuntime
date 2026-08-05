@@ -162,10 +162,11 @@ Result<std::vector<Value>> State::CallFunction(const Value& fn, const std::vecto
 
 void State::AddModulePath(std::string_view path)
 {
-    if (impl_)
-    {
-        impl_->modulePaths.push_back(std::string(path));
-    }
+    if (!impl_) return;
+    impl_->modulePaths.push_back(std::string(path));
+    // Keep the loader's navigation context in sync so require() can actually
+    // fall back to the newly added search directories.
+    UpdateModulePaths(L_, impl_->modulePaths);
 }
 
 void State::SetGlobal(const std::string& name, const Value& value)

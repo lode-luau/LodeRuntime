@@ -373,6 +373,22 @@ static int LoadModuleImpl(lua_State* L, void* ctx, const char* path, const char*
 
     fs::path targetPath(loadname ? loadname : (path ? path : ""));
 
+    // Resolve via the search directories registered through State::AddModulePath
+    // when the module does not exist relative to the requirer. The direct path
+    // always wins: the fallback only runs when check_path_exists fails.
+    if (loaderCtx && !check_path_exists(targetPath))
+    {
+        for (const auto& searchDir : loaderCtx->modulePaths)
+        {
+            fs::path candidate = fs::path(searchDir) / targetPath.filename();
+            if (check_path_exists(candidate))
+            {
+                targetPath = candidate;
+                break;
+            }
+        }
+    }
+
     fs::path dirPath = targetPath;
     if (fs::is_directory(targetPath))
     {
