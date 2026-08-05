@@ -82,11 +82,8 @@ Often, C++ modules distribute helper Luau scripts (`.luau`) inside their package
 Lode::Value factoryFn = vm.Require("@self/utils/formatter");
 
 // 2. Call the loaded function from C++
-// The second argument is a std::vector<Lode::Value> containing the function arguments.
-Lode::Result<std::vector<Lode::Value>> result = vm.CallFunction(factoryFn, { 
-    Lode::Value("Test"), 
-    Lode::Value(123) 
-});
+// Arguments are passed directly and converted to Lode::Value automatically.
+Lode::Result<std::vector<Lode::Value>> result = vm.CallFunction(factoryFn, "Test", 123);
 
 // 3. Handle the result
 if (result.IsOk()) {
