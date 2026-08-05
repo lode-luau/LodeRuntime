@@ -5,6 +5,7 @@
 #include "Lode/Task.hpp"
 #include "ModuleLoader.hpp"
 #include "Registry.hpp"
+#include "LuaError.hpp"
 #include "lua.h"
 #include "lualib.h"
 #include "Luau/Compiler.h"
@@ -73,6 +74,7 @@ State& State::operator=(State&& other) noexcept
     {
         if (ownsState_ && L_)
         {
+            Task::Shutdown(*this);
             lua_close(L_);
         }
         L_ = other.L_;
@@ -118,7 +120,7 @@ Result<int> State::ExecuteBytecodeWithResults(std::string_view bytecode, std::st
     int loadStatus = luau_load(co, nameStr.c_str(), bytecode.data(), bytecode.size(), 0);
     if (loadStatus != LUA_OK)
     {
-        std::string errStr = lua_tostring(co, -1);
+        std::string errStr = LuaErrorMessage(co, -1);
         lua_pop(co, 1);
         lua_unref(L_, coRef);
         return Error::Syntax("Bytecode load failed: " + errStr);
@@ -132,7 +134,7 @@ Result<int> State::ExecuteBytecodeWithResults(std::string_view bytecode, std::st
     int resStatus = lua_resume(co, nullptr, 0);
     if (resStatus != LUA_OK && resStatus != LUA_YIELD)
     {
-        std::string errStr = lua_tostring(co, -1);
+        std::string errStr = LuaErrorMessage(co, -1);
         lua_pop(co, 1);
         lua_unref(L_, coRef);
         return Error::Runtime("Execution failed: " + errStr);
@@ -392,7 +394,7 @@ Result<Value> State::TryRequire(std::string_view moduleName)
     int status = lua_pcall(L_, 1, 1, 0);
     if (status != LUA_OK)
     {
-        std::string errStr = lua_tostring(L_, -1);
+        std::string errStr = LuaErrorMessage(L_, -1);
         lua_pop(L_, 1);
         return Error::Module("Require failed: " + errStr);
     }

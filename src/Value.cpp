@@ -5,6 +5,7 @@
 #include "Lode/Buffer.hpp"
 #include "Lode/State.hpp"
 #include "Lode/Coroutine.hpp"
+#include "LuaError.hpp"
 #include "lua.h"
 #include "lualib.h"
 #include <stdexcept>
@@ -235,7 +236,7 @@ namespace
         int status = lua_pcall(L, static_cast<int>(args.size()), LUA_MULTRET, 0);
         if (status != LUA_OK)
         {
-            std::string errStr = lua_tostring(L, -1);
+            std::string errStr = LuaErrorMessage(L, -1);
             lua_pop(L, 1);
             return Error::Runtime("Function execution failed: " + errStr);
         }
@@ -270,7 +271,7 @@ namespace
         int status = lua_pcall(L, static_cast<int>(args.size()), 1, 0);
         if (status != LUA_OK)
         {
-            std::string errStr = lua_tostring(L, -1);
+            std::string errStr = LuaErrorMessage(L, -1);
             lua_pop(L, 1);
             return Error::Runtime("Function execution failed: " + errStr);
         }

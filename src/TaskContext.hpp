@@ -4,6 +4,8 @@
 
 #include <string>
 #include <unordered_map>
+#include <functional>
+#include <vector>
 
 struct lua_State;
 
@@ -24,6 +26,7 @@ struct TaskContext
     lua_State* mainThread = nullptr;
     std::string mainThreadError;
     std::unordered_map<int, TimerData*> timers;
+    std::vector<std::function<void()>> shutdownHooks;
 
     TaskContext() = default;
     ~TaskContext();

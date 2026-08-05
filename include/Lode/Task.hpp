@@ -71,6 +71,9 @@ public:
      * this automatically) so no timer is left holding a dangling lua_State*.
      */
     static void Shutdown(State& vm);
+
+    /** @brief Registers a State-owned asynchronous resource cleanup callback. */
+    static void RegisterShutdownHook(State& vm, std::function<void()> hook);
 };
 
 } // namespace Lode

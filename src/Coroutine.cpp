@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 #include "Lode/Coroutine.hpp"
 #include "Lode/State.hpp"
+#include "LuaError.hpp"
 #include "lua.h"
 #include "lualib.h"
 #include <stdexcept>
@@ -104,7 +105,7 @@ Result<std::vector<Value>> Coroutine::Resume(const std::vector<Value>& args)
     int res = lua_resume(co, nullptr, static_cast<int>(args.size()));
     if (res != LUA_OK && res != LUA_YIELD)
     {
-        std::string errStr = lua_tostring(co, -1);
+        std::string errStr = LuaErrorMessage(co, -1);
         lua_pop(co, 1);
         return Error::Runtime("Coroutine execution error: " + errStr);
     }
@@ -134,7 +135,7 @@ Result<std::vector<Value>> Coroutine::ResumeError(const std::string& errorMsg)
     int res = lua_resumeerror(co, nullptr);
     if (res != LUA_OK && res != LUA_YIELD)
     {
-        std::string errStr = lua_tostring(co, -1);
+        std::string errStr = LuaErrorMessage(co, -1);
         lua_pop(co, 1);
         return Error::Runtime("Coroutine execution error: " + errStr);
     }
