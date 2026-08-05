@@ -129,6 +129,14 @@ void Task::Shutdown(State& vm)
     }
     ctx->timers.clear();
 
+    auto shutdownHooks = std::move(ctx->shutdownHooks);
+    for (auto& hook : shutdownHooks)
+    {
+        if (hook)
+            hook();
+    }
+    shutdownHooks.clear();
+
     // Destroy the per-State context before the VM is released; the timers (and
     // the Value/Coroutine references they hold) are freed below while the VM is
     // still alive, so lua_unref runs against an open lua_State.
@@ -140,6 +148,14 @@ void Task::Shutdown(State& vm)
     // Flush pending uv_close callbacks so the TimerData heap objects are freed now.
     if (loop)
         uv_run(loop, UV_RUN_NOWAIT);
+}
+
+void Task::RegisterShutdownHook(State& vm, std::function<void()> hook)
+{
+    if (!hook) return;
+    TaskContext* ctx = GetOrCreateContext(vm.GetMainThread());
+    if (ctx)
+        ctx->shutdownHooks.push_back(std::move(hook));
 }
 
 int Task::Wait(State& vm, double seconds)

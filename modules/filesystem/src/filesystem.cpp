@@ -13,6 +13,9 @@
 #include <vector>
 #include <fstream>
 #include <sstream>
+#include <condition_variable>
+#include <mutex>
+#include <chrono>
 #include <cstring>
 
 namespace fs = std::filesystem;
@@ -119,6 +122,14 @@ enum class FsOp {
     ReadFile, ReadToBuffer, WriteFile, AppendFile, Exists, Mkdir, ReadDir, Stat, Rm, CopyFile, Rename, Realpath
 };
 
+struct FsWorkState {
+    std::mutex mutex;
+    std::condition_variable condition;
+    uv_work_t* request = nullptr;
+    bool pending = true;
+    bool shuttingDown = false;
+};
+
 struct FsWorkContext {
     uv_work_t req;
     lua_State* L = nullptr;
@@ -146,7 +157,34 @@ struct FsWorkContext {
     double statCtime = 0;
     bool statIsDirectory = false;
     bool statIsFile = false;
+    std::shared_ptr<FsWorkState> lifecycle;
 };
+
+static void ShutdownWork(const std::shared_ptr<FsWorkState>& lifecycle, uv_loop_t* loop)
+{
+    if (!lifecycle) return;
+
+    {
+        std::lock_guard<std::mutex> lock(lifecycle->mutex);
+        lifecycle->shuttingDown = true;
+        if (lifecycle->request)
+            uv_cancel(reinterpret_cast<uv_req_t*>(lifecycle->request));
+    }
+
+    while (true) {
+        {
+            std::unique_lock<std::mutex> lock(lifecycle->mutex);
+            if (!lifecycle->pending)
+                break;
+        }
+
+        if (loop)
+            uv_run(loop, UV_RUN_NOWAIT);
+
+        std::unique_lock<std::mutex> lock(lifecycle->mutex);
+        lifecycle->condition.wait_for(lock, std::chrono::milliseconds(1));
+    }
+}
 
 static bool SubmitWork(Lode::State& vm, FsWorkContext* ctx) {
     uv_loop_t* loop = Lode::EventLoop::Default().GetUVLoop();
@@ -155,6 +193,9 @@ static bool SubmitWork(Lode::State& vm, FsWorkContext* ctx) {
         return false;
     }
     ctx->req.data = ctx;
+    ctx->lifecycle = std::make_shared<FsWorkState>();
+    ctx->lifecycle->request = &ctx->req;
+    auto lifecycle = ctx->lifecycle;
 
     int queueStatus = uv_queue_work(loop, &ctx->req, [](uv_work_t* req) {
         FsWorkContext* ctx = static_cast<FsWorkContext*>(req->data);
@@ -286,6 +327,18 @@ static bool SubmitWork(Lode::State& vm, FsWorkContext* ctx) {
         }
     }, [](uv_work_t* req, int status) {
         FsWorkContext* ctx = static_cast<FsWorkContext*>(req->data);
+        bool shuttingDown = false;
+        if (ctx->lifecycle) {
+            std::lock_guard<std::mutex> lock(ctx->lifecycle->mutex);
+            shuttingDown = ctx->lifecycle->shuttingDown;
+            ctx->lifecycle->request = nullptr;
+            ctx->lifecycle->pending = false;
+            ctx->lifecycle->condition.notify_all();
+        }
+        if (shuttingDown) {
+            delete ctx;
+            return;
+        }
         if (status != 0) {
             ctx->success = false;
             ctx->errorMsg = uv_strerror(status);
@@ -351,6 +404,10 @@ static bool SubmitWork(Lode::State& vm, FsWorkContext* ctx) {
         delete ctx;
         return false;
     }
+
+    Lode::Task::RegisterShutdownHook(vm, [lifecycle, loop]() {
+        ShutdownWork(lifecycle, loop);
+    });
     return true;
 }
 
