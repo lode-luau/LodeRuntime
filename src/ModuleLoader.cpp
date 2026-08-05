@@ -28,8 +28,11 @@ fs::path FindLodeJson(const fs::path& startPath)
     fs::path current = startPath;
     if (fs::is_regular_file(current))
         current = current.parent_path();
-        
-    while (current.has_parent_path())
+
+    // Walk up to the filesystem root looking for a package marker. MSVC reports
+    // has_parent_path() == true for a drive root and parent_path() == itself, so
+    // terminate when we would stop making progress instead of looping forever.
+    while (current.has_parent_path() && current.parent_path() != current)
     {
         if (fs::exists(current / "lode.json") || fs::exists(current / "init.luau"))
             return current;
