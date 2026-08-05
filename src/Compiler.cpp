@@ -647,12 +647,14 @@ std::string Compiler::CompileWithCache(std::string_view source, std::string_view
 
     struct CacheHeader
     {
-        char magic[4];          // "LODE"
-        uint8_t contentHash[32]; // SHA-256 do source (validação extra)
-        uint32_t size;          // Tamanho do bytecode
+        char magic[4];          // "LODE" file marker
+        uint8_t contentHash[32]; // SHA-256 of the source (extra validation)
+        uint32_t size;          // Bytecode size
     };
 
-    // Tentar ler do cache (o nome do arquivo já codifica o hash do conteúdo)
+    // Try reading from the cache first. The filename already encodes the content
+    // hash and options fingerprint, and the header below revalidates it, so a
+    // stale or corrupt entry falls through to a fresh compile instead of running.
     if (fs::exists(cachePath))
     {
         std::ifstream cacheFile(cachePath, std::ios::binary);
@@ -684,7 +686,8 @@ std::string Compiler::CompileWithCache(std::string_view source, std::string_view
         return "";
     }
 
-    // Não grava cache para bytecodes de erro (bytecode[0] == 0)
+    // Do not cache error bytecodes: luau_compile emits a leading null byte to
+    // signal a failed compile, so those must be re-validated on every run.
     if (compiledBytecode[0] != 0)
     {
         std::ofstream cacheOut(cachePath, std::ios::binary);
