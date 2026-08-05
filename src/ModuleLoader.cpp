@@ -366,8 +366,10 @@ static int LoadModuleImpl(lua_State* L, void* ctx, const char* path, const char*
 {
     State vm(L);
     LodeNavigationContext* loaderCtx = static_cast<LodeNavigationContext*>(ctx);
-    std::string rawPathStr(path ? path : "");
-    std::string loadNameStr(loadname ? loadname : "");
+    try
+    {
+        std::string rawPathStr(path ? path : "");
+        std::string loadNameStr(loadname ? loadname : "");
 
     // 1. Check for Static Module Registration (Production Bundling / iOS / App Store Sandbox)
     if (loaderCtx && loaderCtx->registry)
@@ -443,9 +445,18 @@ static int LoadModuleImpl(lua_State* L, void* ctx, const char* path, const char*
             std::string platform = std::string(Platform::GetOSName());
             std::string arch = std::string(Platform::GetArchitectureName());
 
-            if (jsonDoc["libraries"].contains(platform) && jsonDoc["libraries"][platform].contains(arch))
+            if (jsonDoc["libraries"].contains(platform) &&
+                jsonDoc["libraries"][platform].is_object() &&
+                jsonDoc["libraries"][platform].contains(arch))
             {
-                std::string relLibPath = jsonDoc["libraries"][platform][arch];
+                const auto& libraryEntry = jsonDoc["libraries"][platform][arch];
+                if (!libraryEntry.is_string())
+                {
+                    vm.RaiseError("Invalid library path in lode.json: expected a string");
+                    return 0;
+                }
+
+                std::string relLibPath = libraryEntry.get<std::string>();
                 fs::path fullLibPath = dirPath / relLibPath;
 
                 // Prefer the module binary next to the executable: the build drops a
@@ -550,7 +561,18 @@ static int LoadModuleImpl(lua_State* L, void* ctx, const char* path, const char*
         return 0;
     }
 
-    return execResult.GetValue();
+        return execResult.GetValue();
+    }
+    catch (const std::exception& e)
+    {
+        vm.RaiseError(std::string("Module loading failed: ") + e.what());
+        return 0;
+    }
+    catch (...)
+    {
+        vm.RaiseError("Module loading failed with an unknown exception");
+        return 0;
+    }
 }
 
 std::string GetCallerChunkName(lua_State* L)
