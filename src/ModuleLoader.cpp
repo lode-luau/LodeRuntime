@@ -548,7 +548,7 @@ static int MultiReturnLodeRequire(lua_State* L)
 
     const char* pathStr = luaL_checkstring(L, 1);
     luarequire_Configuration* config = static_cast<luarequire_Configuration*>(lua_touserdata(L, lua_upvalueindex(1)));
-    void* ctx = lua_tolightuserdata(L, lua_upvalueindex(2));
+    void* ctx = lua_touserdata(L, lua_upvalueindex(2));
 
     // Reset navigation to requirer context
     if (config->reset(L, ctx, requirerChunkname) != NAVIGATE_SUCCESS)
@@ -666,9 +666,29 @@ static int MultiReturnLodeRequire(lua_State* L)
 
 void SetupModuleLoader(lua_State* L, NativeModuleRegistry* registry, const std::vector<std::string>& modulePaths)
 {
-    static LodeNavigationContext ctx;
-    ctx.registry = registry;
-    ctx.modulePaths = modulePaths;
+    // Per-State navigation context. Owned by a GC-tracked full userdata so its
+    // std::vectors are destroyed when the VM is collected. It is also referenced
+    // from the registry so UpdateModulePaths can reach it and the require closure
+    // can safely hold it as an upvalue for the whole State lifetime.
+    auto* ctxMem = static_cast<LodeNavigationContext*>(lua_newuserdata(L, sizeof(LodeNavigationContext)));
+    auto* ctx = new (ctxMem) LodeNavigationContext();
+    ctx->registry = registry;
+    ctx->modulePaths = modulePaths;
+
+    lua_newtable(L);
+    lua_pushcfunction(L, [](lua_State* L) -> int {
+        auto* c = static_cast<LodeNavigationContext*>(lua_touserdata(L, 1));
+        if (c) c->~LodeNavigationContext();
+        return 0;
+    }, "__gc");
+    lua_setfield(L, -2, "__gc");
+    lua_setmetatable(L, -2);
+
+    // Keep a registry reference so the context lives as long as the State and is
+    // reachable by UpdateModulePaths. The registry is per-lua_State, so two State
+    // instances no longer share (and clobber) a single navigation context.
+    lua_pushvalue(L, -1);
+    lua_setfield(L, LUA_REGISTRYINDEX, "_LODE_NAVIGATION_CTX");
 
     void* ud = (lua_newuserdata(L, sizeof(luarequire_Configuration)));
     luarequire_Configuration* config = new (ud) luarequire_Configuration{};
@@ -686,9 +706,21 @@ void SetupModuleLoader(lua_State* L, NativeModuleRegistry* registry, const std::
     config->get_config = get_config;
     config->load = LoadModuleImpl;
 
-    lua_pushlightuserdata(L, &ctx);
+    // The context userdata is at -2 (upvalue 2), the config userdata at -1 (upvalue 1).
+    lua_pushvalue(L, -2);
     lua_pushcclosure(L, MultiReturnLodeRequire, "require", 2);
     lua_setglobal(L, "require");
+    lua_pop(L, 1); // pop the original context userdata
+}
+
+void UpdateModulePaths(lua_State* L, const std::vector<std::string>& modulePaths)
+{
+    lua_getfield(L, LUA_REGISTRYINDEX, "_LODE_NAVIGATION_CTX");
+    if (auto* ctx = static_cast<LodeNavigationContext*>(lua_touserdata(L, -1)))
+    {
+        ctx->modulePaths = modulePaths;
+    }
+    lua_pop(L, 1);
 }
 
 } // namespace Lode
