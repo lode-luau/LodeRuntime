@@ -15,6 +15,7 @@
 #include <vector>
 #include <memory>
 #include <functional>
+#include <utility>
 
 struct lua_State;
 
@@ -76,10 +77,15 @@ public:
     /**
      * @brief Calls a Luau function safely.
      * @param fn The Luau function to call.
-     * @param args The arguments to pass.
-     * @return Result containing the returned Values.
+     * @param args Arguments to pass; each is converted to a Value. A std::vector<Value>
+     *             passed as a single argument is spread as multiple arguments.
+     * @return Result containing all returned Values.
      */
-    Result<std::vector<Value>> CallFunction(const Value& fn, const std::vector<Value>& args = {});
+    template <typename... Args>
+    Result<std::vector<Value>> CallFunction(const Value& fn, Args&&... args)
+    {
+        return fn.Call(*this, std::forward<Args>(args)...);
+    }
 
     void AddModulePath(std::string_view path);
 

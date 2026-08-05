@@ -211,174 +211,102 @@ Result<Buffer> Value::TryAsBufferObj() const
     return Error::Type("Value is not a buffer");
 }
 
-Result<std::vector<Value>> Value::Call(State& vm, const std::vector<Value>& args) const
+namespace
 {
-    lua_State* L = vm.GetLuaState();
-    if (!L || type_ != ValueType::Function)
+    // Shared multi-return call core: pushes the function and its arguments, runs
+    // lua_pcall with LUA_MULTRET, and collects every returned Value.
+    Result<std::vector<Value>> CallMultiReturn(lua_State* L, const Value& fn, const std::vector<Value>& args)
     {
-        return Error::Type("Value is not callable");
+        if (!L || fn.GetType() != ValueType::Function)
+        {
+            return Error::Type("Value is not callable");
+        }
+
+        // Record the stack top before pushing anything so we can calculate how many
+        // values the function actually returned after lua_pcall with LUA_MULTRET.
+        int topBefore = lua_gettop(L);
+
+        fn.PushToLuaState(L);
+        for (const auto& arg : args)
+        {
+            arg.PushToLuaState(L);
+        }
+
+        int status = lua_pcall(L, static_cast<int>(args.size()), LUA_MULTRET, 0);
+        if (status != LUA_OK)
+        {
+            std::string errStr = lua_tostring(L, -1);
+            lua_pop(L, 1);
+            return Error::Runtime("Function execution failed: " + errStr);
+        }
+
+        // Collect only the values that the function pushed onto the stack.
+        int nresults = lua_gettop(L) - topBefore;
+        std::vector<Value> results;
+        results.reserve(nresults);
+        for (int i = topBefore + 1; i <= topBefore + nresults; ++i)
+        {
+            results.push_back(Value::FromLuaState(L, i));
+        }
+        lua_pop(L, nresults);
+        return results;
     }
 
-    // Record the stack top before pushing anything so we can calculate how many
-    // values the function actually returned after lua_pcall with LUA_MULTRET.
-    int topBefore = lua_gettop(L);
-
-    PushToLuaState(L);
-    for (const auto& arg : args)
+    // Shared single-return call core: pushes the function and its arguments, runs
+    // lua_pcall expecting one result, and returns the first returned Value.
+    Result<Value> CallSingleReturn(lua_State* L, const Value& fn, const std::vector<Value>& args)
     {
-        arg.PushToLuaState(L);
-    }
+        if (!L || fn.GetType() != ValueType::Function)
+        {
+            return Error::Type("Value is not callable");
+        }
 
-    int status = lua_pcall(L, static_cast<int>(args.size()), LUA_MULTRET, 0);
-    if (status != LUA_OK)
-    {
-        std::string errStr = lua_tostring(L, -1);
+        fn.PushToLuaState(L);
+        for (const auto& arg : args)
+        {
+            arg.PushToLuaState(L);
+        }
+
+        int status = lua_pcall(L, static_cast<int>(args.size()), 1, 0);
+        if (status != LUA_OK)
+        {
+            std::string errStr = lua_tostring(L, -1);
+            lua_pop(L, 1);
+            return Error::Runtime("Function execution failed: " + errStr);
+        }
+        Value result = Value::FromLuaState(L, -1);
         lua_pop(L, 1);
-        return Error::Runtime("Function execution failed: " + errStr);
+        return result;
     }
+} // namespace
 
-    // Collect only the values that the function pushed onto the stack.
-    int nresults = lua_gettop(L) - topBefore;
-    std::vector<Value> results;
-    results.reserve(nresults);
-    for (int i = topBefore + 1; i <= topBefore + nresults; ++i)
-    {
-        results.push_back(Value::FromLuaState(L, i));
-    }
-    lua_pop(L, nresults);
-    return results;
-}
-
-Result<std::vector<Value>> Value::Call(const std::vector<Value>& args) const
+lua_State* Value::GetCapturedState() const
 {
-    lua_State* L = nullptr;
     if (auto* ref = std::get_if<std::shared_ptr<RefData>>(&data_))
     {
-        if (*ref) L = (*ref)->L;
+        if (*ref) return (*ref)->L;
     }
-    if (!L || type_ != ValueType::Function)
-    {
-        return Error::Type("Value is not callable");
-    }
-
-    // Record the stack top before pushing anything so we can calculate how many
-    // values the function actually returned after lua_pcall with LUA_MULTRET.
-    int topBefore = lua_gettop(L);
-
-    PushToLuaState(L);
-    for (const auto& arg : args)
-    {
-        arg.PushToLuaState(L);
-    }
-
-    int status = lua_pcall(L, static_cast<int>(args.size()), LUA_MULTRET, 0);
-    if (status != LUA_OK)
-    {
-        std::string errStr = lua_tostring(L, -1);
-        lua_pop(L, 1);
-        return Error::Runtime("Function execution failed: " + errStr);
-    }
-
-    // Collect only the values that the function pushed onto the stack.
-    int nresults = lua_gettop(L) - topBefore;
-    std::vector<Value> results;
-    results.reserve(nresults);
-    for (int i = topBefore + 1; i <= topBefore + nresults; ++i)
-    {
-        results.push_back(Value::FromLuaState(L, i));
-    }
-    lua_pop(L, nresults);
-    return results;
+    return nullptr;
 }
 
-Result<Value> Value::CallSingle() const
+Result<std::vector<Value>> Value::CallArgs(State& vm, std::vector<Value> args) const
 {
-    lua_State* L = nullptr;
-    if (auto* ref = std::get_if<std::shared_ptr<RefData>>(&data_))
-    {
-        if (*ref) L = (*ref)->L;
-    }
-    if (!L || type_ != ValueType::Function) return Error::Type("Value is not callable");
-
-    PushToLuaState(L);
-    if (lua_pcall(L, 0, 1, 0) != LUA_OK)
-    {
-        std::string errStr = lua_tostring(L, -1);
-        lua_pop(L, 1);
-        return Error::Runtime("Function execution failed: " + errStr);
-    }
-    Value result = Value::FromLuaState(L, -1);
-    lua_pop(L, 1);
-    return result;
+    return CallMultiReturn(vm.GetLuaState(), *this, args);
 }
 
-Result<Value> Value::CallSingle(const Value& arg1) const
+Result<std::vector<Value>> Value::CallArgs(std::vector<Value> args) const
 {
-    lua_State* L = nullptr;
-    if (auto* ref = std::get_if<std::shared_ptr<RefData>>(&data_))
-    {
-        if (*ref) L = (*ref)->L;
-    }
-    if (!L || type_ != ValueType::Function) return Error::Type("Value is not callable");
-
-    PushToLuaState(L);
-    arg1.PushToLuaState(L);
-    if (lua_pcall(L, 1, 1, 0) != LUA_OK)
-    {
-        std::string errStr = lua_tostring(L, -1);
-        lua_pop(L, 1);
-        return Error::Runtime("Function execution failed: " + errStr);
-    }
-    Value result = Value::FromLuaState(L, -1);
-    lua_pop(L, 1);
-    return result;
+    return CallMultiReturn(GetCapturedState(), *this, args);
 }
 
-Result<Value> Value::CallSingle(const Value& arg1, const Value& arg2) const
+Result<Value> Value::CallSingleArgs(State& vm, std::vector<Value> args) const
 {
-    lua_State* L = nullptr;
-    if (auto* ref = std::get_if<std::shared_ptr<RefData>>(&data_))
-    {
-        if (*ref) L = (*ref)->L;
-    }
-    if (!L || type_ != ValueType::Function) return Error::Type("Value is not callable");
-
-    PushToLuaState(L);
-    arg1.PushToLuaState(L);
-    arg2.PushToLuaState(L);
-    if (lua_pcall(L, 2, 1, 0) != LUA_OK)
-    {
-        std::string errStr = lua_tostring(L, -1);
-        lua_pop(L, 1);
-        return Error::Runtime("Function execution failed: " + errStr);
-    }
-    Value result = Value::FromLuaState(L, -1);
-    lua_pop(L, 1);
-    return result;
+    return CallSingleReturn(vm.GetLuaState(), *this, args);
 }
 
-Result<Value> Value::CallSingle(const Value& arg1, const Value& arg2, const Value& arg3) const
+Result<Value> Value::CallSingleArgs(std::vector<Value> args) const
 {
-    lua_State* L = nullptr;
-    if (auto* ref = std::get_if<std::shared_ptr<RefData>>(&data_))
-    {
-        if (*ref) L = (*ref)->L;
-    }
-    if (!L || type_ != ValueType::Function) return Error::Type("Value is not callable");
-
-    PushToLuaState(L);
-    arg1.PushToLuaState(L);
-    arg2.PushToLuaState(L);
-    arg3.PushToLuaState(L);
-    if (lua_pcall(L, 3, 1, 0) != LUA_OK)
-    {
-        std::string errStr = lua_tostring(L, -1);
-        lua_pop(L, 1);
-        return Error::Runtime("Function execution failed: " + errStr);
-    }
-    Value result = Value::FromLuaState(L, -1);
-    lua_pop(L, 1);
-    return result;
+    return CallSingleReturn(GetCapturedState(), *this, args);
 }
 
 Value Value::FromLuaState(lua_State* L, int index)
