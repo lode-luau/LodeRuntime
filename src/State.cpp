@@ -11,6 +11,8 @@
 #include "Luau/CodeGen.h"
 #include <stdexcept>
 #include <iostream>
+#include <cmath>
+#include <cstdint>
 
 namespace Lode
 {
@@ -429,7 +431,14 @@ void State::PushTable(const Table& table) { if (L_) table.PushToLuaState(L_); }
 bool State::IsNil(int index) const { return L_ ? (lua_isnil(L_, index) != 0) : false; }
 bool State::IsBoolean(int index) const { return L_ ? (lua_isboolean(L_, index) != 0) : false; }
 bool State::IsNumber(int index) const { return L_ ? (lua_isnumber(L_, index) != 0) : false; }
-bool State::IsInteger(int index) const { return L_ ? (lua_type(L_, index) == LUA_TINTEGER) : false; }
+bool State::IsInteger(int index) const
+{
+    if (!L_) return false;
+    if (lua_type(L_, index) == LUA_TINTEGER) return true;
+    if (!lua_isnumber(L_, index)) return false;
+    double d = lua_tonumber(L_, index);
+    return std::isfinite(d) && d == std::trunc(d) && std::fabs(d) <= static_cast<double>(INT64_MAX);
+}
 bool State::IsString(int index) const { return L_ ? (lua_isstring(L_, index) != 0) : false; }
 bool State::IsTable(int index) const { return L_ ? (lua_istable(L_, index) != 0) : false; }
 bool State::IsFunction(int index) const { return L_ ? (lua_isfunction(L_, index) != 0) : false; }
