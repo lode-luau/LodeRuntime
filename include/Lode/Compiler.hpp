@@ -60,13 +60,26 @@ public:
      */
     static std::string GetCacheDirectory();
 
+    /**
+     * @brief Evicts cache entries older than `ttlDays` days.
+     *
+     * The cache lives in the OS temp dir and is otherwise never cleaned, so this
+     * bounds its growth. Safe to call repeatedly; the prune runs at most once per
+     * process (it is also invoked automatically when the cache is first touched).
+     * @param ttlDays Maximum age of a cache entry in days (default 30).
+     */
+    static void PruneCache(int ttlDays = 30);
+
     /** 
      * @brief Compiles source code with caching based on a SHA-256 of the content.
      * 
-     * The cache key is derived from the SHA-256 of the source plus a fingerprint
+     * The cache key is derived from the SHA-256 of the source plus fingerprints
      * of the effective compile options (which reflect --!native/@native/--!optimize/
-     * --!debug directives parsed from the source), so editing a module or toggling
-     * its directives invalidates the cache deterministically.
+     * --!debug directives parsed from the source) and the resolved Luau config
+     * (.luaurc / .config.luau: typeErrors, mode, lints...). The Luau bytecode
+     * version is also included. Editing a module, toggling its directives,
+     * changing its config, or upgrading the vendored Luau all invalidate the
+     * cache, so diagnostics always reflect the effective config.
      * 
      * On a cache hit the compiled bytecode is returned immediately without any
      * type checking. On a miss the source is compiled (with diagnostics when
