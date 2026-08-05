@@ -162,11 +162,6 @@ Result<Value> State::ProtectedCall(std::string_view bytecode, std::string_view c
     return Value();
 }
 
-Result<std::vector<Value>> State::CallFunction(const Value& fn, const std::vector<Value>& args)
-{
-    return fn.Call(*this, args);
-}
-
 void State::AddModulePath(std::string_view path)
 {
     if (!impl_) return;

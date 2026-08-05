@@ -11,6 +11,8 @@
 #include <variant>
 #include <span>
 #include <cstdint>
+#include <utility>
+#include <type_traits>
 
 struct lua_State;
 
@@ -142,26 +144,38 @@ public:
     /**
      * @brief Calls the value if it's a function, explicitly providing a State.
      * @param vm The state to execute in.
-     * @param args The arguments to pass.
-     * @return Result containing a vector of returned Values.
+     * @param args Arguments to pass; each is converted to a Value. A std::vector<Value>
+     *             passed as a single argument is spread as multiple arguments.
+     * @return Result containing all returned Values.
      */
-    Result<std::vector<Value>> Call(State& vm, const std::vector<Value>& args = {}) const;
-    
+    template <typename... Args>
+    Result<std::vector<Value>> Call(State& vm, Args&&... args) const;
+
     /**
      * @brief Calls the value if it's a function using its captured State.
-     * @param args The arguments to pass.
-     * @return Result containing a vector of returned Values.
+     * @param args Arguments to pass; each is converted to a Value. A std::vector<Value>
+     *             passed as a single argument is spread as multiple arguments.
+     * @return Result containing all returned Values.
      */
-    Result<std::vector<Value>> Call(const std::vector<Value>& args = {}) const;
+    template <typename... Args>
+    Result<std::vector<Value>> Call(Args&&... args) const;
 
-    /** @brief Fast zero-allocation call overload (Returns single Value). */
-    Result<Value> CallSingle() const;
-    /** @brief Fast zero-allocation call overload (Returns single Value) with 1 argument. */
-    Result<Value> CallSingle(const Value& arg1) const;
-    /** @brief Fast zero-allocation call overload (Returns single Value) with 2 arguments. */
-    Result<Value> CallSingle(const Value& arg1, const Value& arg2) const;
-    /** @brief Fast zero-allocation call overload (Returns single Value) with 3 arguments. */
-    Result<Value> CallSingle(const Value& arg1, const Value& arg2, const Value& arg3) const;
+    /**
+     * @brief Calls the value and returns only the first result.
+     * @param vm The state to execute in.
+     * @param args Arguments to pass; each is converted to a Value.
+     * @return Result containing the first returned Value (Nil if the function returns none).
+     */
+    template <typename... Args>
+    Result<Value> CallSingle(State& vm, Args&&... args) const;
+
+    /**
+     * @brief Calls the value and returns only the first result, using its captured State.
+     * @param args Arguments to pass; each is converted to a Value.
+     * @return Result containing the first returned Value (Nil if the function returns none).
+     */
+    template <typename... Args>
+    Result<Value> CallSingle(Args&&... args) const;
 
 
     // Internal creation for Luau stack values
@@ -169,6 +183,15 @@ public:
     void PushToLuaState(lua_State* L) const;
 
 private:
+    // Shared implementation used by the Call/CallSingle templates.
+    Result<std::vector<Value>> CallArgs(State& vm, std::vector<Value> args) const;
+    Result<std::vector<Value>> CallArgs(std::vector<Value> args) const;
+    Result<Value> CallSingleArgs(State& vm, std::vector<Value> args) const;
+    Result<Value> CallSingleArgs(std::vector<Value> args) const;
+
+    // Returns the lua_State* pinned by this value's reference, or nullptr.
+    lua_State* GetCapturedState() const;
+
     struct RefData
     {
         lua_State* L = nullptr;
@@ -179,5 +202,62 @@ private:
     ValueType type_ = ValueType::Nil;
     std::variant<std::monostate, bool, double, int, std::string, void*, std::shared_ptr<RefData>> data_;
 };
+
+namespace Detail
+{
+    // Appends arguments to the call vector. A std::vector<Value> passed as a single
+    // argument is spread as multiple arguments, so callers that already hold the
+    // argument list as a vector (e.g. State::CallFunction forwarding a vector) keep
+    // working without wrapping it.
+    inline void AppendArgs(std::vector<Value>&) {}
+
+    template <typename T, typename... Rest>
+    void AppendArgs(std::vector<Value>& out, T&& arg, Rest&&... rest)
+    {
+        if constexpr (std::is_same_v<std::decay_t<T>, std::vector<Value>>)
+        {
+            out.insert(out.end(), arg.begin(), arg.end());
+        }
+        else
+        {
+            out.emplace_back(std::forward<T>(arg));
+        }
+        AppendArgs(out, std::forward<Rest>(rest)...);
+    }
+
+    // Collects the call arguments into a vector, converting each one to a Value.
+    template <typename... Args>
+    std::vector<Value> MakeArgs(Args&&... args)
+    {
+        std::vector<Value> out;
+        out.reserve(sizeof...(Args));
+        AppendArgs(out, std::forward<Args>(args)...);
+        return out;
+    }
+} // namespace Detail
+
+template <typename... Args>
+Result<std::vector<Value>> Value::Call(State& vm, Args&&... args) const
+{
+    return CallArgs(vm, Detail::MakeArgs(std::forward<Args>(args)...));
+}
+
+template <typename... Args>
+Result<std::vector<Value>> Value::Call(Args&&... args) const
+{
+    return CallArgs(Detail::MakeArgs(std::forward<Args>(args)...));
+}
+
+template <typename... Args>
+Result<Value> Value::CallSingle(State& vm, Args&&... args) const
+{
+    return CallSingleArgs(vm, Detail::MakeArgs(std::forward<Args>(args)...));
+}
+
+template <typename... Args>
+Result<Value> Value::CallSingle(Args&&... args) const
+{
+    return CallSingleArgs(Detail::MakeArgs(std::forward<Args>(args)...));
+}
 
 } // namespace Lode

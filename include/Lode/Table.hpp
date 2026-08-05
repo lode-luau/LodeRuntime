@@ -9,6 +9,7 @@
 #include <string>
 #include <memory>
 #include <vector>
+#include <utility>
 
 struct lua_State;
 
@@ -64,36 +65,91 @@ public:
     /** 
      * @brief Calls a function stored in this table (like table.funcName(args)) 
      * @param vm The state to execute in.
+     * @param funcName The function field to call.
+     * @param args Arguments to pass; each is converted to a Value. A std::vector<Value>
+     *             passed as a single argument is spread as multiple arguments.
+     * @return Result containing all returned Values.
      */
-    Result<std::vector<Value>> CallFunction(State& vm, const std::string& funcName, const std::vector<Value>& args = {}) const;
+    template <typename... Args>
+    Result<std::vector<Value>> CallFunction(State& vm, const std::string& funcName, Args&&... args) const
+    {
+        auto fnRes = Get(funcName);
+        if (fnRes.IsError()) return fnRes.GetError();
+        return fnRes.GetValue().Call(vm, std::forward<Args>(args)...);
+    }
+
     /** @brief Calls a function stored in this table using its captured State. */
-    Result<std::vector<Value>> CallFunction(const std::string& funcName, const std::vector<Value>& args = {}) const;
+    template <typename... Args>
+    Result<std::vector<Value>> CallFunction(const std::string& funcName, Args&&... args) const
+    {
+        auto fnRes = Get(funcName);
+        if (fnRes.IsError()) return fnRes.GetError();
+        return fnRes.GetValue().Call(std::forward<Args>(args)...);
+    }
 
     /** 
      * @brief Calls a method stored in this table (like table:methodName(args)), injecting 'self' automatically. 
      * @param vm The state to execute in.
+     * @param methodName The method field to call.
+     * @param args Arguments to pass after the injected self; each is converted to a Value.
+     * @return Result containing all returned Values.
      */
-    Result<std::vector<Value>> CallMethod(State& vm, const std::string& methodName, const std::vector<Value>& args = {}) const;
-    /** @brief Calls a method stored in this table using its captured State. */
-    Result<std::vector<Value>> CallMethod(const std::string& methodName, const std::vector<Value>& args = {}) const;
+    template <typename... Args>
+    Result<std::vector<Value>> CallMethod(State& vm, const std::string& methodName, Args&&... args) const
+    {
+        return CallFunction(vm, methodName, Value(*this), std::forward<Args>(args)...);
+    }
 
-    /** @brief Fast zero-allocation static function call overload (Returns single Value). */
-    Result<Value> CallFunctionSingle(const std::string& funcName) const;
-    /** @brief Fast zero-allocation static function call overload (Returns single Value) with 1 argument. */
-    Result<Value> CallFunctionSingle(const std::string& funcName, const Value& arg1) const;
-    /** @brief Fast zero-allocation static function call overload (Returns single Value) with 2 arguments. */
-    Result<Value> CallFunctionSingle(const std::string& funcName, const Value& arg1, const Value& arg2) const;
-    /** @brief Fast zero-allocation static function call overload (Returns single Value) with 3 arguments. */
-    Result<Value> CallFunctionSingle(const std::string& funcName, const Value& arg1, const Value& arg2, const Value& arg3) const;
+    /** @brief Calls a method stored in this table using its captured State, injecting 'self' automatically. */
+    template <typename... Args>
+    Result<std::vector<Value>> CallMethod(const std::string& methodName, Args&&... args) const
+    {
+        return CallFunction(methodName, Value(*this), std::forward<Args>(args)...);
+    }
 
-    /** @brief Fast zero-allocation method call overload (Returns single Value). */
-    Result<Value> CallMethodSingle(const std::string& methodName) const;
-    /** @brief Fast zero-allocation method call overload (Returns single Value) with 1 argument. */
-    Result<Value> CallMethodSingle(const std::string& methodName, const Value& arg1) const;
-    /** @brief Fast zero-allocation method call overload (Returns single Value) with 2 arguments. */
-    Result<Value> CallMethodSingle(const std::string& methodName, const Value& arg1, const Value& arg2) const;
-    /** @brief Fast zero-allocation method call overload (Returns single Value) with 3 arguments. */
-    Result<Value> CallMethodSingle(const std::string& methodName, const Value& arg1, const Value& arg2, const Value& arg3) const;
+    /**
+     * @brief Calls a function stored in this table and returns only the first result.
+     * @param vm The state to execute in.
+     * @param funcName The function field to call.
+     * @param args Arguments to pass; each is converted to a Value.
+     * @return Result containing the first returned Value (Nil if the function returns none).
+     */
+    template <typename... Args>
+    Result<Value> CallFunctionSingle(State& vm, const std::string& funcName, Args&&... args) const
+    {
+        auto fnRes = Get(funcName);
+        if (fnRes.IsError()) return fnRes.GetError();
+        return fnRes.GetValue().CallSingle(vm, std::forward<Args>(args)...);
+    }
+
+    /** @brief Calls a function stored in this table using its captured State, returning only the first result. */
+    template <typename... Args>
+    Result<Value> CallFunctionSingle(const std::string& funcName, Args&&... args) const
+    {
+        auto fnRes = Get(funcName);
+        if (fnRes.IsError()) return fnRes.GetError();
+        return fnRes.GetValue().CallSingle(std::forward<Args>(args)...);
+    }
+
+    /**
+     * @brief Calls a method stored in this table (injecting 'self') and returns only the first result.
+     * @param vm The state to execute in.
+     * @param methodName The method field to call.
+     * @param args Arguments to pass after the injected self; each is converted to a Value.
+     * @return Result containing the first returned Value (Nil if the method returns none).
+     */
+    template <typename... Args>
+    Result<Value> CallMethodSingle(State& vm, const std::string& methodName, Args&&... args) const
+    {
+        return CallFunctionSingle(vm, methodName, Value(*this), std::forward<Args>(args)...);
+    }
+
+    /** @brief Calls a method stored in this table using its captured State (injecting 'self'), returning only the first result. */
+    template <typename... Args>
+    Result<Value> CallMethodSingle(const std::string& methodName, Args&&... args) const
+    {
+        return CallFunctionSingle(methodName, Value(*this), std::forward<Args>(args)...);
+    }
 
     void PushToLuaState(lua_State* L) const;
     [[nodiscard]] lua_State* GetLuaState() const;
