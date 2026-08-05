@@ -50,6 +50,10 @@ State::~State()
 {
     if (ownsState_ && L_)
     {
+        // Cancel every pending timer for this State before the VM is closed.
+        // Timers hold Value/Coroutine references to this lua_State, so they
+        // must be released while the state is still open (see issue #9).
+        Lode::Task::Shutdown(*this);
         lua_close(L_);
         L_ = nullptr;
     }
@@ -104,7 +108,7 @@ Result<int> State::ExecuteBytecodeWithResults(std::string_view bytecode, std::st
     lua_State* co = lua_newthread(L_);
     if (isMainScript)
     {
-        Lode::Task::SetMainThread(co);
+        Lode::Task::SetMainThread(*this, co);
     }
     int coRef = lua_ref(L_, -1);
     lua_pop(L_, 1);

@@ -108,6 +108,7 @@ set(LODE_CORE_SOURCES
     src/State.cpp
     src/Compiler.cpp
     src/Logger.cpp
+    src/TaskContext.hpp
     src/Platform/Platform.cpp
     src/Platform/WindowsDll.cpp
     src/Platform/UnixDlopen.cpp

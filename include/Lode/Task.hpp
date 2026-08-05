@@ -51,17 +51,26 @@ public:
     static void Cancel(State& vm, const Value& target);
 
     /**
-     * @brief Registers the top-level script thread.
+     * @brief Registers the top-level script thread for a specific State.
      *
      * When that thread errors while being resumed from a Wait timer (the script
      * yielded, so it can only continue inside the event loop), the error is
      * captured instead of being swallowed as a TaskError so the runtime can
-     * surface it as the script's fatal error.
+     * surface it as the script's fatal error. The registration is stored per
+     * State, so independent States never clobber each other's fatal error slot.
      */
-    static void SetMainThread(lua_State* L);
+    static void SetMainThread(State& vm, lua_State* L);
 
     /** @brief Returns the pending main-script error (cleared after retrieval). */
-    static std::string GetMainThreadError();
+    static std::string GetMainThreadError(State& vm);
+
+    /**
+     * @brief Cancels every pending timer owned by the given State.
+     *
+     * Must be called before the State's lua_State is closed (State::~State does
+     * this automatically) so no timer is left holding a dangling lua_State*.
+     */
+    static void Shutdown(State& vm);
 };
 
 } // namespace Lode
