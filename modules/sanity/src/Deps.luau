@@ -1,5 +1,4 @@
 --!strict
---!native
 
 --[[
     Centralized native-module dependencies for the Sanity framework.
@@ -9,13 +8,30 @@
       * filesystem -> test discovery + fixtures
       * task       -> async execution (spawn, wait, cancel)
 
+    Sanity is runtime-agnostic: it runs on any Luau runtime (Lode, Roblox, Lute,
+    Lune, ...) as long as that runtime provides modules with the same public API.
+    The tryRequire calls below try a list of candidate module names in order —
+    prepend your runtime's own module names (e.g. "@lune/fs") to load from the
+    runtime you are using instead of the bundled Lode modules.
+
     NOTE: the `task` module currently lives in `temp/task_module` (not under
     `modules/`). If it is moved to `modules/`, update the path below.
 ]]
 
-local stdio = require("../../stdio")
-local fs = require("../../filesystem")
-local task = require("../../../temp/task_module")
+local function tryRequire(...: string): any
+    local candidates = { ... }
+    for _, name in ipairs(candidates) do
+        local ok, result = pcall(require, name)
+        if ok then
+            return result
+        end
+    end
+    error(string.format("Failed to require any of: %s", table.concat(candidates, ", ")))
+end
+
+local stdio = tryRequire("@stdio", "../../stdio")
+local fs = tryRequire("@filesystem", "../../filesystem")
+local task = tryRequire("@task", "../../../temp/task_module")
 
 return {
     stdio = stdio,

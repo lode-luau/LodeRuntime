@@ -1,6 +1,3 @@
---!strict
---!native
-
 --[[
     Sanity configuration.
 

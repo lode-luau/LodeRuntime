@@ -1,5 +1,4 @@
 --!strict
---!native
 
 --[[
     Test discovery for the Sanity framework.

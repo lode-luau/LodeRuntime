@@ -1,5 +1,4 @@
 --!strict
---!native
 
 --[[
     Expectation/assertion library for the Sanity test framework.

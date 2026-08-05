@@ -70,8 +70,8 @@ if config.live ~= false then
     }
 end
 
-local results, totalDuration = sanity.run(config, callbacks)
-sanity.report(results, totalDuration, config)
+local results, totalDuration, testsElapsed = sanity.run(config, callbacks)
+sanity.report(results, totalDuration, testsElapsed, config)
 
 local failed = 0
 for _, r in ipairs(results) do

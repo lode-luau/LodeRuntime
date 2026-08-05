@@ -1,5 +1,4 @@
 --!strict
---!native
 
 --[[
     Shared test registry for the Sanity test framework.

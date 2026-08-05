@@ -1,5 +1,4 @@
 --!strict
---!native
 
 --[[
     Reporter for the Sanity framework.
@@ -67,7 +66,7 @@ local function begin()
     state.frame = 0
 
     stdio.print("")
-    stdio.print(color(ANSI.bold, "Sanity Test Runner"))
+    stdio.print(color(ANSI.bold, "  Sanity Test Runner"))
     stdio.print("")
 end
 
@@ -143,7 +142,9 @@ local function testEnded(result: any)
 end
 
 --- Prints the summary (and the full block report when live mode was not used).
-local function report(results: { any }, totalDurationMs: number, config: any)
+--- `totalDurationMs` is the wall-clock run time; `testsElapsedMs` is the sum of
+--- the individual test durations. The difference is the runner overhead.
+local function report(results: { any }, totalDurationMs: number, testsElapsedMs: number, config: any)
     if not state.anyLive then
         -- Non-live mode: print the whole block report (header + lines + summary).
         local ok, tty = pcall(function()
@@ -154,7 +155,7 @@ local function report(results: { any }, totalDurationMs: number, config: any)
         end
 
         stdio.print("")
-        stdio.print(color(ANSI.bold, "Sanity Test Runner"))
+        stdio.print(color(ANSI.bold, "  Sanity Test Runner"))
         stdio.print("")
 
         for _, r in ipairs(results) do
@@ -178,11 +179,18 @@ local function report(results: { any }, totalDurationMs: number, config: any)
         end
     end
 
+    local runnerElapsedMs = totalDurationMs - testsElapsedMs
+
     stdio.print(string.format(
         "  %s  %s  %s",
         color(ANSI.green, tostring(passed) .. " passed"),
         color(ANSI.red, tostring(failed) .. " failed"),
-        color(ANSI.dim, string.format("(%.0fms)", totalDurationMs))
+        color(ANSI.dim, string.format(
+            "(%.0fms total · %.0fms tests · %.0fms runner)",
+            totalDurationMs,
+            testsElapsedMs,
+            runnerElapsedMs
+        ))
     ))
     stdio.print("")
 end

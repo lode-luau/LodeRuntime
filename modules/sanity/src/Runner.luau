@@ -1,5 +1,4 @@
 --!strict
---!native
 
 --[[
     Test runner for the Sanity framework.
@@ -98,7 +97,7 @@ local function runTest(deps: any, suite: any, test: any, config: any, suiteName:
         task.wait()
     end
 
-    result.durationMs = (os.clock() - start) * 1000
+    result.durationMs = math.floor((os.clock() - start) * 1000 + 0.5)
     if callbacks and callbacks.onTestEnd then
         callbacks.onTestEnd(result)
     end
@@ -137,10 +136,12 @@ local function runSuite(deps: any, suite: any, results: { TestResult }, config: 
     end)
 end
 
---- Runs the whole registered tree. Returns (results, totalDurationMs).
---- `callbacks` (optional) streams live progress:
+--- Runs the whole registered tree. Returns (results, totalDurationMs, testsElapsedMs).
+--- `totalDurationMs` is wall-clock time including runner overhead (hook setup,
+--- coroutine spawn, pump loop); `testsElapsedMs` is the sum of the individual
+--- test durations. `callbacks` (optional) streams live progress:
 ---   onTestStart(suite, name) / onTestProgress(suite, name, ms) / onTestEnd(result)
-local function run(config: any, callbacks: any): (any, number)
+local function run(config: any, callbacks: any): (any, number, number)
     local results: { TestResult } = {}
     local root = Registry.getRoot()
     local start = os.clock()
@@ -157,7 +158,13 @@ local function run(config: any, callbacks: any): (any, number)
     end
 
     local total = (os.clock() - start) * 1000
-    return results, total
+
+    local testsElapsed = 0
+    for _, r in ipairs(results) do
+        testsElapsed += r.durationMs
+    end
+
+    return results, total, testsElapsed
 end
 
 return {
