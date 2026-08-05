@@ -59,9 +59,11 @@ public:
      * @brief Executes compiled Luau bytecode and returns the number of results pushed to the stack.
      * @param bytecode The compiled Luau bytecode.
      * @param chunkName The name of the chunk.
+     * @param isMainScript Set to true when executing the top-level script (not a module), so its
+     * thread is registered as the main thread for fatal-error reporting.
      * @return Result containing the number of returned values.
      */
-    Result<int> ExecuteBytecodeWithResults(std::string_view bytecode, std::string_view chunkName = "=main");
+    Result<int> ExecuteBytecodeWithResults(std::string_view bytecode, std::string_view chunkName = "=main", bool isMainScript = false);
 
     /**
      * @brief Executes bytecode and captures the first returned value.

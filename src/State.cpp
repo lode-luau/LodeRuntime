@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 #include "Lode/State.hpp"
 #include "Lode/Metatable.hpp"
+#include "Lode/Task.hpp"
 #include "ModuleLoader.hpp"
 #include "Registry.hpp"
 #include "lua.h"
@@ -88,17 +89,21 @@ Result<State> State::Create()
 
 Result<void> State::ExecuteBytecode(std::string_view bytecode, std::string_view chunkName)
 {
-    auto res = ExecuteBytecodeWithResults(bytecode, chunkName);
+    auto res = ExecuteBytecodeWithResults(bytecode, chunkName, true);
     if (res.IsError()) return res.GetError();
     return Result<void>();
 }
 
-Result<int> State::ExecuteBytecodeWithResults(std::string_view bytecode, std::string_view chunkName)
+Result<int> State::ExecuteBytecodeWithResults(std::string_view bytecode, std::string_view chunkName, bool isMainScript)
 {
     if (!L_) return Error::Runtime("State is null");
 
     // Wrap script execution in a Main Coroutine so root code can yield seamlessly
     lua_State* co = lua_newthread(L_);
+    if (isMainScript)
+    {
+        Lode::Task::SetMainThread(co);
+    }
     int coRef = lua_ref(L_, -1);
     lua_pop(L_, 1);
 
