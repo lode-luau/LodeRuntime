@@ -398,6 +398,10 @@ Value Value::FromLuaState(lua_State* L, int index)
         val.type_ = ValueType::Number;
         val.data_ = lua_tonumber(L, index);
         break;
+    case LUA_TINTEGER:
+        val.type_ = ValueType::Integer;
+        val.data_ = static_cast<int>(lua_tointeger(L, index));
+        break;
     case LUA_TSTRING:
         val.type_ = ValueType::String;
         val.data_ = std::string(lua_tostring(L, index));

@@ -11,6 +11,8 @@
 #include "Luau/CodeGen.h"
 #include <stdexcept>
 #include <iostream>
+#include <cmath>
+#include <cstdint>
 
 namespace Lode
 {
@@ -162,10 +164,11 @@ Result<std::vector<Value>> State::CallFunction(const Value& fn, const std::vecto
 
 void State::AddModulePath(std::string_view path)
 {
-    if (impl_)
-    {
-        impl_->modulePaths.push_back(std::string(path));
-    }
+    if (!impl_) return;
+    impl_->modulePaths.push_back(std::string(path));
+    // Keep the loader's navigation context in sync so require() can actually
+    // fall back to the newly added search directories.
+    UpdateModulePaths(L_, impl_->modulePaths);
 }
 
 void State::SetGlobal(const std::string& name, const Value& value)
@@ -206,7 +209,19 @@ Value State::CreateFunction(const std::function<Value(State& vm, const std::vect
     {
         std::function<Value(State& vm, const std::vector<Value>& args)> func;
     };
-    auto* data = new ClosureData{ fn };
+    // GC-tracked userdata owns the payload: it is freed (destructor runs) when
+    // the closure is collected, instead of leaking on every CreateFunction call.
+    auto* data = static_cast<ClosureData*>(lua_newuserdata(L_, sizeof(ClosureData)));
+    new (data) ClosureData{ fn };
+
+    lua_newtable(L_);
+    lua_pushcfunction(L_, [](lua_State* L) -> int {
+        auto* d = static_cast<ClosureData*>(lua_touserdata(L, 1));
+        if (d) d->~ClosureData();
+        return 0;
+    }, "__gc");
+    lua_setfield(L_, -2, "__gc");
+    lua_setmetatable(L_, -2);
 
     auto cfunc = [](lua_State* L) -> int {
         auto* data = static_cast<ClosureData*>(lua_touserdata(L, lua_upvalueindex(1)));
@@ -227,7 +242,7 @@ Value State::CreateFunction(const std::function<Value(State& vm, const std::vect
         return 1;
     };
 
-    lua_pushlightuserdata(L_, data);
+    // The userdata (at -1) is captured as the closure upvalue.
     lua_pushcclosure(L_, cfunc, "CFunction", 1);
     Value val = Value::FromLuaState(L_, -1);
     lua_pop(L_, 1);
@@ -242,7 +257,19 @@ Value State::CreateFastFunction(const std::function<Value(State& vm, StackArgs a
     {
         std::function<Value(State& vm, StackArgs args)> func;
     };
-    auto* data = new ClosureData{ fn };
+    // GC-tracked userdata owns the payload: it is freed (destructor runs) when
+    // the closure is collected, instead of leaking on every CreateFastFunction call.
+    auto* data = static_cast<ClosureData*>(lua_newuserdata(L_, sizeof(ClosureData)));
+    new (data) ClosureData{ fn };
+
+    lua_newtable(L_);
+    lua_pushcfunction(L_, [](lua_State* L) -> int {
+        auto* d = static_cast<ClosureData*>(lua_touserdata(L, 1));
+        if (d) d->~ClosureData();
+        return 0;
+    }, "__gc");
+    lua_setfield(L_, -2, "__gc");
+    lua_setmetatable(L_, -2);
 
     auto cfunc = [](lua_State* L) -> int {
         auto* data = static_cast<ClosureData*>(lua_touserdata(L, lua_upvalueindex(1)));
@@ -257,7 +284,7 @@ Value State::CreateFastFunction(const std::function<Value(State& vm, StackArgs a
         return 1;
     };
 
-    lua_pushlightuserdata(L_, data);
+    // The userdata (at -1) is captured as the closure upvalue.
     lua_pushcclosure(L_, cfunc, "CFunctionFast", 1);
     Value val = Value::FromLuaState(L_, -1);
     lua_pop(L_, 1);
@@ -404,7 +431,14 @@ void State::PushTable(const Table& table) { if (L_) table.PushToLuaState(L_); }
 bool State::IsNil(int index) const { return L_ ? (lua_isnil(L_, index) != 0) : false; }
 bool State::IsBoolean(int index) const { return L_ ? (lua_isboolean(L_, index) != 0) : false; }
 bool State::IsNumber(int index) const { return L_ ? (lua_isnumber(L_, index) != 0) : false; }
-bool State::IsInteger(int index) const { return L_ ? (lua_isnumber(L_, index) != 0) : false; }
+bool State::IsInteger(int index) const
+{
+    if (!L_) return false;
+    if (lua_type(L_, index) == LUA_TINTEGER) return true;
+    if (!lua_isnumber(L_, index)) return false;
+    double d = lua_tonumber(L_, index);
+    return std::isfinite(d) && d == std::trunc(d) && std::fabs(d) <= static_cast<double>(INT64_MAX);
+}
 bool State::IsString(int index) const { return L_ ? (lua_isstring(L_, index) != 0) : false; }
 bool State::IsTable(int index) const { return L_ ? (lua_istable(L_, index) != 0) : false; }
 bool State::IsFunction(int index) const { return L_ ? (lua_isfunction(L_, index) != 0) : false; }
