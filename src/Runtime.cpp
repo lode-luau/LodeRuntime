@@ -5,6 +5,7 @@
 #include "Lode/Logger.hpp"
 #include "Lode/Result.hpp"
 #include "Lode/EventLoop.hpp"
+#include "Lode/Task.hpp"
 #include "Platform/CrashHandler.hpp"
 
 #include <fstream>
@@ -114,6 +115,17 @@ int main(int argc, char* argv[])
 
     // Process all pending libuv timers, I/O events, and coroutine resumes
     Lode::EventLoop::Default().Run(vm);
+
+    // If the top-level script failed while yielding (e.g. error() inside a coroutine
+    // resumed by the event loop), the error is surfaced here instead of being lost.
+    std::string mainError = Lode::Task::GetMainThreadError();
+    if (!mainError.empty())
+    {
+        Lode::Diagnostic diag = Lode::Logger::ParseLuauError(mainError, absPath.string());
+        diag.code = "RuntimeError";
+        Lode::Logger::EmitDiagnostic(diag);
+        return 1;
+    }
 
     return 0;
 }
