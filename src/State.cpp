@@ -227,6 +227,12 @@ Value State::CreateFunction(const std::function<Value(State& vm, const std::vect
 
     auto cfunc = [](lua_State* L) -> int {
         auto* data = static_cast<ClosureData*>(lua_touserdata(L, lua_upvalueindex(1)));
+        if (!data)
+        {
+            luaL_error(L, "C++ callback data is unavailable");
+            return 0;
+        }
+
         int top = lua_gettop(L);
         std::vector<Value> args;
         args.reserve(top);
@@ -234,14 +240,25 @@ Value State::CreateFunction(const std::function<Value(State& vm, const std::vect
         {
             args.push_back(Value::FromLuaState(L, i));
         }
-        State vm(L);
-        Value res = data->func(vm, args);
-        if (lua_status(L) == LUA_YIELD)
+        try
         {
-            return lua_yield(L, 0);
+            State vm(L);
+            Value res = data->func(vm, args);
+            if (lua_status(L) == LUA_YIELD)
+                return lua_yield(L, 0);
+            res.PushToLuaState(L);
+            return 1;
         }
-        res.PushToLuaState(L);
-        return 1;
+        catch (const std::exception& e)
+        {
+            luaL_error(L, "C++ callback exception: %s", e.what());
+            return 0;
+        }
+        catch (...)
+        {
+            luaL_error(L, "C++ callback threw an unknown exception");
+            return 0;
+        }
     };
 
     // The userdata (at -1) is captured as the closure upvalue.
@@ -275,15 +292,32 @@ Value State::CreateFastFunction(const std::function<Value(State& vm, StackArgs a
 
     auto cfunc = [](lua_State* L) -> int {
         auto* data = static_cast<ClosureData*>(lua_touserdata(L, lua_upvalueindex(1)));
-        StackArgs args(L);
-        State vm(L);
-        Value res = data->func(vm, args);
-        if (lua_status(L) == LUA_YIELD)
+        if (!data)
         {
-            return lua_yield(L, 0);
+            luaL_error(L, "C++ callback data is unavailable");
+            return 0;
         }
-        res.PushToLuaState(L);
-        return 1;
+
+        StackArgs args(L);
+        try
+        {
+            State vm(L);
+            Value res = data->func(vm, args);
+            if (lua_status(L) == LUA_YIELD)
+                return lua_yield(L, 0);
+            res.PushToLuaState(L);
+            return 1;
+        }
+        catch (const std::exception& e)
+        {
+            luaL_error(L, "C++ callback exception: %s", e.what());
+            return 0;
+        }
+        catch (...)
+        {
+            luaL_error(L, "C++ callback threw an unknown exception");
+            return 0;
+        }
     };
 
     // The userdata (at -1) is captured as the closure upvalue.
@@ -460,7 +494,13 @@ bool State::IsBuffer(int index) const { return L_ ? (lua_type(L_, index) == LUA_
 
 // --- Stack Reading API ---
 Value State::GetValue(int index) const { return L_ ? Value::FromLuaState(L_, index) : Value(); }
-std::string State::GetString(int index) const { return L_ ? lua_tostring(L_, index) : ""; }
+std::string State::GetString(int index) const
+{
+    if (!L_) return "";
+    size_t length = 0;
+    const char* str = lua_tolstring(L_, index, &length);
+    return str ? std::string(str, length) : std::string();
+}
 double State::GetNumber(int index) const { return L_ ? lua_tonumber(L_, index) : 0.0; }
 int State::GetInteger(int index) const { return L_ ? static_cast<int>(lua_tonumber(L_, index)) : 0; }
 bool State::GetBoolean(int index) const { return L_ ? (lua_toboolean(L_, index) != 0) : false; }

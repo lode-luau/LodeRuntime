@@ -9,6 +9,7 @@
 #include "Lode/Logger.hpp"
 #include <unordered_map>
 #include <vector>
+#include <exception>
 
 namespace Lode
 {
@@ -185,21 +186,38 @@ int Task::Wait(State& vm, double seconds)
         auto* data = static_cast<TimerData*>(handle->data);
         if (data && data->coroutine.IsValid())
         {
-            auto res = data->coroutine.Resume();
-            if (res.IsError())
+            try
             {
-                if (data->ctx && data->ctx->mainThread &&
-                    data->coroutine.GetThreadState() == data->ctx->mainThread)
+                auto res = data->coroutine.Resume();
+                if (res.IsError())
                 {
-                    data->ctx->mainThreadError = res.GetError().ErrorMessage();
+                    if (data->ctx && data->ctx->mainThread &&
+                        data->coroutine.GetThreadState() == data->ctx->mainThread)
+                    {
+                        data->ctx->mainThreadError = res.GetError().ErrorMessage();
+                    }
+                    else
+                    {
+                        Diagnostic diag;
+                        diag.message = "Unhandled exception in Wait timer: " + res.GetError().ErrorMessage();
+                        diag.code = "TaskError";
+                        Logger::EmitDiagnostic(diag);
+                    }
                 }
-                else
-                {
-                    Diagnostic diag;
-                    diag.message = "Unhandled exception in Wait timer: " + res.GetError().ErrorMessage();
-                    diag.code = "TaskError";
-                    Logger::EmitDiagnostic(diag);
-                }
+            }
+            catch (const std::exception& e)
+            {
+                Diagnostic diag;
+                diag.message = std::string("Unhandled C++ exception in Wait timer: ") + e.what();
+                diag.code = "TaskError";
+                Logger::EmitDiagnostic(diag);
+            }
+            catch (...)
+            {
+                Diagnostic diag;
+                diag.message = "Unhandled unknown C++ exception in Wait timer";
+                diag.code = "TaskError";
+                Logger::EmitDiagnostic(diag);
             }
         }
         uv_timer_stop(handle);
@@ -251,13 +269,30 @@ int Task::SetTimeout(State& vm, const Value& callback, double delayMs, const std
         auto* data = static_cast<TimerData*>(handle->data);
         if (data && data->L)
         {
-            State localVm(data->L);
-            Coroutine co(localVm, data->callback);
-            auto res = co.Resume(data->args);
-            if (res.IsError())
+            try
+            {
+                State localVm(data->L);
+                Coroutine co(localVm, data->callback);
+                auto res = co.Resume(data->args);
+                if (res.IsError())
+                {
+                    Diagnostic diag;
+                    diag.message = "Unhandled exception in SetTimeout: " + res.GetError().ErrorMessage();
+                    diag.code = "TaskError";
+                    Logger::EmitDiagnostic(diag);
+                }
+            }
+            catch (const std::exception& e)
             {
                 Diagnostic diag;
-                diag.message = "Unhandled exception in SetTimeout: " + res.GetError().ErrorMessage();
+                diag.message = std::string("Unhandled C++ exception in SetTimeout: ") + e.what();
+                diag.code = "TaskError";
+                Logger::EmitDiagnostic(diag);
+            }
+            catch (...)
+            {
+                Diagnostic diag;
+                diag.message = "Unhandled unknown C++ exception in SetTimeout";
                 diag.code = "TaskError";
                 Logger::EmitDiagnostic(diag);
             }
@@ -324,13 +359,30 @@ int Task::SetInterval(State& vm, const Value& callback, double intervalMs, const
         auto* data = static_cast<TimerData*>(handle->data);
         if (data && data->L)
         {
-            State localVm(data->L);
-            Coroutine co(localVm, data->callback);
-            auto res = co.Resume(data->args);
-            if (res.IsError())
+            try
+            {
+                State localVm(data->L);
+                Coroutine co(localVm, data->callback);
+                auto res = co.Resume(data->args);
+                if (res.IsError())
+                {
+                    Diagnostic diag;
+                    diag.message = "Unhandled exception in SetInterval: " + res.GetError().ErrorMessage();
+                    diag.code = "TaskError";
+                    Logger::EmitDiagnostic(diag);
+                }
+            }
+            catch (const std::exception& e)
             {
                 Diagnostic diag;
-                diag.message = "Unhandled exception in SetInterval: " + res.GetError().ErrorMessage();
+                diag.message = std::string("Unhandled C++ exception in SetInterval: ") + e.what();
+                diag.code = "TaskError";
+                Logger::EmitDiagnostic(diag);
+            }
+            catch (...)
+            {
+                Diagnostic diag;
+                diag.message = "Unhandled unknown C++ exception in SetInterval";
                 diag.code = "TaskError";
                 Logger::EmitDiagnostic(diag);
             }

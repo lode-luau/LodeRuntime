@@ -333,7 +333,11 @@ Value Value::FromLuaState(lua_State* L, int index)
         break;
     case LUA_TSTRING:
         val.type_ = ValueType::String;
-        val.data_ = std::string(lua_tostring(L, index));
+        {
+            size_t length = 0;
+            const char* str = lua_tolstring(L, index, &length);
+            val.data_ = str ? std::string(str, length) : std::string();
+        }
         break;
     case LUA_TLIGHTUSERDATA:
         val.type_ = ValueType::LightUserdata;
@@ -366,6 +370,9 @@ Value Value::FromLuaState(lua_State* L, int index)
 
 void Value::PushToLuaState(lua_State* L) const
 {
+    if (!L)
+        return;
+
     switch (type_)
     {
     case ValueType::Nil:
@@ -398,9 +405,20 @@ void Value::PushToLuaState(lua_State* L) const
     case ValueType::Buffer:
         if (auto* ref = std::get_if<std::shared_ptr<RefData>>(&data_))
         {
-            if (*ref && (*ref)->refId != LUA_NOREF)
+            if (*ref && (*ref)->L && (*ref)->refId != LUA_NOREF && (*ref)->refId != LUA_REFNIL)
             {
-                lua_getref(L, (*ref)->refId);
+                // References are resolved on their owning main thread. A value can
+                // then be moved to another thread in the same VM, but never to an
+                // unrelated lua_State.
+                if (lua_mainthread(L) != (*ref)->L)
+                {
+                    lua_pushnil(L);
+                    break;
+                }
+
+                lua_getref((*ref)->L, (*ref)->refId);
+                if (L != (*ref)->L)
+                    lua_xmove((*ref)->L, L, 1);
             }
             else
             {
