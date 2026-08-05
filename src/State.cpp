@@ -74,6 +74,7 @@ State& State::operator=(State&& other) noexcept
     {
         if (ownsState_ && L_)
         {
+            Task::Shutdown(*this);
             lua_close(L_);
         }
         L_ = other.L_;
