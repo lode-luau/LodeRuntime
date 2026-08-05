@@ -63,7 +63,9 @@ int StackValue::AsInteger() const
 
 std::string StackValue::AsString() const
 {
-    return lua_tostring(L_, index_);
+    size_t length = 0;
+    const char* str = lua_tolstring(L_, index_, &length);
+    return str ? std::string(str, length) : std::string();
 }
 
 std::string_view StackValue::AsStringView() const

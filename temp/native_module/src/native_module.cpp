@@ -2,12 +2,15 @@
 #include "Lode/State.hpp"
 #include "Lode/Table.hpp"
 #include "Lode/Value.hpp"
+#include "Lode/Buffer.hpp"
 #include "Lode/Task.hpp"
 #include "Lode/Metatable.hpp"
 #include "Lode/ClassBuilder.hpp"
 #include <cstring>
 #include <string>
 #include <cmath>
+#include <limits>
+#include <stdexcept>
 
 struct Vector3
 {
@@ -80,6 +83,38 @@ LODE_MODULE(vm)
         }
         
         return Lode::Value(static_cast<int>(copyCount));
+    }));
+
+    // Exercise reference transfer through a separate coroutine. This keeps the
+    // integration regression on the real runtime path instead of a standalone VM.
+    exports.Set("roundTripReference", vm.CreateFunction([](Lode::State& vm, const std::vector<Lode::Value>& args) -> Lode::Value {
+        if (args.empty()) return Lode::Value();
+
+        Lode::Value identity = vm.CreateFunction([](Lode::State&, const std::vector<Lode::Value>& values) -> Lode::Value {
+            return values.empty() ? Lode::Value() : values[0];
+        });
+        Lode::Coroutine coroutine(vm, identity);
+        auto result = coroutine.Resume({ args[0] });
+        if (result.IsError())
+        {
+            vm.RaiseError(result.GetError().ErrorMessage());
+            return Lode::Value();
+        }
+        return result.GetValue().empty() ? Lode::Value() : result.GetValue()[0];
+    }));
+
+    exports.Set("roundTripString", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs args) -> Lode::Value {
+        return args.Size() > 0 ? args[0].ToValue() : Lode::Value();
+    }));
+
+    exports.Set("bufferBoundsProbe", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs args) -> Lode::Value {
+        if (args.Size() == 0 || !args[0].IsBuffer()) return Lode::Value();
+        Lode::Buffer buffer = args[0].ToValue().AsBufferObj();
+        return Lode::Value(static_cast<int>(buffer.ReadUInt32(std::numeric_limits<size_t>::max())));
+    }));
+
+    exports.Set("throwCpp", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs) -> Lode::Value {
+        throw std::runtime_error("native callback failure");
     }));
 
     exports.Set("getSystemInfo", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs) -> Lode::Value {

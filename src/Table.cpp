@@ -116,7 +116,10 @@ std::vector<std::string> Table::GetKeys() const
     {
         if (lua_type(L, -2) == LUA_TSTRING)
         {
-            keys.push_back(lua_tostring(L, -2));
+            size_t length = 0;
+            const char* key = lua_tolstring(L, -2, &length);
+            if (key)
+                keys.emplace_back(key, length);
         }
         lua_pop(L, 1);
     }
@@ -156,9 +159,20 @@ Result<Table> Table::GetMetatable() const
 
 void Table::PushToLuaState(lua_State* L) const
 {
-    if (refData_ && refData_->refId != LUA_NOREF)
+    if (!L)
+        return;
+
+    if (refData_ && refData_->L && refData_->refId != LUA_NOREF && refData_->refId != LUA_REFNIL)
     {
-        lua_getref(L, refData_->refId);
+        if (lua_mainthread(L) != refData_->L)
+        {
+            lua_pushnil(L);
+            return;
+        }
+
+        lua_getref(refData_->L, refData_->refId);
+        if (L != refData_->L)
+            lua_xmove(refData_->L, L, 1);
     }
     else
     {

@@ -8,6 +8,14 @@
 namespace Lode
 {
 
+namespace
+{
+    bool HasRange(std::span<uint8_t> span, size_t offset, size_t width)
+    {
+        return offset <= span.size() && width <= span.size() - offset;
+    }
+}
+
 Buffer::Buffer() = default;
 
 Buffer::Buffer(lua_State* L, int index)
@@ -122,10 +130,14 @@ std::span<uint8_t> Buffer::Span() const
 
 void Buffer::PushToLuaState(lua_State* L) const
 {
-    if (IsValid())
+    if (!L)
+        return;
+
+    if (IsValid() && lua_mainthread(L) == L_)
     {
         lua_getref(L_, refId_);
-        lua_xmove(L_, L, 1);
+        if (L != L_)
+            lua_xmove(L_, L, 1);
     }
     else
     {
@@ -152,7 +164,7 @@ uint8_t Buffer::ReadUInt8(size_t offset) const
 int16_t Buffer::ReadInt16(size_t offset) const
 {
     auto span = Span();
-    if (offset + sizeof(int16_t) > span.size()) return 0;
+    if (!HasRange(span, offset, sizeof(int16_t))) return 0;
     int16_t val;
     std::memcpy(&val, span.data() + offset, sizeof(int16_t));
     return val;
@@ -161,7 +173,7 @@ int16_t Buffer::ReadInt16(size_t offset) const
 uint16_t Buffer::ReadUInt16(size_t offset) const
 {
     auto span = Span();
-    if (offset + sizeof(uint16_t) > span.size()) return 0;
+    if (!HasRange(span, offset, sizeof(uint16_t))) return 0;
     uint16_t val;
     std::memcpy(&val, span.data() + offset, sizeof(uint16_t));
     return val;
@@ -170,7 +182,7 @@ uint16_t Buffer::ReadUInt16(size_t offset) const
 int32_t Buffer::ReadInt32(size_t offset) const
 {
     auto span = Span();
-    if (offset + sizeof(int32_t) > span.size()) return 0;
+    if (!HasRange(span, offset, sizeof(int32_t))) return 0;
     int32_t val;
     std::memcpy(&val, span.data() + offset, sizeof(int32_t));
     return val;
@@ -179,7 +191,7 @@ int32_t Buffer::ReadInt32(size_t offset) const
 uint32_t Buffer::ReadUInt32(size_t offset) const
 {
     auto span = Span();
-    if (offset + sizeof(uint32_t) > span.size()) return 0;
+    if (!HasRange(span, offset, sizeof(uint32_t))) return 0;
     uint32_t val;
     std::memcpy(&val, span.data() + offset, sizeof(uint32_t));
     return val;
@@ -188,7 +200,7 @@ uint32_t Buffer::ReadUInt32(size_t offset) const
 float Buffer::ReadFloat32(size_t offset) const
 {
     auto span = Span();
-    if (offset + sizeof(float) > span.size()) return 0.0f;
+    if (!HasRange(span, offset, sizeof(float))) return 0.0f;
     float val;
     std::memcpy(&val, span.data() + offset, sizeof(float));
     return val;
@@ -197,7 +209,7 @@ float Buffer::ReadFloat32(size_t offset) const
 double Buffer::ReadFloat64(size_t offset) const
 {
     auto span = Span();
-    if (offset + sizeof(double) > span.size()) return 0.0;
+    if (!HasRange(span, offset, sizeof(double))) return 0.0;
     double val;
     std::memcpy(&val, span.data() + offset, sizeof(double));
     return val;
@@ -229,7 +241,7 @@ void Buffer::WriteUInt8(size_t offset, uint8_t value)
 void Buffer::WriteInt16(size_t offset, int16_t value)
 {
     auto span = Span();
-    if (offset + sizeof(int16_t) <= span.size())
+    if (HasRange(span, offset, sizeof(int16_t)))
     {
         std::memcpy(span.data() + offset, &value, sizeof(int16_t));
     }
@@ -238,7 +250,7 @@ void Buffer::WriteInt16(size_t offset, int16_t value)
 void Buffer::WriteUInt16(size_t offset, uint16_t value)
 {
     auto span = Span();
-    if (offset + sizeof(uint16_t) <= span.size())
+    if (HasRange(span, offset, sizeof(uint16_t)))
     {
         std::memcpy(span.data() + offset, &value, sizeof(uint16_t));
     }
@@ -247,7 +259,7 @@ void Buffer::WriteUInt16(size_t offset, uint16_t value)
 void Buffer::WriteInt32(size_t offset, int32_t value)
 {
     auto span = Span();
-    if (offset + sizeof(int32_t) <= span.size())
+    if (HasRange(span, offset, sizeof(int32_t)))
     {
         std::memcpy(span.data() + offset, &value, sizeof(int32_t));
     }
@@ -256,7 +268,7 @@ void Buffer::WriteInt32(size_t offset, int32_t value)
 void Buffer::WriteUInt32(size_t offset, uint32_t value)
 {
     auto span = Span();
-    if (offset + sizeof(uint32_t) <= span.size())
+    if (HasRange(span, offset, sizeof(uint32_t)))
     {
         std::memcpy(span.data() + offset, &value, sizeof(uint32_t));
     }
@@ -265,7 +277,7 @@ void Buffer::WriteUInt32(size_t offset, uint32_t value)
 void Buffer::WriteFloat32(size_t offset, float value)
 {
     auto span = Span();
-    if (offset + sizeof(float) <= span.size())
+    if (HasRange(span, offset, sizeof(float)))
     {
         std::memcpy(span.data() + offset, &value, sizeof(float));
     }
@@ -274,7 +286,7 @@ void Buffer::WriteFloat32(size_t offset, float value)
 void Buffer::WriteFloat64(size_t offset, double value)
 {
     auto span = Span();
-    if (offset + sizeof(double) <= span.size())
+    if (HasRange(span, offset, sizeof(double)))
     {
         std::memcpy(span.data() + offset, &value, sizeof(double));
     }
