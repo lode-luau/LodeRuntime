@@ -289,22 +289,42 @@ static bool is_module_present(lua_State* L, void* ctx)
     return false;
 }
 
+// Shared string helpers used both by the luarequire write callbacks (whose
+// contract requires writing into a caller-provided char buffer) and by
+// MultiReturnLodeRequire, which must NOT use a fixed-size stack buffer: paths
+// can exceed 1023 characters, and WriteBuffer leaves the buffer untouched when
+// it reports WRITE_BUFFER_TOO_SMALL (see issue #10).
+static std::string GetLoadname(const LodeNavigationContext& nav)
+{
+    return nav.currentPath.string();
+}
+
+static std::string GetChunkname(const LodeNavigationContext& nav)
+{
+    return "@" + nav.currentPath.string();
+}
+
+static std::string GetCacheKey(const LodeNavigationContext& nav)
+{
+    return nav.currentPath.string();
+}
+
 static luarequire_WriteResult get_chunkname(lua_State* L, void* ctx, char* buffer, size_t buffer_size, size_t* size_out)
 {
     LodeNavigationContext* nav = static_cast<LodeNavigationContext*>(ctx);
-    return WriteBuffer("@" + nav->currentPath.string(), buffer, buffer_size, size_out);
+    return WriteBuffer(GetChunkname(*nav), buffer, buffer_size, size_out);
 }
 
 static luarequire_WriteResult get_loadname(lua_State* L, void* ctx, char* buffer, size_t buffer_size, size_t* size_out)
 {
     LodeNavigationContext* nav = static_cast<LodeNavigationContext*>(ctx);
-    return WriteBuffer(nav->currentPath.string(), buffer, buffer_size, size_out);
+    return WriteBuffer(GetLoadname(*nav), buffer, buffer_size, size_out);
 }
 
 static luarequire_WriteResult get_cache_key(lua_State* L, void* ctx, char* buffer, size_t buffer_size, size_t* size_out)
 {
     LodeNavigationContext* nav = static_cast<LodeNavigationContext*>(ctx);
-    return WriteBuffer(nav->currentPath.string(), buffer, buffer_size, size_out);
+    return WriteBuffer(GetCacheKey(*nav), buffer, buffer_size, size_out);
 }
 
 static luarequire_ConfigStatus get_config_status(lua_State* L, void* ctx)
@@ -612,19 +632,10 @@ static int MultiReturnLodeRequire(lua_State* L)
         config->to_child(L, ctx, relPath.c_str());
     }
 
-    char loadnameBuf[1024];
-    size_t loadnameSize = 0;
-    config->get_loadname(L, ctx, loadnameBuf, sizeof(loadnameBuf), &loadnameSize);
-
-    char chunknameBuf[1024];
-    size_t chunknameSize = 0;
-    config->get_chunkname(L, ctx, chunknameBuf, sizeof(chunknameBuf), &chunknameSize);
-
-    char cacheKeyBuf[1024];
-    size_t cacheKeySize = 0;
-    config->get_cache_key(L, ctx, cacheKeyBuf, sizeof(cacheKeyBuf), &cacheKeySize);
-
-    std::string cacheKey(cacheKeyBuf);
+    auto* nav = static_cast<LodeNavigationContext*>(ctx);
+    std::string loadname = GetLoadname(*nav);
+    std::string chunkname = GetChunkname(*nav);
+    std::string cacheKey = GetCacheKey(*nav);
 
     // 1. Get or create _LODE_MULTI_CACHE in registry
     lua_getfield(L, LUA_REGISTRYINDEX, "_LODE_MULTI_CACHE");
@@ -658,7 +669,7 @@ static int MultiReturnLodeRequire(lua_State* L)
     lua_pop(L, 1); // pop nil
 
     // 2. Load module (pushes N results onto stack above slot 2)
-    int nresults = config->load(L, ctx, pathStr, chunknameBuf, loadnameBuf);
+    int nresults = config->load(L, ctx, pathStr, chunkname.c_str(), loadname.c_str());
 
     if (nresults <= 0)
     {

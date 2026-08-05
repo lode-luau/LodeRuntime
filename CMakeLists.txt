@@ -107,7 +107,9 @@ set(LODE_CORE_SOURCES
     src/ModuleLoader.cpp
     src/State.cpp
     src/Compiler.cpp
+    src/Gc.cpp
     src/Logger.cpp
+    src/TaskContext.hpp
     src/Platform/Platform.cpp
     src/Platform/WindowsDll.cpp
     src/Platform/UnixDlopen.cpp
@@ -132,6 +134,7 @@ set(LODE_CORE_HEADERS
     include/Lode/StackValue.hpp
     include/Lode/State.hpp
     include/Lode/Compiler.hpp
+    include/Lode/Gc.hpp
     include/Lode/Logger.hpp
     src/Platform/Platform.hpp
     src/Platform/CrashHandler.hpp
