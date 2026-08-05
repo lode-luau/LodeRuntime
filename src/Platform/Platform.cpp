@@ -2,6 +2,15 @@
 // SPDX-License-Identifier: MIT
 #include "Platform.hpp"
 
+#if defined(_WIN32)
+#include <windows.h>
+#include <vector>
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>
+#else
+#include <unistd.h>
+#endif
+
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
 #endif
@@ -81,6 +90,39 @@ std::string_view GetArchitectureName()
     case Architecture::wasm64: return "wasm64";
     default:                   return "unknown";
     }
+}
+
+std::string GetExecutablePath()
+{
+#if defined(_WIN32)
+    wchar_t wBuf[MAX_PATH];
+    DWORD len = GetModuleFileNameW(nullptr, wBuf, MAX_PATH);
+    if (len == 0 || len >= MAX_PATH)
+        return "";
+
+    std::vector<char> utf8(static_cast<size_t>(len) * 2 + 1);
+    int bytes = WideCharToMultiByte(CP_UTF8, 0, wBuf, static_cast<int>(len),
+        utf8.data(), static_cast<int>(utf8.size()), nullptr, nullptr);
+    if (bytes <= 0)
+        return "";
+
+    return std::string(utf8.data(), static_cast<size_t>(bytes));
+#elif defined(__APPLE__)
+    char buf[4096];
+    uint32_t size = sizeof(buf);
+    if (_NSGetExecutablePath(buf, &size) != 0)
+        return "";
+    return std::string(buf);
+#elif defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__) || defined(__sun) || defined(__HAIKU__)
+    char buf[4096];
+    ssize_t n = ::readlink("/proc/self/exe", buf, sizeof(buf) - 1);
+    if (n <= 0)
+        return "";
+    buf[n] = '\0';
+    return std::string(buf);
+#else
+    return "";
+#endif
 }
 
 } // namespace Lode::Platform

@@ -40,6 +40,9 @@ LODE_API Architecture GetArchitecture();
 LODE_API std::string_view GetOSName();
 LODE_API std::string_view GetArchitectureName();
 
+// Returns the absolute path of the current executable (empty string on failure).
+LODE_API std::string GetExecutablePath();
+
 class LODE_API DynamicLibrary
 {
 public:
