@@ -146,12 +146,12 @@ void Logger::EmitDiagnostic(const Diagnostic& diag)
 
         std::cerr << Color::CyanBold << padding << " |\n" << Color::Reset;
 
-        // Imprime a linha do código original
+        // Print the original source line
         std::cerr << Color::CyanBold << diag.line;
         for (size_t i = lineStr.length(); i < padWidth; ++i) std::cerr << " ";
         std::cerr << " | " << Color::Reset << sourceLines[lineIdx] << "\n";
 
-        // Imprime o ponteiro de sinalização ^^^^^
+        // Print the underline marker ^^^^^
         std::cerr << Color::CyanBold << padding << " | " << Color::Reset;
 
         int col = diag.column > 0 ? diag.column : 1;
@@ -165,7 +165,7 @@ void Logger::EmitDiagnostic(const Diagnostic& diag)
                 std::cerr << " ";
         }
 
-        // Cor dos carets: vermelho para error, amarelo para warning
+        // Caret color: red for errors, yellow for warnings
         std::cerr << (isWarn ? Color::YellowBold : Color::RedBold);
         for (int i = 0; i < len; ++i) std::cerr << "^";
         std::cerr << Color::Reset;
@@ -234,13 +234,16 @@ void Logger::EmitCrashReport(std::string_view title, std::string_view codeStr, v
     std::cerr << Color::RedBold << "=======================================================\n\n" << Color::Reset;
 }
 
+// Parses Luau's "<path>:<line>:<column>: <message>" runtime error format into a
+// structured Diagnostic. When the string carries no location, the supplied
+// defaultFilePath is kept and the whole string becomes the message.
 Diagnostic Logger::ParseLuauError(std::string_view rawError, std::string_view defaultFilePath)
 {
     Diagnostic diag;
     diag.filePath = std::string(defaultFilePath);
     std::string errStr(rawError);
 
-    // Remover prefixos comuns de erro do Lode/Luau
+    // Strip common Lode/Luau error prefixes
     const std::vector<std::string> prefixes = {
         "Bytecode load failed: ",
         "Execution failed: "
@@ -256,14 +259,14 @@ Diagnostic Logger::ParseLuauError(std::string_view rawError, std::string_view de
         }
     }
 
-    // Se o erro começar com ':' (ex: ":1: Expected..."), insere o caminho do arquivo na frente
+    // If the error starts with ':' (e.g. ":1: Expected..."), prepend the file path
     if (errStr.rfind(":", 0) == 0 && !diag.filePath.empty())
     {
         errStr = diag.filePath + errStr;
     }
 
-    // Procura o padrão:  <caminho_do_arquivo>:<linha>: <mensagem>
-    // ou:                <caminho_do_arquivo>:<linha>:<coluna>: <mensagem>
+    // Match the pattern: <file_path>:<line>: <message>
+    // or:                <file_path>:<line>:<column>: <message>
     size_t lineColon = std::string::npos;
     for (size_t i = 0; i < errStr.length(); ++i)
     {
@@ -289,7 +292,7 @@ Diagnostic Logger::ParseLuauError(std::string_view rawError, std::string_view de
             {
                 diag.line = std::stoi(lineStr);
 
-                // Verifica se tem número de coluna logo a seguir (ex: :1:15: msg)
+                // Check whether a column number follows (e.g. :1:15: msg)
                 size_t msgColon = errStr.find(':', nextColon + 1);
                 if (msgColon != std::string::npos && std::isdigit(errStr[nextColon + 1]))
                 {
@@ -317,7 +320,7 @@ Diagnostic Logger::ParseLuauError(std::string_view rawError, std::string_view de
         diag.message = errStr;
     }
 
-    // Limpar espaços extras do início da mensagem
+    // Strip leading whitespace from the message
     size_t startMsg = diag.message.find_first_not_of(" \t\r\n");
     if (startMsg != std::string::npos)
     {

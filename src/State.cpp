@@ -353,7 +353,9 @@ Value State::Require(std::string_view moduleName)
     // Mirrors Luau's built-in require(): if the module is not found or fails to load,
     // a Lua error is raised and propagates naturally through the call stack.
     // The caller does not need to check a Result or wrap the call in a pcall equivalent.
-    if (!L_) luaL_error(L_, "State is null");
+    // With no Lua state there is no error context to raise into, so return Nil instead
+    // of passing a null lua_State* to luaL_error (which would dereference it and crash).
+    if (!L_) return Value();
     lua_getglobal(L_, "require");
     if (!lua_isfunction(L_, -1))
     {

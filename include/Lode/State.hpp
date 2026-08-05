@@ -152,6 +152,7 @@ public:
 
     // Require a module — raises a Lua error on failure, identical to Luau's built-in require().
     // Use this when you want the error to propagate naturally (no wrapping needed).
+    // If the State has no Lua thread (null), it cannot raise into the VM, so it returns Nil.
     Value Require(std::string_view moduleName);
 
     // Require a module without throwing — returns Result<Value> for explicit error handling.
