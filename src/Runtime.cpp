@@ -118,7 +118,7 @@ int main(int argc, char* argv[])
 
     // If the top-level script failed while yielding (e.g. error() inside a coroutine
     // resumed by the event loop), the error is surfaced here instead of being lost.
-    std::string mainError = Lode::Task::GetMainThreadError();
+    std::string mainError = Lode::Task::GetMainThreadError(vm);
     if (!mainError.empty())
     {
         Lode::Diagnostic diag = Lode::Logger::ParseLuauError(mainError, absPath.string());

@@ -14,6 +14,7 @@
 #include <fstream>
 #include <iostream>
 #include <filesystem>
+#include <chrono>
 
 #include "Luau/Parser.h"
 #include "Luau/Scope.h"
@@ -593,6 +594,8 @@ std::string Compiler::GetCacheDirectory()
     fs::path lodeCacheDir = tempDir / "lode_cache";
     std::error_code ec;
     fs::create_directories(lodeCacheDir, ec);
+    // Evict entries older than 30 days the first time the cache is touched.
+    PruneCache(30);
     return lodeCacheDir.string();
 }
 
@@ -614,6 +617,55 @@ static std::array<uint8_t, 32> OptionsFingerprint(const lua_CompileOptions& o)
     return Sha256(bytes);
 }
 
+// Fingerprint of the resolved Luau config that affects diagnostics. A change to
+// .luaurc / .config.luau (e.g. enabling typeErrors, toggling strict mode, or
+// enabling a lint rule) produces a different fingerprint, which invalidates the
+// cache so the next compile re-runs the type checker under the new config (see
+// issue #11). Uses the same FileConfigResolver CompileWithResult uses so the key
+// matches the config the compiler would actually apply.
+static std::array<uint8_t, 32> ConfigFingerprint(std::string_view source, std::string_view filePath)
+{
+    std::optional<Luau::Mode> explicitMode;
+    FileConfigResolver resolver(source, filePath, explicitMode);
+
+    // Trigger the directory walk (readConfigRec) so the script dir's config is
+    // populated, then read the resolved config for the script.
+    if (!filePath.empty())
+    {
+        std::error_code ec;
+        fs::path p = fs::absolute(fs::path(filePath), ec);
+        if (!ec)
+        {
+            Luau::TypeCheckLimits limits;
+            resolver.getConfig(p.string(), limits);
+        }
+    }
+    const Luau::Config& config = resolver.getScriptConfig();
+
+    // Hash the fields that change diagnostic output. The serialization only needs
+    // to be self-consistent (stable across runs) and sensitive to changes.
+    std::string bytes;
+    bytes.reserve(32);
+    bytes.push_back(static_cast<char>(config.mode) & 0xff);
+    bytes.push_back(config.typeErrors ? 1 : 0);
+    bytes.push_back(config.lintErrors ? 1 : 0);
+    bytes.push_back(config.parseOptions.allowDeclarationSyntax ? 1 : 0);
+    bytes.push_back(config.parseOptions.captureComments ? 1 : 0);
+    bytes.push_back(config.parseOptions.storeCstData ? 1 : 0);
+    bytes.push_back(config.parseOptions.noErrorLimit ? 1 : 0);
+    for (uint64_t mask : { config.enabledLint.warningMask, config.fatalLint.warningMask })
+    {
+        for (int i = 0; i < 8; ++i)
+            bytes.push_back(static_cast<char>((mask >> (i * 8)) & 0xff));
+    }
+    for (const auto& g : config.globals)
+    {
+        bytes.append(g);
+        bytes.push_back('\0');
+    }
+    return Sha256(bytes);
+}
+
 std::string Compiler::CompileWithCache(std::string_view source, std::string_view filePath, const lua_CompileOptions* options, std::vector<Diagnostic>* outDiagnostics)
 {
     // No file path -> nothing to key the cache on.
@@ -626,15 +678,27 @@ std::string Compiler::CompileWithCache(std::string_view source, std::string_view
     // reflects --!native/@native/--!optimize/--!debug directives from the source.
     lua_CompileOptions resolvedOptions = options ? *options : ParseOptionsFromSource(source, filePath);
 
-    // The key is derived from the source CONTENT (SHA-256) plus the compile
-    // options fingerprint, so editing a module or toggling its directives
-    // invalidates the cache deterministically without relying on mtimes.
+    // The key is derived from the source CONTENT (SHA-256), the compile options
+    // fingerprint, AND a fingerprint of the resolved Luau config. Editing the
+    // module, toggling its directives, or changing its .luaurc / .config.luau
+    // (typeErrors, strict mode, lints...) all invalidate the cache so diagnostics
+    // reflect the effective config rather than stale cached state. The Luau bytecode
+    // version is also included so upgrading the vendored Luau invalidates old
+    // entries instead of loading incompatible bytecode (issue #11).
     std::array<uint8_t, 32> contentHash = Sha256(source);
     std::array<uint8_t, 32> optionsFp = OptionsFingerprint(resolvedOptions);
+    std::array<uint8_t, 32> configFp = ConfigFingerprint(source, filePath);
 
     std::string keyMaterial;
     keyMaterial.append(reinterpret_cast<const char*>(contentHash.data()), contentHash.size());
     keyMaterial.append(reinterpret_cast<const char*>(optionsFp.data()), optionsFp.size());
+    keyMaterial.append(reinterpret_cast<const char*>(configFp.data()), configFp.size());
+    {
+        // Bytecode version: runtime supports [MIN, MAX], compiler emits TARGET.
+        uint32_t v = LuauBytecodeTag::LBC_VERSION_TARGET;
+        for (int i = 0; i < 4; ++i)
+            keyMaterial.push_back(static_cast<char>((v >> (i * 8)) & 0xff));
+    }
     std::array<uint8_t, 32> keyHash = Sha256(keyMaterial);
 
     std::error_code ec;
@@ -647,14 +711,16 @@ std::string Compiler::CompileWithCache(std::string_view source, std::string_view
 
     struct CacheHeader
     {
-        char magic[4];          // "LODE" file marker
+        char magic[4];           // "LODE" file marker
+        uint8_t version;         // Luau bytecode version (LBC_VERSION_TARGET) at write time
         uint8_t contentHash[32]; // SHA-256 of the source (extra validation)
-        uint32_t size;          // Bytecode size
+        uint32_t size;           // Bytecode size
     };
 
-    // Try reading from the cache first. The filename already encodes the content
-    // hash and options fingerprint, and the header below revalidates it, so a
-    // stale or corrupt entry falls through to a fresh compile instead of running.
+    // Try reading from the cache first. The filename encodes the content hash,
+    // options + config fingerprints, and bytecode version; the header revalidates
+    // the content hash and version, so a stale, corrupt, or version-skewed entry
+    // falls through to a fresh compile instead of running.
     if (fs::exists(cachePath))
     {
         std::ifstream cacheFile(cachePath, std::ios::binary);
@@ -664,6 +730,7 @@ std::string Compiler::CompileWithCache(std::string_view source, std::string_view
             cacheFile.read(reinterpret_cast<char*>(&header), sizeof(CacheHeader));
             if (cacheFile.gcount() == sizeof(CacheHeader) &&
                 std::memcmp(header.magic, "LODE", 4) == 0 &&
+                header.version == static_cast<uint8_t>(LuauBytecodeTag::LBC_VERSION_TARGET) &&
                 std::memcmp(header.contentHash, contentHash.data(), 32) == 0)
             {
                 std::string cachedBytecode(header.size, '\0');
@@ -695,6 +762,7 @@ std::string Compiler::CompileWithCache(std::string_view source, std::string_view
         {
             CacheHeader header{};
             std::memcpy(header.magic, "LODE", 4);
+            header.version = static_cast<uint8_t>(LuauBytecodeTag::LBC_VERSION_TARGET);
             std::memcpy(header.contentHash, contentHash.data(), 32);
             header.size = static_cast<uint32_t>(compiledBytecode.size());
 
@@ -704,6 +772,42 @@ std::string Compiler::CompileWithCache(std::string_view source, std::string_view
     }
 
     return compiledBytecode;
+}
+
+// Evicts cache entries older than `ttlDays` days. The OS temp dir is shared and
+// never otherwise cleaned, so without this the cache grows without bound (one file
+// per unique source + options + config combination — see issue #11). Called once
+// per process via GetCacheDirectory(); the static guard keeps it to a single pass.
+void Compiler::PruneCache(int ttlDays)
+{
+    static bool s_pruned = false;
+    if (s_pruned)
+        return;
+    s_pruned = true;
+
+    fs::path cacheDir = fs::path(GetCacheDirectory());
+    std::error_code ec;
+    if (!fs::exists(cacheDir, ec))
+        return;
+
+    // file_clock has an unspecified epoch, so convert each entry's write time to
+    // system_clock (whose epoch is well-defined) before comparing against the cutoff.
+    auto cutoff = std::chrono::system_clock::now() - std::chrono::hours(24 * ttlDays);
+
+    for (auto it = fs::directory_iterator(cacheDir, ec); it != fs::directory_iterator(); it.increment(ec))
+    {
+        if (ec)
+            break;
+        const auto& entry = *it;
+        if (!entry.is_regular_file(ec))
+            continue;
+        auto lastWrite = entry.last_write_time(ec);
+        if (ec)
+            continue;
+        auto sysWrite = std::chrono::clock_cast<std::chrono::system_clock>(lastWrite);
+        if (sysWrite < cutoff)
+            fs::remove(entry.path(), ec);
+    }
 }
 
 } // namespace Lode

@@ -13,6 +13,7 @@
 #include <iostream>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 
 namespace Lode
 {
@@ -50,6 +51,10 @@ State::~State()
 {
     if (ownsState_ && L_)
     {
+        // Cancel every pending timer for this State before the VM is closed.
+        // Timers hold Value/Coroutine references to this lua_State, so they
+        // must be released while the state is still open (see issue #9).
+        Lode::Task::Shutdown(*this);
         lua_close(L_);
         L_ = nullptr;
     }
@@ -104,7 +109,7 @@ Result<int> State::ExecuteBytecodeWithResults(std::string_view bytecode, std::st
     lua_State* co = lua_newthread(L_);
     if (isMainScript)
     {
-        Lode::Task::SetMainThread(co);
+        Lode::Task::SetMainThread(*this, co);
     }
     int coRef = lua_ref(L_, -1);
     lua_pop(L_, 1);
@@ -328,13 +333,20 @@ void State::SetUserdataGC(const Table& metatable, void(*destructor)(void* ptr))
 {
     if (!L_) return;
     metatable.PushToLuaState(L_);
-    lua_pushlightuserdata(L_, reinterpret_cast<void*>(destructor));
+    // Store the destructor in a full userdata (a real object pointer) and copy its
+    // bytes with memcpy, instead of reinterpret_cast-ing the function pointer to
+    // void*. Casting between function-pointer and object-pointer types is
+    // conditionally-supported / implementation-defined, so the lightuserdata route
+    // is not portable (see issue #12). The closure keeps the userdata alive as an
+    // upvalue, and reads the destructor back out by copying the bytes.
+    void* storage = lua_newuserdata(L_, sizeof(void(*)(void*)));
+    std::memcpy(storage, &destructor, sizeof(destructor));
     auto gcFunc = [](lua_State* L) -> int {
-        auto* dt = reinterpret_cast<void(*)(void*)>(lua_touserdata(L, lua_upvalueindex(1)));
-        void* ud = lua_touserdata(L, 1);
-        if (dt && ud) {
+        void (*dt)(void*) = nullptr;
+        if (void* storage = lua_touserdata(L, lua_upvalueindex(1)))
+            std::memcpy(&dt, storage, sizeof(dt));
+        if (void* ud = lua_touserdata(L, 1))
             dt(ud);
-        }
         return 0;
     };
     lua_pushcclosure(L_, gcFunc, "__gc", 1);

@@ -2,31 +2,58 @@
 // SPDX-License-Identifier: MIT
 #include "Lode/Task.hpp"
 #include "Lode/EventLoop.hpp"
+#include "TaskContext.hpp"
 #define NOMINMAX
 #include "uv.h"
+#include "lua.h"
 #include "Lode/Logger.hpp"
 #include <unordered_map>
-#include <atomic>
 #include <vector>
 
 namespace Lode
 {
 
-static std::atomic<int> g_nextTimerId{ 1 };
+static const char* const kTaskCtxKey = "_LODE_TASK_CTX";
 
-static lua_State* g_mainThread = nullptr;
-static std::string g_mainThreadError;
-
-void Task::SetMainThread(lua_State* L)
+static TaskContext* GetContext(lua_State* L)
 {
-    g_mainThread = L;
-    g_mainThreadError.clear();
+    if (!L) return nullptr;
+    lua_getfield(L, LUA_REGISTRYINDEX, kTaskCtxKey);
+    auto* ctx = static_cast<TaskContext*>(lua_touserdata(L, -1));
+    lua_pop(L, 1);
+    return ctx;
 }
 
-std::string Task::GetMainThreadError()
+static TaskContext* GetOrCreateContext(lua_State* L)
 {
-    std::string error = g_mainThreadError;
-    g_mainThreadError.clear();
+    if (!L) return nullptr;
+    if (TaskContext* existing = GetContext(L))
+        return existing;
+
+    auto* mem = static_cast<TaskContext*>(lua_newuserdata(L, sizeof(TaskContext)));
+    new (mem) TaskContext();
+    lua_pushvalue(L, -1);
+    lua_setfield(L, LUA_REGISTRYINDEX, kTaskCtxKey);
+    lua_pop(L, 1);
+    return mem;
+}
+
+void Task::SetMainThread(State& vm, lua_State* L)
+{
+    TaskContext* ctx = GetOrCreateContext(vm.GetMainThread());
+    if (ctx)
+    {
+        ctx->mainThread = L;
+        ctx->mainThreadError.clear();
+    }
+}
+
+std::string Task::GetMainThreadError(State& vm)
+{
+    TaskContext* ctx = GetContext(vm.GetMainThread());
+    if (!ctx) return "";
+    std::string error = ctx->mainThreadError;
+    ctx->mainThreadError.clear();
     return error;
 }
 
@@ -34,14 +61,13 @@ struct TimerData
 {
     int timerId = 0;
     lua_State* L = nullptr;
+    TaskContext* ctx = nullptr;
     Value callback;
     Coroutine coroutine;
     bool recurring = false;
     std::vector<Value> args;
     uv_timer_t handle{};
 };
-
-static std::unordered_map<int, TimerData*> g_activeTimers;
 
 static void SafeDestroyTimer(TimerData* data)
 {
@@ -60,13 +86,74 @@ static void SafeDestroyTimer(TimerData* data)
     }
 }
 
+TaskContext::~TaskContext()
+{
+    // Normally empty: Task::Shutdown closes and flushes every timer before
+    // destroying the context. This is only a defensive fallback.
+    for (auto& [id, data] : timers)
+    {
+        (void)id;
+        SafeDestroyTimer(data);
+    }
+    timers.clear();
+}
+
+void Task::Shutdown(State& vm)
+{
+    lua_State* L = vm.GetMainThread();
+    if (!L) return;
+
+    lua_getfield(L, LUA_REGISTRYINDEX, kTaskCtxKey);
+    TaskContext* ctx = static_cast<TaskContext*>(lua_touserdata(L, -1));
+    if (!ctx)
+    {
+        lua_pop(L, 1);
+        return;
+    }
+
+    uv_loop_t* loop = EventLoop::Default().GetUVLoop();
+    for (auto& [id, data] : ctx->timers)
+    {
+        (void)id;
+        uv_timer_stop(&data->handle);
+        if (!uv_is_closing(reinterpret_cast<uv_handle_t*>(&data->handle)))
+        {
+            uv_close(reinterpret_cast<uv_handle_t*>(&data->handle), [](uv_handle_t* handle) {
+                delete static_cast<TimerData*>(handle->data);
+            });
+        }
+        else
+        {
+            delete data;
+        }
+    }
+    ctx->timers.clear();
+
+    // Destroy the per-State context before the VM is released; the timers (and
+    // the Value/Coroutine references they hold) are freed below while the VM is
+    // still alive, so lua_unref runs against an open lua_State.
+    ctx->~TaskContext();
+    lua_pushnil(L);
+    lua_setfield(L, LUA_REGISTRYINDEX, kTaskCtxKey);
+    lua_pop(L, 1);
+
+    // Flush pending uv_close callbacks so the TimerData heap objects are freed now.
+    if (loop)
+        uv_run(loop, UV_RUN_NOWAIT);
+}
+
 int Task::Wait(State& vm, double seconds)
 {
+    TaskContext* ctx = GetOrCreateContext(vm.GetMainThread());
+    if (!ctx) return 0;
+
     auto* timerData = new TimerData();
-    timerData->timerId = g_nextTimerId++;
+    timerData->timerId = ctx->nextTimerId++;
     timerData->L = vm.GetLuaState();
+    timerData->ctx = ctx;
     timerData->coroutine = Coroutine(vm.GetLuaState());
     timerData->recurring = false;
+    ctx->timers[timerData->timerId] = timerData;
 
     uv_loop_t* loop = EventLoop::Default().GetUVLoop();
     uv_timer_init(loop, &timerData->handle);
@@ -79,9 +166,10 @@ int Task::Wait(State& vm, double seconds)
             auto res = data->coroutine.Resume();
             if (res.IsError())
             {
-                if (g_mainThread && data->coroutine.GetThreadState() == g_mainThread)
+                if (data->ctx && data->ctx->mainThread &&
+                    data->coroutine.GetThreadState() == data->ctx->mainThread)
                 {
-                    g_mainThreadError = res.GetError().ErrorMessage();
+                    data->ctx->mainThreadError = res.GetError().ErrorMessage();
                 }
                 else
                 {
@@ -93,6 +181,8 @@ int Task::Wait(State& vm, double seconds)
             }
         }
         uv_timer_stop(handle);
+        if (data && data->ctx)
+            data->ctx->timers.erase(data->timerId);
         SafeDestroyTimer(data);
     };
 
@@ -105,15 +195,19 @@ int Task::Wait(State& vm, double seconds)
 
 int Task::SetTimeout(State& vm, const Value& callback, double delayMs, const std::vector<Value>& args)
 {
-    int id = g_nextTimerId++;
+    TaskContext* ctx = GetOrCreateContext(vm.GetMainThread());
+    if (!ctx) return 0;
+
+    int id = ctx->nextTimerId++;
     auto* timerData = new TimerData();
     timerData->timerId = id;
-    timerData->L = vm.GetLuaState();
+    timerData->L = vm.GetMainThread();
+    timerData->ctx = ctx;
     timerData->callback = callback;
     timerData->recurring = false;
     timerData->args = args;
 
-    g_activeTimers[id] = timerData;
+    ctx->timers[id] = timerData;
 
     uv_loop_t* loop = EventLoop::Default().GetUVLoop();
     uv_timer_init(loop, &timerData->handle);
@@ -133,9 +227,10 @@ int Task::SetTimeout(State& vm, const Value& callback, double delayMs, const std
                 diag.code = "TaskError";
                 Logger::EmitDiagnostic(diag);
             }
-            g_activeTimers.erase(data->timerId);
         }
         uv_timer_stop(handle);
+        if (data && data->ctx)
+            data->ctx->timers.erase(data->timerId);
         SafeDestroyTimer(data);
     };
 
@@ -148,27 +243,33 @@ int Task::SetTimeout(State& vm, const Value& callback, double delayMs, const std
 
 void Task::ClearTimeout(State& vm, int timerId)
 {
-    auto it = g_activeTimers.find(timerId);
-    if (it != g_activeTimers.end())
+    TaskContext* ctx = GetContext(vm.GetMainThread());
+    if (!ctx) return;
+    auto it = ctx->timers.find(timerId);
+    if (it != ctx->timers.end())
     {
         TimerData* data = it->second;
         uv_timer_stop(&data->handle);
-        g_activeTimers.erase(it);
+        ctx->timers.erase(it);
         SafeDestroyTimer(data);
     }
 }
 
 int Task::SetInterval(State& vm, const Value& callback, double intervalMs, const std::vector<Value>& args)
 {
-    int id = g_nextTimerId++;
+    TaskContext* ctx = GetOrCreateContext(vm.GetMainThread());
+    if (!ctx) return 0;
+
+    int id = ctx->nextTimerId++;
     auto* timerData = new TimerData();
     timerData->timerId = id;
-    timerData->L = vm.GetLuaState();
+    timerData->L = vm.GetMainThread();
+    timerData->ctx = ctx;
     timerData->callback = callback;
     timerData->recurring = true;
     timerData->args = args;
 
-    g_activeTimers[id] = timerData;
+    ctx->timers[id] = timerData;
 
     uv_loop_t* loop = EventLoop::Default().GetUVLoop();
     uv_timer_init(loop, &timerData->handle);
