@@ -14,6 +14,7 @@ ValueType StackValue::GetType() const
     case LUA_TNIL: return ValueType::Nil;
     case LUA_TBOOLEAN: return ValueType::Boolean;
     case LUA_TNUMBER: return ValueType::Number; // Could be Integer, but Lua API just returns Number
+    case LUA_TINTEGER: return ValueType::Integer;
     case LUA_TSTRING: return ValueType::String;
     case LUA_TTABLE: return ValueType::Table;
     case LUA_TFUNCTION: return ValueType::Function;
@@ -28,7 +29,7 @@ ValueType StackValue::GetType() const
 bool StackValue::IsNil() const { return lua_isnil(L_, index_); }
 bool StackValue::IsBoolean() const { return lua_isboolean(L_, index_); }
 bool StackValue::IsNumber() const { return lua_isnumber(L_, index_); }
-bool StackValue::IsInteger() const { return lua_isnumber(L_, index_); }
+bool StackValue::IsInteger() const { return lua_type(L_, index_) == LUA_TINTEGER; }
 bool StackValue::IsString() const { return lua_isstring(L_, index_); }
 bool StackValue::IsBuffer() const { return lua_type(L_, index_) == LUA_TBUFFER; }
 bool StackValue::IsTable() const { return lua_istable(L_, index_); }

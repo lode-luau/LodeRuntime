@@ -404,7 +404,7 @@ void State::PushTable(const Table& table) { if (L_) table.PushToLuaState(L_); }
 bool State::IsNil(int index) const { return L_ ? (lua_isnil(L_, index) != 0) : false; }
 bool State::IsBoolean(int index) const { return L_ ? (lua_isboolean(L_, index) != 0) : false; }
 bool State::IsNumber(int index) const { return L_ ? (lua_isnumber(L_, index) != 0) : false; }
-bool State::IsInteger(int index) const { return L_ ? (lua_isnumber(L_, index) != 0) : false; }
+bool State::IsInteger(int index) const { return L_ ? (lua_type(L_, index) == LUA_TINTEGER) : false; }
 bool State::IsString(int index) const { return L_ ? (lua_isstring(L_, index) != 0) : false; }
 bool State::IsTable(int index) const { return L_ ? (lua_istable(L_, index) != 0) : false; }
 bool State::IsFunction(int index) const { return L_ ? (lua_isfunction(L_, index) != 0) : false; }
