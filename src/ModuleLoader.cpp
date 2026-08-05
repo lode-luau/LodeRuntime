@@ -409,6 +409,19 @@ static int LoadModuleImpl(lua_State* L, void* ctx, const char* path, const char*
                 std::string relLibPath = jsonDoc["libraries"][platform][arch];
                 fs::path fullLibPath = dirPath / relLibPath;
 
+                // Prefer the module binary next to the executable: the build drops a
+                // config-matched copy there (Debug or Release), while the lode.json
+                // "libs/" copy is overwritten by whichever configuration was built
+                // last. Loading a module built with a different CRT/std::string ABI
+                // than the running exe corrupts cross-boundary strings and crashes.
+                std::string exePath = Platform::GetExecutablePath();
+                if (!exePath.empty())
+                {
+                    fs::path exeDirCandidate = fs::path(exePath).parent_path() / fullLibPath.filename();
+                    if (fs::exists(exeDirCandidate))
+                        fullLibPath = exeDirCandidate;
+                }
+
                 auto libResult = Platform::DynamicLibrary::Open(fullLibPath.string());
                 if (libResult.IsOk())
                 {
@@ -448,22 +461,21 @@ static int LoadModuleImpl(lua_State* L, void* ctx, const char* path, const char*
         }
     }
 
-    // Pure Luau module resolution
+    // Pure Luau module resolution. Always try the ".luau" variant: fs::path
+    // treats "sanity.config" as having extension ".config", so a has_extension()
+    // check would wrongly skip "sanity.config.luau" and fall through to init.luau.
     fs::path scriptToLoad;
     fs::path initLuauPath = dirPath / "init.luau";
-    fs::path directFile = targetPath;
-    if (!directFile.has_extension())
-    {
-        directFile += ".luau";
-    }
+    fs::path exactFile = targetPath;
+    fs::path luauVariant(targetPath.string() + ".luau");
 
-    if (fs::is_regular_file(targetPath))
+    if (fs::is_regular_file(exactFile))
     {
-        scriptToLoad = targetPath;
+        scriptToLoad = exactFile;
     }
-    else if (fs::is_regular_file(directFile))
+    else if (fs::is_regular_file(luauVariant))
     {
-        scriptToLoad = directFile;
+        scriptToLoad = luauVariant;
     }
     else if (fs::is_regular_file(initLuauPath))
     {
