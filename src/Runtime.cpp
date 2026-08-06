@@ -12,10 +12,22 @@
 #include <vector>
 #include <string>
 #include <filesystem>
+#include <algorithm>
+#include <cctype>
 
 namespace fs = std::filesystem;
 
+static std::string PathToUtf8(const fs::path& path)
+{
+    std::u8string utf8 = path.u8string();
+    return std::string(reinterpret_cast<const char*>(utf8.data()), utf8.size());
+}
+
+#if defined(_WIN32)
+int wmain(int argc, wchar_t* argv[])
+#else
 int main(int argc, char* argv[])
+#endif
 {
     // Initialize cross-platform CrashHandler and Logger ANSI support
     Lode::Platform::CrashHandler::Initialize();
@@ -28,14 +40,28 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    std::string filePath = argv[1];
+    fs::path filePath = fs::path(argv[1]);
+    std::string filePathUtf8 = PathToUtf8(filePath);
     if (!fs::exists(filePath))
     {
         Lode::Diagnostic diag;
-        diag.filePath = filePath;
-        diag.message = "File not found: " + filePath;
+        diag.filePath = filePathUtf8;
+        diag.message = "File not found: " + filePathUtf8;
         diag.code = "E0001";
         diag.helps.push_back("Check if the target path and filename are correct.");
+        Lode::Logger::EmitDiagnostic(diag);
+        return 1;
+    }
+
+    if (!fs::is_regular_file(filePath))
+    {
+        Lode::Diagnostic diag;
+        diag.filePath = filePathUtf8;
+        diag.message = fs::is_directory(filePath)
+            ? "Path is a directory, expected a .luau or .luac file: " + filePathUtf8
+            : "Path is not a regular file: " + filePathUtf8;
+        diag.code = "E0003";
+        diag.helps.push_back("Pass a .luau or .luac file as the script argument.");
         Lode::Logger::EmitDiagnostic(diag);
         return 1;
     }
@@ -44,8 +70,8 @@ int main(int argc, char* argv[])
     if (!file.is_open())
     {
         Lode::Diagnostic diag;
-        diag.filePath = filePath;
-        diag.message = "Failed to open file: " + filePath;
+        diag.filePath = filePathUtf8;
+        diag.message = "Failed to open file: " + filePathUtf8;
         diag.code = "E0002";
         diag.helps.push_back("Verify file permissions and accessibility.");
         Lode::Logger::EmitDiagnostic(diag);
@@ -56,13 +82,18 @@ int main(int argc, char* argv[])
     file.close();
 
     std::string bytecode;
-    if (filePath.size() >= 5 && filePath.substr(filePath.size() - 5) == ".luau")
+    std::string extension = filePath.extension().string();
+    std::transform(extension.begin(), extension.end(), extension.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+
+    if (extension == ".luau")
     {
         // Cached compile: on a cache hit the source is not type-checked again,
         // so warm runs start near-instantly. Diagnostics are only produced on a
         // cache miss (first run or when the file changed).
         std::vector<Lode::Diagnostic> diagnostics;
-        bytecode = Lode::Compiler::CompileWithCache(content, filePath, nullptr, &diagnostics);
+        bytecode = Lode::Compiler::CompileWithCache(content, filePathUtf8, nullptr, &diagnostics);
 
         bool hasErrors = false;
         for (const auto& diag : diagnostics)
@@ -97,17 +128,18 @@ int main(int argc, char* argv[])
     Lode::State vm = std::move(stateResult.GetValue());
 
     fs::path absPath = fs::absolute(filePath);
+    std::string absPathUtf8 = PathToUtf8(absPath);
     fs::path parentPath = absPath.parent_path();
     if (!parentPath.empty())
     {
-        vm.AddModulePath(parentPath.string());
+        vm.AddModulePath(PathToUtf8(parentPath));
     }
 
-    std::string chunkName = "@" + absPath.string();
+    std::string chunkName = "@" + absPathUtf8;
     auto execResult = vm.ExecuteBytecode(bytecode, chunkName);
     if (execResult.IsError())
     {
-        Lode::Diagnostic diag = Lode::Logger::ParseLuauError(execResult.GetError().ErrorMessage(), absPath.string());
+        Lode::Diagnostic diag = Lode::Logger::ParseLuauError(execResult.GetError().ErrorMessage(), absPathUtf8);
         diag.code = "RuntimeError";
         Lode::Logger::EmitDiagnostic(diag);
         return 1;
@@ -121,7 +153,7 @@ int main(int argc, char* argv[])
     std::string mainError = Lode::Task::GetMainThreadError(vm);
     if (!mainError.empty())
     {
-        Lode::Diagnostic diag = Lode::Logger::ParseLuauError(mainError, absPath.string());
+        Lode::Diagnostic diag = Lode::Logger::ParseLuauError(mainError, absPathUtf8);
         diag.code = "RuntimeError";
         Lode::Logger::EmitDiagnostic(diag);
         return 1;

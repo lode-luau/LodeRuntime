@@ -1,15 +1,15 @@
 # LodeRuntime — Workflow
 
 ## Branch naming
-- Daily work branches, one per batch: `fix/runtime-issues-YYYYDDMM-N`.
-- The date component is year, day, month, with zero padding: `20260508` means 2026-08-05. Use the next available numeric suffix for that date, for example `fix/runtime-issues-20260508-3`.
+- Daily work branches, one per batch: `fix/runtime-issues-YYYYMMDD-N`.
+- The date component is year, month, day, with zero padding: `20260805` means 2026-08-05. Use the next available numeric suffix for that date, for example `fix/runtime-issues-20260805-3`.
 - The old `fix/runtime-issues` long-lived branch is retired. Never use it.
 - Start every new branch from the latest `main`.
 - Do not reuse a suffix that already exists locally or on `origin`.
 
 ## Flow
 1. Update local `main`: `git checkout main` followed by `git pull origin main`.
-2. Check existing branch suffixes and create `fix/runtime-issues-YYYYDDMM-N` from the updated `main`.
+2. Check existing branch suffixes and create `fix/runtime-issues-YYYYMMDD-N` from the updated `main`.
 3. Make changes. Each independent fix or feature gets its own commit.
 4. Before every commit, inspect `git status`, `git diff`, and `git diff --check`, then run the required validation below.
 5. Push: `git push -u origin fix/runtime-issues-YYYYDDMM-N`.

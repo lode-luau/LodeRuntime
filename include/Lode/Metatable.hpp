@@ -37,7 +37,7 @@ public:
     void SetNewIndexFunction(const std::function<void(State& vm, Value key, Value val)>& fn);
     /** @brief Sets __tostring metamethod. */
     void SetToString(const std::function<std::string(State& vm)>& fn);
-    /** @brief Sets __gc metamethod (only works on Userdata in standard Lua 5.1/Luau, but can be simulated). */
+    /** @brief Deprecated: Luau does not run metatable __gc methods. */
     void SetGC(const std::function<void(State& vm)>& fn);
     /** @brief Sets __call metamethod to make the table callable like a function. */
     void SetCall(const std::function<Value(State& vm, const std::vector<Value>& args)>& fn);

@@ -25,6 +25,7 @@
 #include <memory>
 #include <cstring>
 #include <algorithm>
+#include <cstdio>
 
 namespace {
     void alloc_buffer(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {
@@ -36,9 +37,13 @@ namespace {
 class WritableStream {
 public:
     uv_stream_t* stream = nullptr;
+    uv_loop_t* loop = nullptr;
+    uv_file file = -1;
+    bool fileMode = false;
 
     WritableStream() = default;
-    explicit WritableStream(uv_stream_t* s) : stream(s) {}
+    WritableStream(uv_loop_t* l, uv_stream_t* s) : stream(s), loop(l) {}
+    WritableStream(uv_loop_t* l, uv_file f) : loop(l), file(f), fileMode(true) {}
 
     void Shutdown() {
         if (!stream) return;
@@ -53,7 +58,32 @@ public:
     }
 
     void writeData(const char* data, size_t len) {
-        if (!stream || len == 0) return;
+        if (len == 0) return;
+
+        if (fileMode) {
+            struct FileWriteReq {
+                uv_fs_t req;
+                uv_buf_t buf;
+            };
+
+            auto* wr = new FileWriteReq;
+            wr->buf.base = new char[len];
+            wr->buf.len = len;
+            std::memcpy(wr->buf.base, data, len);
+            int result = uv_fs_write(loop, &wr->req, file, &wr->buf, 1, -1, [](uv_fs_t* req) {
+                auto* wr = reinterpret_cast<FileWriteReq*>(req);
+                delete[] wr->buf.base;
+                uv_fs_req_cleanup(req);
+                delete wr;
+            });
+            if (result < 0) {
+                delete[] wr->buf.base;
+                delete wr;
+            }
+            return;
+        }
+
+        if (!stream) return;
         
         struct WriteReq {
             uv_write_t req;
@@ -72,7 +102,10 @@ public:
         });
     }
 
+    bool IsAvailable() const { return fileMode || stream != nullptr; }
+
     Lode::Value write(Lode::State& vm, const std::vector<Lode::Value>& args) {
+        if (!IsAvailable()) { vm.RaiseError("stdio writable stream is unavailable"); return Lode::Value(); }
         if (args.empty()) return Lode::Value();
         
         if (args[0].IsString()) {
@@ -87,6 +120,7 @@ public:
     }
 
     Lode::Value writeLine(Lode::State& vm, const std::vector<Lode::Value>& args) {
+        if (!IsAvailable()) { vm.RaiseError("stdio writable stream is unavailable"); return Lode::Value(); }
         if (args.empty()) return Lode::Value();
         
         if (args[0].IsString()) {
@@ -130,6 +164,10 @@ public:
 class ReadableStream {
 public:
     uv_stream_t* stream = nullptr;
+    uv_loop_t* loop = nullptr;
+    uv_file file = -1;
+    bool fileMode = false;
+    int64_t fileOffset = 0;
     std::vector<uint8_t> buffer;
     bool reading = false;
     lua_State* mainL = nullptr;
@@ -154,7 +192,8 @@ public:
     std::deque<PendingRead> pendingQueue;
 
     ReadableStream() = default;
-    explicit ReadableStream(uv_stream_t* s) : stream(s) {}
+    ReadableStream(uv_loop_t* l, uv_stream_t* s) : stream(s), loop(l) {}
+    ReadableStream(uv_loop_t* l, uv_file f) : loop(l), file(f), fileMode(true) {}
 
     void Shutdown() {
         shuttingDown = true;
@@ -177,8 +216,54 @@ public:
         }
     }
 
+    void startFileRead() {
+        struct FileReadReq {
+            uv_fs_t req;
+            uv_buf_t buf;
+            ReadableStream* owner;
+        };
+
+        auto* rr = new FileReadReq;
+        rr->owner = this;
+        rr->buf.base = new char[4096];
+        rr->buf.len = 4096;
+        reading = true;
+        int result = uv_fs_read(loop, &rr->req, file, &rr->buf, 1, fileOffset, [](uv_fs_t* req) {
+            auto* rr = reinterpret_cast<FileReadReq*>(req);
+            ReadableStream* self = rr->owner;
+            ssize_t nread = req->result;
+            if (nread > 0) {
+                self->fileOffset += nread;
+                self->buffer.insert(self->buffer.end(), rr->buf.base, rr->buf.base + nread);
+            }
+            self->reading = false;
+            uv_fs_req_cleanup(req);
+            delete[] rr->buf.base;
+            delete rr;
+
+            if (nread > 0)
+                self->processQueue();
+            else
+                self->processQueue(true);
+
+            if (!self->shuttingDown && !self->pendingQueue.empty() && nread > 0)
+                self->startFileRead();
+        });
+        if (result < 0) {
+            reading = false;
+            delete[] rr->buf.base;
+            delete rr;
+            processQueue(true);
+        }
+    }
+
     void startReadIfNeeded() {
-        if (shuttingDown || !stream || reading) return;
+        if (shuttingDown || reading) return;
+        if (fileMode) {
+            startFileRead();
+            return;
+        }
+        if (!stream) return;
         reading = true;
         stream->data = this;
         uv_read_start(stream, alloc_buffer, [](uv_stream_t* s, ssize_t nread, const uv_buf_t* buf) {
@@ -295,7 +380,7 @@ public:
             }
         }
         
-        if (pendingQueue.empty() && reading) {
+        if (pendingQueue.empty() && reading && !fileMode) {
             uv_read_stop(stream);
             reading = false;
         }
@@ -307,6 +392,7 @@ public:
     }
 
     Lode::Value read(Lode::State& vm, const std::vector<Lode::Value>& args) {
+        if (!stream && !fileMode) { vm.RaiseError("stdio readable stream is unavailable"); return Lode::Value(); }
         mainL = vm.GetMainThread();
         PendingRead req;
         if (args.size() > 0 && args[0].IsNumber()) {
@@ -326,6 +412,7 @@ public:
     }
     
     Lode::Value readBuffer(Lode::State& vm, const std::vector<Lode::Value>& args) {
+        if (!stream && !fileMode) { vm.RaiseError("stdio readable stream is unavailable"); return Lode::Value(); }
         mainL = vm.GetMainThread();
         PendingRead req;
         req.isBuffer = true;
@@ -346,6 +433,7 @@ public:
     }
     
     Lode::Value readLine(Lode::State& vm, const std::vector<Lode::Value>& args) {
+        if (!stream && !fileMode) { vm.RaiseError("stdio readable stream is unavailable"); return Lode::Value(); }
         mainL = vm.GetMainThread();
         PendingRead req;
         req.isLine = true;
@@ -361,6 +449,7 @@ public:
     }
 
     Lode::Value readInto(Lode::State& vm, const std::vector<Lode::Value>& args) {
+        if (!stream && !fileMode) { vm.RaiseError("stdio readable stream is unavailable"); return Lode::Value(); }
         mainL = vm.GetMainThread();
         if (args.empty() || !args[0].IsBuffer()) return Lode::Value(0.0);
         
@@ -394,6 +483,7 @@ public:
     }
 
     Lode::Value readAsync(Lode::State& vm, const std::vector<Lode::Value>& args) {
+        if (!stream && !fileMode) { vm.RaiseError("stdio readable stream is unavailable"); return Lode::Value(); }
         mainL = vm.GetMainThread();
         if (args.empty() || !args[0].IsFunction()) return Lode::Value();
         
@@ -419,6 +509,7 @@ public:
     }
 
     Lode::Value readBufferAsync(Lode::State& vm, const std::vector<Lode::Value>& args) {
+        if (!stream && !fileMode) { vm.RaiseError("stdio readable stream is unavailable"); return Lode::Value(); }
         mainL = vm.GetMainThread();
         if (args.empty() || !args[0].IsFunction()) return Lode::Value();
         
@@ -445,6 +536,7 @@ public:
     }
 
     Lode::Value readIntoAsync(Lode::State& vm, const std::vector<Lode::Value>& args) {
+        if (!stream && !fileMode) { vm.RaiseError("stdio readable stream is unavailable"); return Lode::Value(); }
         mainL = vm.GetMainThread();
         if (args.size() < 2 || !args[0].IsBuffer() || !args[1].IsFunction()) return Lode::Value();
         
@@ -503,15 +595,22 @@ LODE_MODULE(vm)
         uv_stream_t* stream = nullptr;
         if (type == UV_TTY) {
             uv_tty_t* tty = new uv_tty_t;
-            uv_tty_init(loop, tty, fd, 0); 
+            if (uv_tty_init(loop, tty, fd, 0) < 0) {
+                delete tty;
+                return std::make_shared<WritableStream>();
+            }
             stream = reinterpret_cast<uv_stream_t*>(tty);
         } else if (type == UV_NAMED_PIPE) {
             uv_pipe_t* pipe = new uv_pipe_t;
-            uv_pipe_init(loop, pipe, 0);
-            uv_pipe_open(pipe, fd);
+            if (uv_pipe_init(loop, pipe, 0) < 0 || uv_pipe_open(pipe, fd) < 0) {
+                delete pipe;
+                return std::make_shared<WritableStream>();
+            }
             stream = reinterpret_cast<uv_stream_t*>(pipe);
+        } else if (type == UV_FILE) {
+            return std::make_shared<WritableStream>(loop, static_cast<uv_file>(fd));
         }
-        return std::make_shared<WritableStream>(stream);
+        return std::make_shared<WritableStream>(loop, stream);
     };
 
     auto createRead = [loop](int fd) {
@@ -519,15 +618,22 @@ LODE_MODULE(vm)
         uv_stream_t* stream = nullptr;
         if (type == UV_TTY) {
             uv_tty_t* tty = new uv_tty_t;
-            uv_tty_init(loop, tty, fd, 1);
+            if (uv_tty_init(loop, tty, fd, 1) < 0) {
+                delete tty;
+                return std::make_shared<ReadableStream>();
+            }
             stream = reinterpret_cast<uv_stream_t*>(tty);
         } else if (type == UV_NAMED_PIPE) {
             uv_pipe_t* pipe = new uv_pipe_t;
-            uv_pipe_init(loop, pipe, 0);
-            uv_pipe_open(pipe, fd);
+            if (uv_pipe_init(loop, pipe, 0) < 0 || uv_pipe_open(pipe, fd) < 0) {
+                delete pipe;
+                return std::make_shared<ReadableStream>();
+            }
             stream = reinterpret_cast<uv_stream_t*>(pipe);
+        } else if (type == UV_FILE) {
+            return std::make_shared<ReadableStream>(loop, static_cast<uv_file>(fd));
         }
-        return std::make_shared<ReadableStream>(stream);
+        return std::make_shared<ReadableStream>(loop, stream);
     };
 
     auto cppStdin = createRead(0);
@@ -579,6 +685,7 @@ LODE_MODULE(vm)
     exports.Set("stderr", stderrVal);
 
     exports.Set("print", vm.CreateFastFunction([cppStdout](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
+        if (!cppStdout->IsAvailable()) { vm.RaiseError("stdio stdout is unavailable"); return Lode::Value(); }
         std::string out;
         for (size_t i = 0; i < args.Size(); ++i) {
             if (i > 0) out += " ";
@@ -597,6 +704,7 @@ LODE_MODULE(vm)
     }));
 
     exports.Set("eprint", vm.CreateFastFunction([cppStderr](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
+        if (!cppStderr->IsAvailable()) { vm.RaiseError("stdio stderr is unavailable"); return Lode::Value(); }
         std::string out;
         for (size_t i = 0; i < args.Size(); ++i) {
             if (i > 0) out += " ";
@@ -615,6 +723,7 @@ LODE_MODULE(vm)
     }));
 
     exports.Set("write", vm.CreateFastFunction([cppStdout](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
+        if (!cppStdout->IsAvailable()) { vm.RaiseError("stdio stdout is unavailable"); return Lode::Value(); }
         if (args.Size() > 0) {
             if (args[0].IsString()) {
                 std::string_view sv = args[0].AsStringView();
@@ -629,6 +738,8 @@ LODE_MODULE(vm)
     }));
 
     exports.Set("prompt", vm.CreateFastFunction([cppStdin, cppStdout](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
+        if (!cppStdin->stream && !cppStdin->fileMode) { vm.RaiseError("stdio stdin is unavailable"); return Lode::Value(); }
+        if (!cppStdout->IsAvailable()) { vm.RaiseError("stdio stdout is unavailable"); return Lode::Value(); }
         if (args.Size() > 0 && args[0].IsString()) {
             std::string_view sv = args[0].AsStringView();
             cppStdout->writeData(sv.data(), sv.size());
@@ -645,6 +756,7 @@ LODE_MODULE(vm)
     }));
 
     exports.Set("clear", vm.CreateFastFunction([cppStdout](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
+        if (!cppStdout->IsAvailable()) { vm.RaiseError("stdio stdout is unavailable"); return Lode::Value(); }
         const char* clearCmd = "\033[2J\033[H";
         cppStdout->writeData(clearCmd, std::strlen(clearCmd));
         return Lode::Value();

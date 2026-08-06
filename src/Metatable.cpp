@@ -136,37 +136,9 @@ void Metatable::SetToString(const std::function<std::string(State& vm)>& fn)
 
 void Metatable::SetGC(const std::function<void(State& vm)>& fn)
 {
-    lua_State* L = table_.GetLuaState();
-    if (!L) return;
-
-    struct ClosureData
-    {
-        std::function<void(State& vm)> func;
-    };
-    auto cfunc = [](lua_State* L) -> int {
-        auto* data = static_cast<ClosureData*>(lua_touserdata(L, lua_upvalueindex(1)));
-        try
-        {
-            State vm(L);
-            data->func(vm);
-            return 0;
-        }
-        catch (const std::exception& error)
-        {
-            return RaiseCppException(L, "C++ __gc callback exception", error);
-        }
-        catch (...)
-        {
-            return RaiseCppException(L, "C++ __gc callback threw an unknown exception");
-        }
-    };
-
-    table_.PushToLuaState(L);
-    auto* data = Detail::NewLuaOwnedCallbackData(L, ClosureData{ fn });
-    (void)data;
-    lua_pushcclosure(L, cfunc, "__gc", 1);
-    lua_setfield(L, -2, "__gc");
-    lua_pop(L, 1);
+    // Luau does not run metatable __gc methods. Use a tagged userdata destructor
+    // at allocation time for native object lifetime management instead.
+    (void)fn;
 }
 
 void Metatable::SetCall(const std::function<Value(State& vm, const std::vector<Value>& args)>& fn)

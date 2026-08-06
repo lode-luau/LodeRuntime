@@ -23,6 +23,17 @@ namespace fs = std::filesystem;
 namespace Lode
 {
 
+static fs::path PathFromUtf8(std::string_view path)
+{
+    return fs::u8path(path);
+}
+
+static std::string PathToUtf8(const fs::path& path)
+{
+    std::u8string utf8 = path.u8string();
+    return std::string(reinterpret_cast<const char*>(utf8.data()), utf8.size());
+}
+
 fs::path FindLodeJson(const fs::path& startPath)
 {
     fs::path current = startPath;
@@ -84,7 +95,7 @@ static luarequire_NavigateResult reset(lua_State* L, void* ctx, const char* requ
 
     try
     {
-        fs::path p(chunkStr);
+        fs::path p = PathFromUtf8(chunkStr);
         if (p.is_relative())
         {
             p = fs::current_path() / p;
@@ -96,7 +107,7 @@ static luarequire_NavigateResult reset(lua_State* L, void* ctx, const char* requ
         {
             if (canonicalP.filename() == "init.luau")
             {
-                nav->currentPath = canonicalP.parent_path().parent_path();
+                nav->currentPath = canonicalP.parent_path();
                 nav->packagePath = canonicalP.parent_path();
             }
             else
@@ -133,17 +144,17 @@ static std::optional<fs::path> ResolveAliasRecursively(const fs::path& startDir,
         
         if (fs::exists(luauConfigPath))
         {
-            configPathToUse = luauConfigPath.string();
+            configPathToUse = PathToUtf8(luauConfigPath);
             isLuau = true;
         }
         else if (fs::exists(luaurcPath))
         {
-            configPathToUse = luaurcPath.string();
+            configPathToUse = PathToUtf8(luaurcPath);
         }
         
         if (!configPathToUse.empty())
         {
-            std::ifstream file(configPathToUse);
+            std::ifstream file(PathFromUtf8(configPathToUse));
             if (file.is_open())
             {
                 std::string contents((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
@@ -178,7 +189,7 @@ static std::optional<fs::path> ResolveAliasRecursively(const fs::path& startDir,
                 auto it = result.aliases.find(lowerAlias);
                 if (it != nullptr)
                 {
-                    return fs::path(std::string(it->configLocation)).parent_path() / it->value;
+                    return PathFromUtf8(std::string(it->configLocation)).parent_path() / PathFromUtf8(it->value);
                 }
             }
         }
@@ -221,7 +232,10 @@ static luarequire_NavigateResult jump_to_alias(lua_State* L, void* ctx, const ch
             return NAVIGATE_SUCCESS;
         }
 
-        fs::path p(aliasStr);
+        if (!aliasStr.empty() && aliasStr[0] == '@')
+            return NAVIGATE_NOT_FOUND;
+
+        fs::path p = PathFromUtf8(aliasStr);
         if (p.is_relative())
         {
             p = nav->rootPath / p;
@@ -262,7 +276,9 @@ static luarequire_NavigateResult to_child(lua_State* L, void* ctx, const char* n
 static bool check_path_exists(const fs::path& p)
 {
     if (fs::is_regular_file(p)) return true;
-    if (fs::is_regular_file(p.string() + ".luau")) return true;
+    fs::path luauPath = p;
+    luauPath += ".luau";
+    if (fs::is_regular_file(luauPath)) return true;
     if (fs::is_regular_file(p / "init.luau")) return true;
     if (fs::is_regular_file(p / "lode.json")) return true;
     return false;
@@ -295,7 +311,14 @@ static bool is_module_present(lua_State* L, void* ctx)
 
     for (const auto& searchDir : nav->modulePaths)
     {
-        fs::path searchPath = fs::path(searchDir) / p.filename();
+        fs::path searchPath = PathFromUtf8(searchDir) / p.filename();
+        if (check_path_exists(searchPath))
+        {
+            nav->currentPath = fs::weakly_canonical(searchPath);
+            return true;
+        }
+
+        searchPath = p.parent_path().parent_path() / p.filename();
         if (check_path_exists(searchPath))
         {
             nav->currentPath = fs::weakly_canonical(searchPath);
@@ -313,17 +336,17 @@ static bool is_module_present(lua_State* L, void* ctx)
 // it reports WRITE_BUFFER_TOO_SMALL (see issue #10).
 static std::string GetLoadname(const LodeNavigationContext& nav)
 {
-    return nav.currentPath.string();
+    return PathToUtf8(nav.currentPath);
 }
 
 static std::string GetChunkname(const LodeNavigationContext& nav)
 {
-    return "@" + nav.currentPath.string();
+    return "@" + PathToUtf8(nav.currentPath);
 }
 
 static std::string GetCacheKey(const LodeNavigationContext& nav)
 {
-    return nav.currentPath.string();
+    return PathToUtf8(nav.currentPath);
 }
 
 static luarequire_WriteResult get_chunkname(lua_State* L, void* ctx, char* buffer, size_t buffer_size, size_t* size_out)
@@ -419,7 +442,7 @@ static ModuleLoadResult LoadModuleNoJump(lua_State* L, void* ctx, const char* pa
         if (initFn) return { initFn(L), {} };
     }
 
-    fs::path targetPath(loadname ? loadname : (path ? path : ""));
+    fs::path targetPath = PathFromUtf8(loadname ? loadname : (path ? path : ""));
 
     // Resolve via the search directories registered through State::AddModulePath
     // when the module does not exist relative to the requirer. The direct path
@@ -428,7 +451,14 @@ static ModuleLoadResult LoadModuleNoJump(lua_State* L, void* ctx, const char* pa
     {
         for (const auto& searchDir : loaderCtx->modulePaths)
         {
-            fs::path candidate = fs::path(searchDir) / targetPath.filename();
+            fs::path candidate = PathFromUtf8(searchDir) / targetPath.filename();
+            if (check_path_exists(candidate))
+            {
+                targetPath = candidate;
+                break;
+            }
+
+            candidate = targetPath.parent_path().parent_path() / targetPath.filename();
             if (check_path_exists(candidate))
             {
                 targetPath = candidate;
@@ -459,7 +489,7 @@ static ModuleLoadResult LoadModuleNoJump(lua_State* L, void* ctx, const char* pa
         }
         catch (const std::exception& e)
         {
-            return { 0, "Failed to parse lode.json in " + dirPath.string() + ": " + e.what() };
+            return { 0, "Failed to parse lode.json in " + PathToUtf8(dirPath) + ": " + e.what() };
         }
 
         if (jsonDoc.contains("libraries") && jsonDoc["libraries"].is_object())
@@ -478,7 +508,7 @@ static ModuleLoadResult LoadModuleNoJump(lua_State* L, void* ctx, const char* pa
                 }
 
                 std::string relLibPath = libraryEntry.get<std::string>();
-                fs::path fullLibPath = dirPath / relLibPath;
+                fs::path fullLibPath = dirPath / PathFromUtf8(relLibPath);
 
                 if (relLibPath.empty() || !IsPathInside(fullLibPath, dirPath))
                 {
@@ -493,12 +523,12 @@ static ModuleLoadResult LoadModuleNoJump(lua_State* L, void* ctx, const char* pa
                 std::string exePath = Platform::GetExecutablePath();
                 if (!exePath.empty())
                 {
-                    fs::path exeDirCandidate = fs::path(exePath).parent_path() / fullLibPath.filename();
+                    fs::path exeDirCandidate = PathFromUtf8(exePath).parent_path() / fullLibPath.filename();
                     if (fs::exists(exeDirCandidate))
                         fullLibPath = exeDirCandidate;
                 }
 
-                auto libResult = Platform::DynamicLibrary::Open(fullLibPath.string());
+                auto libResult = Platform::DynamicLibrary::Open(PathToUtf8(fullLibPath));
                 if (libResult.IsOk())
                 {
                     auto lib = libResult.GetValue();
@@ -512,19 +542,27 @@ static ModuleLoadResult LoadModuleNoJump(lua_State* L, void* ctx, const char* pa
                     {
                         LodeModuleInitFn initFn = reinterpret_cast<LodeModuleInitFn>(symResult.GetValue());
 
-                        lua_pushstring(L, dirPath.string().c_str());
+                        std::string nativeModulePath = PathToUtf8(dirPath);
+                        lua_pushstring(L, nativeModulePath.c_str());
                         lua_setfield(L, LUA_REGISTRYINDEX, "_LODE_NATIVE_MODULE_PATH");
+
+                        struct NativeModulePathGuard
+                        {
+                            lua_State* state;
+                            ~NativeModulePathGuard()
+                            {
+                                lua_pushnil(state);
+                                lua_setfield(state, LUA_REGISTRYINDEX, "_LODE_NATIVE_MODULE_PATH");
+                            }
+                        } pathGuard{L};
 
                         int nret = initFn(L);
-
-                        lua_pushnil(L);
-                        lua_setfield(L, LUA_REGISTRYINDEX, "_LODE_NATIVE_MODULE_PATH");
 
                         return { nret, {} };
                     }
                     else
                     {
-                        return { 0, "Failed to find LodeModuleInit symbol in native library " + fullLibPath.string() };
+                        return { 0, "Failed to find LodeModuleInit symbol in native library " + PathToUtf8(fullLibPath) };
                     }
                 }
                 else
@@ -541,7 +579,8 @@ static ModuleLoadResult LoadModuleNoJump(lua_State* L, void* ctx, const char* pa
     fs::path scriptToLoad;
     fs::path initLuauPath = dirPath / "init.luau";
     fs::path exactFile = targetPath;
-    fs::path luauVariant(targetPath.string() + ".luau");
+    fs::path luauVariant = targetPath;
+    luauVariant += ".luau";
 
     if (fs::is_regular_file(exactFile))
     {
@@ -557,23 +596,24 @@ static ModuleLoadResult LoadModuleNoJump(lua_State* L, void* ctx, const char* pa
     }
     else
     {
-        return { 0, "Module not found at path: " + targetPath.string() };
+        return { 0, "Module not found at path: " + PathToUtf8(targetPath) };
     }
 
     std::ifstream srcFile(scriptToLoad, std::ios::binary);
     if (!srcFile.is_open())
     {
-        return { 0, "Could not open module file: " + scriptToLoad.string() };
+        return { 0, "Could not open module file: " + PathToUtf8(scriptToLoad) };
     }
     std::string source((std::istreambuf_iterator<char>(srcFile)), std::istreambuf_iterator<char>());
 
-    std::string bytecode = Compiler::CompileWithCache(source, scriptToLoad.string());
+    std::string scriptPath = PathToUtf8(scriptToLoad);
+    std::string bytecode = Compiler::CompileWithCache(source, scriptPath);
     if (bytecode.empty())
     {
-        return { 0, "Failed to compile module: " + scriptToLoad.string() };
+        return { 0, "Failed to compile module: " + scriptPath };
     }
 
-    std::string modChunkName = "@" + scriptToLoad.string();
+    std::string modChunkName = "@" + scriptPath;
     auto execResult = vm.ExecuteBytecodeWithResults(bytecode, modChunkName);
 
     if (execResult.IsError())
@@ -625,7 +665,7 @@ std::string GetCallerChunkName(lua_State* L)
     lua_getfield(L, LUA_REGISTRYINDEX, "_LODE_NATIVE_MODULE_PATH");
     if (lua_isstring(L, -1))
     {
-        requirerChunkname = "@" + (fs::path(lua_tostring(L, -1)) / "init.luau").string();
+        requirerChunkname = "@" + PathToUtf8(PathFromUtf8(lua_tostring(L, -1)) / "init.luau");
     }
     lua_pop(L, 1);
 
@@ -768,19 +808,12 @@ void SetupModuleLoader(lua_State* L, NativeModuleRegistry* registry, const std::
     // std::vectors are destroyed when the VM is collected. It is also referenced
     // from the registry so UpdateModulePaths can reach it and the require closure
     // can safely hold it as an upvalue for the whole State lifetime.
-    auto* ctxMem = static_cast<LodeNavigationContext*>(lua_newuserdata(L, sizeof(LodeNavigationContext)));
+    auto* ctxMem = static_cast<LodeNavigationContext*>(lua_newuserdatadtor(L, sizeof(LodeNavigationContext), [](void* ptr) {
+        static_cast<LodeNavigationContext*>(ptr)->~LodeNavigationContext();
+    }));
     auto* ctx = new (ctxMem) LodeNavigationContext();
     ctx->registry = registry;
     ctx->modulePaths = modulePaths;
-
-    lua_newtable(L);
-    lua_pushcfunction(L, [](lua_State* L) -> int {
-        auto* c = static_cast<LodeNavigationContext*>(lua_touserdata(L, 1));
-        if (c) c->~LodeNavigationContext();
-        return 0;
-    }, "__gc");
-    lua_setfield(L, -2, "__gc");
-    lua_setmetatable(L, -2);
 
     // Keep a registry reference so the context lives as long as the State and is
     // reachable by UpdateModulePaths. The registry is per-lua_State, so two State

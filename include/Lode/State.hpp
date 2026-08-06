@@ -9,6 +9,7 @@
 #include "Lode/Table.hpp"
 #include "Lode/Coroutine.hpp"
 #include "Lode/StackValue.hpp"
+#include "lua.h"
 #include <string>
 #include <string_view>
 #include <span>
@@ -132,6 +133,7 @@ public:
      * @return Pointer to the allocated memory.
      */
     void* CreateUserdata(size_t size);
+    void* CreateUserdata(size_t size, void(*destructor)(void* ptr));
 
     /**
      * @brief Creates a Luau buffer of the specified size.
@@ -141,6 +143,7 @@ public:
     [[nodiscard]] Value CreateBuffer(size_t size);
 
     void SetUserdataMetatable(int index, const Table& metatable);
+    /** @deprecated Luau metatables do not run __gc; pass a destructor to CreateUserdata instead. */
     void SetUserdataGC(const Table& metatable, void(*destructor)(void* ptr));
 
     /**
