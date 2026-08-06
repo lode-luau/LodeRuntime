@@ -49,8 +49,17 @@ private:
 Result<std::shared_ptr<DynamicLibrary>> DynamicLibrary::Open(std::string_view path)
 {
     std::string pathStr(path);
-    std::vector<wchar_t> wPath(pathStr.length() + 1);
-    MultiByteToWideChar(CP_UTF8, 0, pathStr.c_str(), -1, wPath.data(), static_cast<int>(wPath.size()));
+    int wideLength = MultiByteToWideChar(CP_UTF8, 0, pathStr.c_str(), -1, nullptr, 0);
+    if (wideLength == 0)
+    {
+        return Error::Platform("Invalid UTF-8 DLL path: " + pathStr);
+    }
+
+    std::vector<wchar_t> wPath(static_cast<size_t>(wideLength));
+    if (MultiByteToWideChar(CP_UTF8, 0, pathStr.c_str(), -1, wPath.data(), wideLength) == 0)
+    {
+        return Error::Platform("Invalid UTF-8 DLL path: " + pathStr);
+    }
 
     HMODULE handle = LoadLibraryW(wPath.data());
     if (!handle)
