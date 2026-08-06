@@ -265,6 +265,7 @@ int Task::SetTimeout(State& vm, const Value& callback, double delayMs, const std
     if (initStatus != 0)
     {
         delete timerData;
+        vm.RaiseError(std::string("Failed to initialize timeout timer: ") + uv_strerror(initStatus));
         return -1;
     }
 
@@ -325,6 +326,7 @@ int Task::SetTimeout(State& vm, const Value& callback, double delayMs, const std
     {
         ctx->timers.erase(id);
         SafeDestroyTimer(timerData);
+        vm.RaiseError(std::string("Failed to start timeout timer: ") + uv_strerror(startStatus));
         return -1;
     }
 
@@ -364,6 +366,7 @@ int Task::SetInterval(State& vm, const Value& callback, double intervalMs, const
     if (initStatus != 0)
     {
         delete timerData;
+        vm.RaiseError(std::string("Failed to initialize interval timer: ") + uv_strerror(initStatus));
         return -1;
     }
 
@@ -420,6 +423,7 @@ int Task::SetInterval(State& vm, const Value& callback, double intervalMs, const
     {
         ctx->timers.erase(id);
         SafeDestroyTimer(timerData);
+        vm.RaiseError(std::string("Failed to start interval timer: ") + uv_strerror(startStatus));
         return -1;
     }
 
