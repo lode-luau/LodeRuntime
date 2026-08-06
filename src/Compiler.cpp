@@ -651,10 +651,23 @@ std::string Compiler::CompileWithResult(std::string_view source, std::vector<Dia
 
 std::string Compiler::GetCacheDirectory()
 {
-    fs::path tempDir = fs::temp_directory_path();
-    fs::path lodeCacheDir = tempDir / "lode_cache";
+    fs::path cacheBase;
+#ifdef _WIN32
+    if (const char* localAppData = std::getenv("LOCALAPPDATA"))
+        cacheBase = fs::path(localAppData) / "LodeRuntime";
+#else
+    if (const char* home = std::getenv("HOME"))
+        cacheBase = fs::path(home) / ".cache" / "lode-runtime";
+#endif
+    if (cacheBase.empty())
+        cacheBase = fs::temp_directory_path() / "lode-runtime";
+
+    fs::path lodeCacheDir = cacheBase / "cache";
     std::error_code ec;
     fs::create_directories(lodeCacheDir, ec);
+    fs::permissions(lodeCacheDir,
+        fs::perms::owner_all,
+        fs::perm_options::replace, ec);
     // Evict entries older than 30 days the first time the cache is touched.
     PruneCache(30);
     return lodeCacheDir.string();
