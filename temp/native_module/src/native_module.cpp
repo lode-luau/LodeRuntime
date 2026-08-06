@@ -161,6 +161,21 @@ LODE_MODULE(vm)
     modernObject.SetMetatable(modernMetatable);
     exports.Set("modernObject", Lode::Value(modernObject));
 
+    exports.Set("bufferEndianProbe", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs) -> Lode::Value {
+        Lode::Buffer written = vm.CreateBuffer(8).AsBufferObj();
+        written.WriteUInt32(0, 0x01020304u);
+        written.WriteFloat32(4, 1.0f);
+
+        Lode::Buffer read = vm.CreateBuffer(8).AsBufferObj();
+        read.WriteString(0, std::string("\x04\x03\x02\x01\x00\x00\x80\x3f", 8));
+
+        Lode::Table result = vm.CreateTable();
+        result.Set("written", Lode::Value(std::string(static_cast<const char*>(written.Data()), written.Size())));
+        result.Set("readInt", Lode::Value(static_cast<double>(read.ReadUInt32(0))));
+        result.Set("readFloat", Lode::Value(static_cast<double>(read.ReadFloat32(4))));
+        return Lode::Value(result);
+    }));
+
     exports.Set("bufferBoundsProbe", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs args) -> Lode::Value {
         if (args.Size() == 0 || !args[0].IsBuffer()) return Lode::Value();
         Lode::Buffer buffer = args[0].ToValue().AsBufferObj();

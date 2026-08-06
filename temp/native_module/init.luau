@@ -48,6 +48,7 @@ export type NativeModule = {
     makeVector: () -> vector,
     roundTripVector: (value: vector) -> vector,
     modernObject: any,
+    bufferEndianProbe: () -> { written: string, readInt: number, readFloat: number },
     bufferBoundsProbe: (buf: buffer) -> number,
     throwCpp: () -> (),
     getSystemInfo: () -> { platform: string, arch: string },
