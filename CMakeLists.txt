@@ -111,6 +111,7 @@ set(LODE_CORE_SOURCES
     src/Compiler.cpp
     src/Gc.cpp
     src/Logger.cpp
+    src/Json.cpp
     src/TaskContext.hpp
     src/Platform/Platform.cpp
     src/Platform/WindowsDll.cpp
@@ -139,6 +140,7 @@ set(LODE_CORE_HEADERS
     include/Lode/Compiler.hpp
     include/Lode/Gc.hpp
     include/Lode/Logger.hpp
+    include/Lode/Json.hpp
     src/Platform/Platform.hpp
     src/Platform/CrashHandler.hpp
     src/Platform/WindowsCrashHandler.hpp
