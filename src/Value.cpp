@@ -9,6 +9,7 @@
 #include "StateLifetime.hpp"
 #include "lua.h"
 #include "lualib.h"
+#include "lstate.h"
 #include <stdexcept>
 #include <cmath>
 #include <limits>
@@ -56,6 +57,15 @@ Value::Value(const Coroutine& coroutine)
     lua_State* co = coroutine.GetThreadState();
     if (co)
     {
+        if ((co->status == LUA_YIELD || co->status == LUA_BREAK) && co->top + 1 > co->ci->top)
+        {
+            // Luau freezes the innermost frame limit (ci->top) to the stack
+            // position at the yield point (see ldo.cpp resume_finish). A
+            // suspended thread whose frame is exactly full trips the
+            // api_check in lua_pushthread's api_incr_top, so relax the
+            // frozen limit to make room for the push.
+            co->ci->top = co->top + 1;
+        }
         lua_pushthread(co);
         type_ = ValueType::Thread;
         auto ref = std::make_shared<RefData>();

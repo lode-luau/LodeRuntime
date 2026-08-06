@@ -5,6 +5,7 @@
 #include "LuaError.hpp"
 #include "lua.h"
 #include "lualib.h"
+#include "lstate.h"
 #include "StateLifetime.hpp"
 #include <stdexcept>
 
@@ -102,6 +103,10 @@ Result<std::vector<Value>> Coroutine::Resume(const std::vector<Value>& args)
     }
 
     lua_State* co = refData_->coL;
+    if ((co->status == LUA_YIELD || co->status == LUA_BREAK) && co->top + static_cast<int>(args.size()) > co->ci->top)
+    {
+        co->ci->top = co->top + static_cast<int>(args.size());
+    }
     for (const auto& arg : args)
     {
         arg.PushToLuaState(co);
@@ -135,6 +140,10 @@ Result<std::vector<Value>> Coroutine::ResumeError(const std::string& errorMsg)
     }
 
     lua_State* co = refData_->coL;
+    if ((co->status == LUA_YIELD || co->status == LUA_BREAK) && co->top + 1 > co->ci->top)
+    {
+        co->ci->top = co->top + 1;
+    }
     lua_pushstring(co, errorMsg.c_str());
 
     int res = lua_resumeerror(co, nullptr);
