@@ -143,6 +143,7 @@ public:
     [[nodiscard]] Value CreateBuffer(size_t size);
 
     void SetUserdataMetatable(int index, const Table& metatable);
+    /** @deprecated Luau metatables do not run __gc; pass a destructor to CreateUserdata instead. */
     void SetUserdataGC(const Table& metatable, void(*destructor)(void* ptr));
 
     /**
