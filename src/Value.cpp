@@ -6,16 +6,19 @@
 #include "Lode/State.hpp"
 #include "Lode/Coroutine.hpp"
 #include "LuaError.hpp"
+#include "StateLifetime.hpp"
 #include "lua.h"
 #include "lualib.h"
 #include <stdexcept>
+#include <cmath>
+#include <limits>
 
 namespace Lode
 {
 
 Value::RefData::~RefData()
 {
-    if (L && refId != LUA_NOREF && refId != LUA_REFNIL)
+    if (L && lifetime && lifetime->alive.load() && refId != LUA_NOREF && refId != LUA_REFNIL)
     {
         lua_unref(L, refId);
     }
@@ -39,6 +42,7 @@ Value::Value(const Table& table)
         type_ = ValueType::Table;
         auto ref = std::make_shared<RefData>();
         ref->L = lua_mainthread(L);
+        ref->lifetime = Detail::GetStateLifetime(L);
         ref->refId = lua_ref(L, -1);
         data_ = ref;
         lua_pop(L, 1);
@@ -54,6 +58,8 @@ Value::Value(const Coroutine& coroutine)
         type_ = ValueType::Thread;
         auto ref = std::make_shared<RefData>();
         ref->L = lua_mainthread(co);
+        ref->thread = co;
+        ref->lifetime = Detail::GetStateLifetime(co);
         ref->refId = lua_ref(co, -1);
         data_ = ref;
         lua_pop(co, 1);
@@ -69,10 +75,19 @@ Value::Value(const Buffer& buffer)
         type_ = ValueType::Buffer;
         auto ref = std::make_shared<RefData>();
         ref->L = lua_mainthread(L);
+        ref->lifetime = Detail::GetStateLifetime(L);
         ref->refId = lua_ref(L, -1);
         data_ = ref;
         lua_pop(L, 1);
     }
+}
+
+Coroutine Value::AsCoroutine() const
+{
+    if (type_ != ValueType::Thread) return Coroutine();
+    auto* ref = std::get_if<std::shared_ptr<RefData>>(&data_);
+    if (!ref || !*ref || !(*ref)->L || !(*ref)->lifetime || !(*ref)->lifetime->alive.load()) return Coroutine();
+    return Coroutine((*ref)->thread);
 }
 
 Value::~Value() = default;
@@ -97,7 +112,12 @@ double Value::AsNumber() const {
 }
 int Value::AsInteger() const {
     if (auto* i = std::get_if<int>(&data_)) return *i;
-    if (auto* n = std::get_if<double>(&data_)) return static_cast<int>(*n);
+    if (auto* n = std::get_if<double>(&data_))
+    {
+        if (std::isfinite(*n) && *n >= static_cast<double>(std::numeric_limits<int>::min()) &&
+            *n < static_cast<double>(std::numeric_limits<int>::max()) + 1.0)
+            return static_cast<int>(*n);
+    }
     return 0;
 }
 std::string Value::AsString() const {
@@ -190,7 +210,14 @@ Result<double> Value::TryAsNumber() const
 Result<int> Value::TryAsInteger() const
 {
     if (auto* i = std::get_if<int>(&data_)) return *i;
-    if (auto* n = std::get_if<double>(&data_)) return static_cast<int>(*n);
+    if (auto* n = std::get_if<double>(&data_))
+    {
+        if (std::isfinite(*n) && *n == std::trunc(*n) &&
+            *n >= static_cast<double>(std::numeric_limits<int>::min()) &&
+            *n < static_cast<double>(std::numeric_limits<int>::max()) + 1.0)
+            return static_cast<int>(*n);
+        return Error::Type("Number is outside the integer range");
+    }
     return Error::Type("Value is not an integer");
 }
 
@@ -355,6 +382,8 @@ Value Value::FromLuaState(lua_State* L, int index)
                     (type == LUA_TBUFFER) ? ValueType::Buffer : ValueType::Userdata;
         auto ref = std::make_shared<RefData>();
         ref->L = lua_mainthread(L);
+        ref->lifetime = Detail::GetStateLifetime(L);
+        if (type == LUA_TTHREAD) ref->thread = lua_tothread(L, index);
         lua_pushvalue(L, index);
         ref->refId = lua_ref(L, -1);
         lua_pop(L, 1);

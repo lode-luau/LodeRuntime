@@ -11,6 +11,8 @@
 #include <unordered_map>
 #include <vector>
 #include <exception>
+#include <cmath>
+#include <limits>
 
 namespace Lode
 {
@@ -38,6 +40,11 @@ static TaskContext* GetOrCreateContext(lua_State* L)
     lua_setfield(L, LUA_REGISTRYINDEX, kTaskCtxKey);
     lua_pop(L, 1);
     return mem;
+}
+
+static Coroutine MakeTaskCoroutine(State& vm, const Value& target)
+{
+    return target.IsThread() ? target.AsCoroutine() : Coroutine(vm, target);
 }
 
 void Task::SetMainThread(State& vm, lua_State* L)
@@ -79,12 +86,9 @@ static void SafeDestroyTimer(TimerData* data)
     {
         uv_close(reinterpret_cast<uv_handle_t*>(&data->handle), [](uv_handle_t* handle) {
             auto* d = static_cast<TimerData*>(handle->data);
+            handle->data = nullptr;
             delete d;
         });
-    }
-    else
-    {
-        delete data;
     }
 }
 
@@ -118,16 +122,7 @@ void Task::Shutdown(State& vm)
     {
         (void)id;
         uv_timer_stop(&data->handle);
-        if (!uv_is_closing(reinterpret_cast<uv_handle_t*>(&data->handle)))
-        {
-            uv_close(reinterpret_cast<uv_handle_t*>(&data->handle), [](uv_handle_t* handle) {
-                delete static_cast<TimerData*>(handle->data);
-            });
-        }
-        else
-        {
-            delete data;
-        }
+        SafeDestroyTimer(data);
     }
     ctx->timers.clear();
 
@@ -283,7 +278,7 @@ int Task::SetTimeout(State& vm, const Value& callback, double delayMs, const std
             try
             {
                 State localVm(data->L);
-                Coroutine co(localVm, data->callback);
+                Coroutine co = MakeTaskCoroutine(localVm, data->callback);
                 auto res = co.Resume(data->args);
                 if (res.IsError())
                 {
@@ -382,7 +377,7 @@ int Task::SetInterval(State& vm, const Value& callback, double intervalMs, const
             try
             {
                 State localVm(data->L);
-                Coroutine co(localVm, data->callback);
+                Coroutine co = MakeTaskCoroutine(localVm, data->callback);
                 auto res = co.Resume(data->args);
                 if (res.IsError())
                 {
@@ -438,7 +433,7 @@ void Task::ClearInterval(State& vm, int timerId)
 
 Coroutine Task::Spawn(State& vm, const Value& fnOrCo, const std::vector<Value>& args)
 {
-    Coroutine co(vm, fnOrCo);
+    Coroutine co = MakeTaskCoroutine(vm, fnOrCo);
     auto res = co.Resume(args);
     if (res.IsError())
     {
@@ -462,10 +457,41 @@ void Task::Delay(State& vm, double seconds, const Value& fnOrCo, const std::vect
 
 void Task::Cancel(State& vm, const Value& target)
 {
+    if (target.IsThread())
+    {
+        Coroutine coroutine = target.AsCoroutine();
+        TaskContext* ctx = GetContext(vm.GetMainThread());
+        if (!ctx || !coroutine.IsValid()) return;
+        std::vector<int> timerIds;
+        for (const auto& [id, data] : ctx->timers)
+        {
+            if (data && data->coroutine.IsValid() &&
+                data->coroutine.GetThreadState() == coroutine.GetThreadState())
+                timerIds.push_back(id);
+        }
+        for (int id : timerIds) ClearTimeout(vm, id);
+        return;
+    }
     if (target.IsNumber() || target.IsInteger())
     {
-        ClearTimeout(vm, static_cast<int>(target.AsNumber()));
+        double value = target.AsNumber();
+        if (std::isfinite(value) && value == std::trunc(value) &&
+            value >= static_cast<double>(std::numeric_limits<int>::min()) &&
+            value < static_cast<double>(std::numeric_limits<int>::max()) + 1.0)
+            ClearTimeout(vm, static_cast<int>(value));
     }
+}
+
+bool Task::IsMainThread(State& vm, lua_State* L)
+{
+    TaskContext* ctx = GetContext(vm.GetMainThread());
+    return ctx && ctx->mainThread == L;
+}
+
+void Task::SetMainThreadError(State& vm, std::string message)
+{
+    TaskContext* ctx = GetOrCreateContext(vm.GetMainThread());
+    if (ctx) ctx->mainThreadError = std::move(message);
 }
 
 } // namespace Lode

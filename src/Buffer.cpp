@@ -4,6 +4,7 @@
 #include "lua.h"
 #include <cstring>
 #include <stdexcept>
+#include "StateLifetime.hpp"
 
 namespace Lode
 {
@@ -23,6 +24,7 @@ Buffer::Buffer(lua_State* L, int index)
     if (lua_type(L, index) == LUA_TBUFFER)
     {
         L_ = lua_mainthread(L);
+        lifetime_ = Detail::GetStateLifetime(L);
         lua_pushvalue(L, index);
         refId_ = lua_ref(L, -1);
         lua_pop(L, 1);
@@ -31,7 +33,7 @@ Buffer::Buffer(lua_State* L, int index)
 
 Buffer::~Buffer()
 {
-    if (L_ && refId_ != LUA_NOREF && refId_ != LUA_REFNIL)
+    if (L_ && lifetime_ && lifetime_->alive.load() && refId_ != LUA_NOREF && refId_ != LUA_REFNIL)
     {
         lua_unref(L_, refId_);
     }
@@ -42,6 +44,7 @@ Buffer::Buffer(const Buffer& other)
     if (other.IsValid())
     {
         L_ = other.L_;
+        lifetime_ = other.lifetime_;
         lua_getref(L_, other.refId_);
         refId_ = lua_ref(L_, -1);
         lua_pop(L_, 1);
@@ -50,6 +53,7 @@ Buffer::Buffer(const Buffer& other)
 
 Buffer::Buffer(Buffer&& other) noexcept : L_(other.L_), refId_(other.refId_)
 {
+    lifetime_ = std::move(other.lifetime_);
     other.L_ = nullptr;
     other.refId_ = LUA_NOREF;
 }
@@ -58,13 +62,14 @@ Buffer& Buffer::operator=(const Buffer& other)
 {
     if (this != &other)
     {
-        if (L_ && refId_ != LUA_NOREF && refId_ != LUA_REFNIL)
+        if (L_ && lifetime_ && lifetime_->alive.load() && refId_ != LUA_NOREF && refId_ != LUA_REFNIL)
         {
             lua_unref(L_, refId_);
         }
         if (other.IsValid())
         {
             L_ = other.L_;
+            lifetime_ = other.lifetime_;
             lua_getref(L_, other.refId_);
             refId_ = lua_ref(L_, -1);
             lua_pop(L_, 1);
@@ -73,6 +78,7 @@ Buffer& Buffer::operator=(const Buffer& other)
         {
             L_ = nullptr;
             refId_ = LUA_NOREF;
+            lifetime_.reset();
         }
     }
     return *this;
@@ -82,12 +88,13 @@ Buffer& Buffer::operator=(Buffer&& other) noexcept
 {
     if (this != &other)
     {
-        if (L_ && refId_ != LUA_NOREF && refId_ != LUA_REFNIL)
+        if (L_ && lifetime_ && lifetime_->alive.load() && refId_ != LUA_NOREF && refId_ != LUA_REFNIL)
         {
             lua_unref(L_, refId_);
         }
         L_ = other.L_;
         refId_ = other.refId_;
+        lifetime_ = std::move(other.lifetime_);
         other.L_ = nullptr;
         other.refId_ = LUA_NOREF;
     }

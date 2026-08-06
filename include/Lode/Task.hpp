@@ -60,9 +60,11 @@ public:
      * State, so independent States never clobber each other's fatal error slot.
      */
     static void SetMainThread(State& vm, lua_State* L);
+    static bool IsMainThread(State& vm, lua_State* L);
 
     /** @brief Returns the pending main-script error (cleared after retrieval). */
     static std::string GetMainThreadError(State& vm);
+    static void SetMainThreadError(State& vm, std::string message);
 
     /**
      * @brief Cancels every pending timer owned by the given State.

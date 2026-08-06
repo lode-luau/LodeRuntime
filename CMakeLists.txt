@@ -106,6 +106,7 @@ set(LODE_CORE_SOURCES
     src/Registry.cpp
     src/ModuleLoader.cpp
     src/State.cpp
+    src/StateLifetime.cpp
     src/Compiler.cpp
     src/Gc.cpp
     src/Logger.cpp

@@ -9,6 +9,7 @@
 #include <string_view>
 #include <cstdint>
 #include <vector>
+#include <memory>
 
 struct lua_State;
 
@@ -17,6 +18,7 @@ namespace Lode
 
 class State;
 class Value;
+namespace Detail { struct StateLifetime; }
 
 /**
  * @brief Represents a Luau buffer object.
@@ -84,6 +86,7 @@ public:
 private:
     lua_State* L_ = nullptr;
     int refId_ = -1; // -1 represents LUA_NOREF
+    std::shared_ptr<Detail::StateLifetime> lifetime_;
 };
 
 } // namespace Lode

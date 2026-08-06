@@ -30,4 +30,25 @@ describe("async tests", function()
         expect(data).toBe("async data")
         pcall(fs.rm, file)
     end)
+
+    it("task.spawn resumes an existing coroutine", function()
+        local ran = false
+        local co = coroutine.create(function()
+            ran = true
+        end)
+        task.spawn(co)
+        expect(ran).toBe(true)
+    end)
+
+    it("task.cancel cancels a coroutine waiting on a timer", function()
+        local ran = false
+        local co = coroutine.create(function()
+            task.wait(0.1)
+            ran = true
+        end)
+        task.spawn(co)
+        task.cancel(co)
+        task.wait(0.15)
+        expect(ran).toBe(false)
+    end)
 end)

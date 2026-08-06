@@ -737,6 +737,10 @@ static int MultiReturnLodeRequire(lua_State* L)
 
     if (nresults <= 0)
     {
+        lua_newtable(L);
+        lua_pushinteger(L, 0);
+        lua_setfield(L, -2, "_nresults");
+        lua_setfield(L, 2, cacheKey.c_str());
         lua_remove(L, 2); // remove cacheTable
         return 0;
     }
