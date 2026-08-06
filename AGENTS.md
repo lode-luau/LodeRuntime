@@ -23,7 +23,7 @@
 - Build Debug: `cmake --build build --config Debug`.
 - Build Release: `cmake --build build --config Release`.
 - Tests: `build/bin/Debug/lode_runtime.exe modules/sanity/run.luau`, `build/bin/Release/lode_runtime.exe modules/sanity/run.luau`, and `build/bin/Debug/lode_runtime.exe temp/test.luau`.
-- The sanity suite currently contains 22 tests; treat the reported count as authoritative if it changes.
+- The sanity suite currently contains 33 tests; treat the reported count as authoritative if it changes.
 - Run Debug and Release builds sequentially when native DLL copy steps can conflict; retry a failed copy-only build before changing code.
 
 ## Commit & PR checklist
@@ -31,6 +31,9 @@
 - Do not commit generated build output, temporary probe executables, secrets, or unrelated worktree changes.
 - Review the complete branch diff against `main` before opening the PR.
 - In the PR description, list the validation commands and link the relevant issues.
+- Create PR descriptions with a reviewed file and `gh pr create --body-file <file>` or `gh pr edit --body-file <file>`. Never pass multiline Markdown containing backticks, `$()`, or shell metacharacters in a double-quoted inline argument.
+- Before creating or merging a PR, run `gh pr view <number> --json body --jq .body` and verify the body contains only the intended Markdown, not command output, logs, or literal escape sequences.
+- Keep validation commands in fenced or inline code in the PR body; do not paste their output unless explicitly required.
 - Do not close issues manually if the PR uses `Closes #N`; let GitHub close them after the merge.
 
 ## Issue Writing
