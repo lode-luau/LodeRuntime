@@ -39,6 +39,8 @@ public:
     [[nodiscard]] bool IsNumber() const;
     /** @brief Checks if the value is an Integer. */
     [[nodiscard]] bool IsInteger() const;
+    /** @brief Checks if the value is a Luau vector. */
+    [[nodiscard]] bool IsVector() const;
     /** @brief Checks if the value is a String. */
     [[nodiscard]] bool IsString() const;
     /** @brief Checks if the value is a Buffer. */
@@ -57,7 +59,9 @@ public:
     /** @brief Fast unsafe cast to double. */
     [[nodiscard]] double AsNumber() const;
     /** @brief Fast unsafe cast to integer. */
-    [[nodiscard]] int AsInteger() const;
+    [[nodiscard]] int64_t AsInteger() const;
+    /** @brief Copies the Luau vector from the stack. */
+    [[nodiscard]] Vector AsVector() const;
     /** @brief Fast unsafe cast to string. */
     [[nodiscard]] std::string AsString() const;
     /** @brief Zero-copy view into the string on the stack. */

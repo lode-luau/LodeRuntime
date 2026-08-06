@@ -5,6 +5,7 @@
 #include "Lode/Export.hpp"
 #include "Lode/Result.hpp"
 #include "Lode/Error.hpp"
+#include "Lode/Vector.hpp"
 #include <string>
 #include <memory>
 #include <vector>
@@ -29,6 +30,7 @@ enum class ValueType
     Boolean,
     Number,
     Integer,
+    Vector,
     String,
     Table,
     Function,
@@ -67,6 +69,10 @@ public:
     Value(double n);
     /** @brief Constructs an Integer value. */
     Value(int i);
+    /** @brief Constructs an Integer value from a 64-bit integer. */
+    Value(int64_t i);
+    /** @brief Constructs a Luau vector value. */
+    Value(const Vector& vector);
     /** @brief Constructs a String value from a C-string. */
     Value(const char* str);
     /** @brief Constructs a String value from a std::string. */
@@ -95,6 +101,8 @@ public:
     [[nodiscard]] bool IsNumber() const { return GetType() == ValueType::Number || GetType() == ValueType::Integer; }
     /** @brief Checks if the value is an Integer. */
     [[nodiscard]] bool IsInteger() const { return GetType() == ValueType::Integer; }
+    /** @brief Checks if the value is a Luau vector. */
+    [[nodiscard]] bool IsVector() const { return GetType() == ValueType::Vector; }
     /** @brief Checks if the value is a String. */
     [[nodiscard]] bool IsString() const { return GetType() == ValueType::String; }
     /** @brief Checks if the value is a Table. */
@@ -113,7 +121,9 @@ public:
     /** @brief Casts the value to a double (unsafe, returns 0.0 if incorrect type). */
     [[nodiscard]] double AsNumber() const;
     /** @brief Casts the value to an integer (unsafe, returns 0 if incorrect type). */
-    [[nodiscard]] int AsInteger() const;
+    [[nodiscard]] int64_t AsInteger() const;
+    /** @brief Casts the value to a Luau vector (unsafe, returns a zero vector if incorrect type). */
+    [[nodiscard]] Vector AsVector() const;
     /** @brief Casts the value to a string (unsafe, returns "" if incorrect type). */
     [[nodiscard]] std::string AsString() const;
     /** @brief Casts the value to a LightUserdata pointer. */
@@ -141,7 +151,9 @@ public:
     /** @brief Safely attempts to cast to double. */
     [[nodiscard]] Result<double> TryAsNumber() const;
     /** @brief Safely attempts to cast to integer. */
-    [[nodiscard]] Result<int> TryAsInteger() const;
+    [[nodiscard]] Result<int64_t> TryAsInteger() const;
+    /** @brief Safely attempts to cast to a Luau vector. */
+    [[nodiscard]] Result<Vector> TryAsVector() const;
     /** @brief Safely attempts to cast to string. */
     [[nodiscard]] Result<std::string> TryAsString() const;
     /** @brief Safely attempts to cast to Buffer pointer. */
@@ -210,7 +222,7 @@ private:
     };
 
     ValueType type_ = ValueType::Nil;
-    std::variant<std::monostate, bool, double, int, std::string, void*, std::shared_ptr<RefData>> data_;
+    std::variant<std::monostate, bool, double, int64_t, Vector, std::string, void*, std::shared_ptr<RefData>> data_;
 };
 
 namespace Detail

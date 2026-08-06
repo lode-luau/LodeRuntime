@@ -12,6 +12,31 @@ local NativeMod, MetaInfo = require("./native_module")
 print("[Native Module DLL] Greet:", NativeMod.greet("Developer"))
 print("[Native Module DLL] Square(9):", NativeMod.square(9))
 
+local largeInteger = NativeMod.makeLargeInteger()
+assert(NativeMod.roundTripInteger(largeInteger) == largeInteger, "64-bit integer round-trip failed")
+print("[Native Module DLL] 64-bit integer round-trip:", NativeMod.roundTripInteger(largeInteger))
+
+local nativeVector = NativeMod.makeVector()
+local roundTripVector = NativeMod.roundTripVector(nativeVector)
+assert(type(roundTripVector) == "vector", "vector type round-trip failed")
+assert(roundTripVector.x == 1.25 and roundTripVector.y == -2.5 and roundTripVector.z == 3.75, "vector component round-trip failed")
+print("[Native Module DLL] vector round-trip:", roundTripVector.x, roundTripVector.y, roundTripVector.z)
+
+local modernObject = NativeMod.modernObject
+assert(modernObject // 2 == 21, "__idiv helper failed")
+assert(#modernObject == 42, "__len helper failed")
+local iterated = {}
+for value in modernObject do
+    table.insert(iterated, value)
+end
+assert(#iterated == 3 and tostring(iterated[1]) == "1" and tostring(iterated[3]) == "3", "__iter helper failed")
+
+local endianProbe = NativeMod.bufferEndianProbe()
+local bytes = { string.byte(endianProbe.written, 1, #endianProbe.written) }
+assert(bytes[1] == 4 and bytes[2] == 3 and bytes[3] == 2 and bytes[4] == 1, "little-endian integer write failed")
+assert(bytes[5] == 0 and bytes[6] == 0 and bytes[7] == 128 and bytes[8] == 63, "little-endian float write failed")
+assert(endianProbe.readInt == 0x01020304 and endianProbe.readFloat == 1.0, "little-endian read failed")
+
 local sysInfo = NativeMod.getSystemInfo()
 print("[Native Module DLL] System Info: Platform =", sysInfo.platform, "| Arch =", sysInfo.arch)
 

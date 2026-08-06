@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: MIT
 #include "Lode/Buffer.hpp"
 #include "lua.h"
+#include <array>
+#include <bit>
 #include <cstring>
+#include <algorithm>
 #include <stdexcept>
 #include "StateLifetime.hpp"
 
@@ -14,6 +17,31 @@ namespace
     bool HasRange(std::span<uint8_t> span, size_t offset, size_t width)
     {
         return offset <= span.size() && width <= span.size() - offset;
+    }
+
+    template <typename T>
+    T ReadLittleEndian(std::span<uint8_t> span, size_t offset)
+    {
+        std::array<uint8_t, sizeof(T)> bytes{};
+        for (size_t i = 0; i < bytes.size(); ++i)
+            bytes[i] = span[offset + i];
+        if constexpr (std::endian::native == std::endian::big)
+            std::reverse(bytes.begin(), bytes.end());
+
+        T value{};
+        std::memcpy(&value, bytes.data(), sizeof(value));
+        return value;
+    }
+
+    template <typename T>
+    void WriteLittleEndian(std::span<uint8_t> span, size_t offset, T value)
+    {
+        std::array<uint8_t, sizeof(T)> bytes{};
+        std::memcpy(bytes.data(), &value, sizeof(value));
+        if constexpr (std::endian::native == std::endian::big)
+            std::reverse(bytes.begin(), bytes.end());
+        for (size_t i = 0; i < bytes.size(); ++i)
+            span[offset + i] = bytes[i];
     }
 }
 
@@ -172,54 +200,42 @@ int16_t Buffer::ReadInt16(size_t offset) const
 {
     auto span = Span();
     if (!HasRange(span, offset, sizeof(int16_t))) return 0;
-    int16_t val;
-    std::memcpy(&val, span.data() + offset, sizeof(int16_t));
-    return val;
+    return ReadLittleEndian<int16_t>(span, offset);
 }
 
 uint16_t Buffer::ReadUInt16(size_t offset) const
 {
     auto span = Span();
     if (!HasRange(span, offset, sizeof(uint16_t))) return 0;
-    uint16_t val;
-    std::memcpy(&val, span.data() + offset, sizeof(uint16_t));
-    return val;
+    return ReadLittleEndian<uint16_t>(span, offset);
 }
 
 int32_t Buffer::ReadInt32(size_t offset) const
 {
     auto span = Span();
     if (!HasRange(span, offset, sizeof(int32_t))) return 0;
-    int32_t val;
-    std::memcpy(&val, span.data() + offset, sizeof(int32_t));
-    return val;
+    return ReadLittleEndian<int32_t>(span, offset);
 }
 
 uint32_t Buffer::ReadUInt32(size_t offset) const
 {
     auto span = Span();
     if (!HasRange(span, offset, sizeof(uint32_t))) return 0;
-    uint32_t val;
-    std::memcpy(&val, span.data() + offset, sizeof(uint32_t));
-    return val;
+    return ReadLittleEndian<uint32_t>(span, offset);
 }
 
 float Buffer::ReadFloat32(size_t offset) const
 {
     auto span = Span();
     if (!HasRange(span, offset, sizeof(float))) return 0.0f;
-    float val;
-    std::memcpy(&val, span.data() + offset, sizeof(float));
-    return val;
+    return ReadLittleEndian<float>(span, offset);
 }
 
 double Buffer::ReadFloat64(size_t offset) const
 {
     auto span = Span();
     if (!HasRange(span, offset, sizeof(double))) return 0.0;
-    double val;
-    std::memcpy(&val, span.data() + offset, sizeof(double));
-    return val;
+    return ReadLittleEndian<double>(span, offset);
 }
 
 std::string_view Buffer::ReadString(size_t offset, size_t count) const
@@ -250,7 +266,7 @@ void Buffer::WriteInt16(size_t offset, int16_t value)
     auto span = Span();
     if (HasRange(span, offset, sizeof(int16_t)))
     {
-        std::memcpy(span.data() + offset, &value, sizeof(int16_t));
+        WriteLittleEndian(span, offset, value);
     }
 }
 
@@ -259,7 +275,7 @@ void Buffer::WriteUInt16(size_t offset, uint16_t value)
     auto span = Span();
     if (HasRange(span, offset, sizeof(uint16_t)))
     {
-        std::memcpy(span.data() + offset, &value, sizeof(uint16_t));
+        WriteLittleEndian(span, offset, value);
     }
 }
 
@@ -268,7 +284,7 @@ void Buffer::WriteInt32(size_t offset, int32_t value)
     auto span = Span();
     if (HasRange(span, offset, sizeof(int32_t)))
     {
-        std::memcpy(span.data() + offset, &value, sizeof(int32_t));
+        WriteLittleEndian(span, offset, value);
     }
 }
 
@@ -277,7 +293,7 @@ void Buffer::WriteUInt32(size_t offset, uint32_t value)
     auto span = Span();
     if (HasRange(span, offset, sizeof(uint32_t)))
     {
-        std::memcpy(span.data() + offset, &value, sizeof(uint32_t));
+        WriteLittleEndian(span, offset, value);
     }
 }
 
@@ -286,7 +302,7 @@ void Buffer::WriteFloat32(size_t offset, float value)
     auto span = Span();
     if (HasRange(span, offset, sizeof(float)))
     {
-        std::memcpy(span.data() + offset, &value, sizeof(float));
+        WriteLittleEndian(span, offset, value);
     }
 }
 
@@ -295,7 +311,7 @@ void Buffer::WriteFloat64(size_t offset, double value)
     auto span = Span();
     if (HasRange(span, offset, sizeof(double)))
     {
-        std::memcpy(span.data() + offset, &value, sizeof(double));
+        WriteLittleEndian(span, offset, value);
     }
 }
 

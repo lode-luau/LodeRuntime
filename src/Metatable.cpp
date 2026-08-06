@@ -323,6 +323,110 @@ void Metatable::SetDiv(const std::function<Value(State& vm, Value a, Value b)>& 
     lua_pop(L, 1);
 }
 
+void Metatable::SetIntegerDivide(const std::function<Value(State& vm, Value a, Value b)>& fn)
+{
+    lua_State* L = table_.GetLuaState();
+    if (!L) return;
+
+    struct ClosureData { std::function<Value(State&, Value, Value)> func; };
+    auto cfunc = [](lua_State* L) -> int {
+        auto* data = static_cast<ClosureData*>(lua_touserdata(L, lua_upvalueindex(1)));
+        Value a = Value::FromLuaState(L, 1);
+        Value b = Value::FromLuaState(L, 2);
+        try
+        {
+            State vm(L);
+            Value result = data->func(vm, a, b);
+            result.PushToLuaState(L);
+            return 1;
+        }
+        catch (const std::exception& error)
+        {
+            return RaiseCppException(L, "C++ __idiv callback exception", error);
+        }
+        catch (...)
+        {
+            return RaiseCppException(L, "C++ __idiv callback threw an unknown exception");
+        }
+    };
+
+    table_.PushToLuaState(L);
+    auto* data = Detail::NewLuaOwnedCallbackData(L, ClosureData{ fn });
+    (void)data;
+    lua_pushcclosure(L, cfunc, "__idiv", 1);
+    lua_setfield(L, -2, "__idiv");
+    lua_pop(L, 1);
+}
+
+void Metatable::SetLength(const std::function<Value(State& vm, Value object)>& fn)
+{
+    lua_State* L = table_.GetLuaState();
+    if (!L) return;
+
+    struct ClosureData { std::function<Value(State&, Value)> func; };
+    auto cfunc = [](lua_State* L) -> int {
+        auto* data = static_cast<ClosureData*>(lua_touserdata(L, lua_upvalueindex(1)));
+        Value object = Value::FromLuaState(L, 1);
+        try
+        {
+            State vm(L);
+            Value result = data->func(vm, object);
+            result.PushToLuaState(L);
+            return 1;
+        }
+        catch (const std::exception& error)
+        {
+            return RaiseCppException(L, "C++ __len callback exception", error);
+        }
+        catch (...)
+        {
+            return RaiseCppException(L, "C++ __len callback threw an unknown exception");
+        }
+    };
+
+    table_.PushToLuaState(L);
+    auto* data = Detail::NewLuaOwnedCallbackData(L, ClosureData{ fn });
+    (void)data;
+    lua_pushcclosure(L, cfunc, "__len", 1);
+    lua_setfield(L, -2, "__len");
+    lua_pop(L, 1);
+}
+
+void Metatable::SetIter(const std::function<std::vector<Value>(State& vm, Value object)>& fn)
+{
+    lua_State* L = table_.GetLuaState();
+    if (!L) return;
+
+    struct ClosureData { std::function<std::vector<Value>(State&, Value)> func; };
+    auto cfunc = [](lua_State* L) -> int {
+        auto* data = static_cast<ClosureData*>(lua_touserdata(L, lua_upvalueindex(1)));
+        Value object = Value::FromLuaState(L, 1);
+        try
+        {
+            State vm(L);
+            std::vector<Value> results = data->func(vm, object);
+            for (const auto& result : results)
+                result.PushToLuaState(L);
+            return static_cast<int>(results.size());
+        }
+        catch (const std::exception& error)
+        {
+            return RaiseCppException(L, "C++ __iter callback exception", error);
+        }
+        catch (...)
+        {
+            return RaiseCppException(L, "C++ __iter callback threw an unknown exception");
+        }
+    };
+
+    table_.PushToLuaState(L);
+    auto* data = Detail::NewLuaOwnedCallbackData(L, ClosureData{ fn });
+    (void)data;
+    lua_pushcclosure(L, cfunc, "__iter", 1);
+    lua_setfield(L, -2, "__iter");
+    lua_pop(L, 1);
+}
+
 void Metatable::SetEq(const std::function<bool(State& vm, Value a, Value b)>& fn)
 {
     lua_State* L = table_.GetLuaState();
