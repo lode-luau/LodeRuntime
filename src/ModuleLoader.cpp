@@ -379,7 +379,13 @@ static luarequire_WriteResult get_config(lua_State* L, void* ctx, char* buffer, 
     return luarequire_WriteResult::WRITE_FAILURE;
 }
 
-static int LoadModuleImpl(lua_State* L, void* ctx, const char* path, const char* chunkname, const char* loadname)
+struct ModuleLoadResult
+{
+    int resultCount = 0;
+    std::string error;
+};
+
+static ModuleLoadResult LoadModuleNoJump(lua_State* L, void* ctx, const char* path, const char* chunkname, const char* loadname)
 {
     State vm(L);
     LodeNavigationContext* loaderCtx = static_cast<LodeNavigationContext*>(ctx);
@@ -394,23 +400,23 @@ static int LoadModuleImpl(lua_State* L, void* ctx, const char* path, const char*
         if (loaderCtx->registry->HasStaticModule(rawPathStr))
         {
             auto initFn = loaderCtx->registry->GetStaticModule(rawPathStr);
-            if (initFn) return initFn(L);
+            if (initFn) return { initFn(L), {} };
         }
         if (!loadNameStr.empty() && loaderCtx->registry->HasStaticModule(loadNameStr))
         {
             auto initFn = loaderCtx->registry->GetStaticModule(loadNameStr);
-            if (initFn) return initFn(L);
+            if (initFn) return { initFn(L), {} };
         }
     }
     if (NativeModuleRegistry::GetGlobalRegistry().HasStaticModule(rawPathStr))
     {
         auto initFn = NativeModuleRegistry::GetGlobalRegistry().GetStaticModule(rawPathStr);
-        if (initFn) return initFn(L);
+        if (initFn) return { initFn(L), {} };
     }
     if (!loadNameStr.empty() && NativeModuleRegistry::GetGlobalRegistry().HasStaticModule(loadNameStr))
     {
         auto initFn = NativeModuleRegistry::GetGlobalRegistry().GetStaticModule(loadNameStr);
-        if (initFn) return initFn(L);
+        if (initFn) return { initFn(L), {} };
     }
 
     fs::path targetPath(loadname ? loadname : (path ? path : ""));
@@ -453,8 +459,7 @@ static int LoadModuleImpl(lua_State* L, void* ctx, const char* path, const char*
         }
         catch (const std::exception& e)
         {
-            vm.RaiseError("Failed to parse lode.json in " + dirPath.string() + ": " + e.what());
-            return 0;
+            return { 0, "Failed to parse lode.json in " + dirPath.string() + ": " + e.what() };
         }
 
         if (jsonDoc.contains("libraries") && jsonDoc["libraries"].is_object())
@@ -469,8 +474,7 @@ static int LoadModuleImpl(lua_State* L, void* ctx, const char* path, const char*
                 const auto& libraryEntry = jsonDoc["libraries"][platform][arch];
                 if (!libraryEntry.is_string())
                 {
-                    vm.RaiseError("Invalid library path in lode.json: expected a string");
-                    return 0;
+                    return { 0, "Invalid library path in lode.json: expected a string" };
                 }
 
                 std::string relLibPath = libraryEntry.get<std::string>();
@@ -478,8 +482,7 @@ static int LoadModuleImpl(lua_State* L, void* ctx, const char* path, const char*
 
                 if (relLibPath.empty() || !IsPathInside(fullLibPath, dirPath))
                 {
-                    vm.RaiseError("Native library path must remain inside module directory: " + relLibPath);
-                    return 0;
+                    return { 0, "Native library path must remain inside module directory: " + relLibPath };
                 }
 
                 // Prefer the module binary next to the executable: the build drops a
@@ -517,18 +520,16 @@ static int LoadModuleImpl(lua_State* L, void* ctx, const char* path, const char*
                         lua_pushnil(L);
                         lua_setfield(L, LUA_REGISTRYINDEX, "_LODE_NATIVE_MODULE_PATH");
 
-                        return nret;
+                        return { nret, {} };
                     }
                     else
                     {
-                        vm.RaiseError("Failed to find LodeModuleInit symbol in native library " + fullLibPath.string());
-                        return 0;
+                        return { 0, "Failed to find LodeModuleInit symbol in native library " + fullLibPath.string() };
                     }
                 }
                 else
                 {
-                    vm.RaiseError(libResult.GetError().ErrorMessage());
-                    return 0;
+                    return { 0, libResult.GetError().ErrorMessage() };
                 }
             }
         }
@@ -556,23 +557,20 @@ static int LoadModuleImpl(lua_State* L, void* ctx, const char* path, const char*
     }
     else
     {
-        vm.RaiseError("Module not found at path: " + targetPath.string());
-        return 0;
+        return { 0, "Module not found at path: " + targetPath.string() };
     }
 
     std::ifstream srcFile(scriptToLoad, std::ios::binary);
     if (!srcFile.is_open())
     {
-        vm.RaiseError("Could not open module file: " + scriptToLoad.string());
-        return 0;
+        return { 0, "Could not open module file: " + scriptToLoad.string() };
     }
     std::string source((std::istreambuf_iterator<char>(srcFile)), std::istreambuf_iterator<char>());
 
     std::string bytecode = Compiler::CompileWithCache(source, scriptToLoad.string());
     if (bytecode.empty())
     {
-        vm.RaiseError("Failed to compile module: " + scriptToLoad.string());
-        return 0;
+        return { 0, "Failed to compile module: " + scriptToLoad.string() };
     }
 
     std::string modChunkName = "@" + scriptToLoad.string();
@@ -580,22 +578,43 @@ static int LoadModuleImpl(lua_State* L, void* ctx, const char* path, const char*
 
     if (execResult.IsError())
     {
-        vm.RaiseError(execResult.GetError().ErrorMessage());
-        return 0;
+        return { 0, execResult.GetError().ErrorMessage() };
     }
 
-        return execResult.GetValue();
+        return { execResult.GetValue(), {} };
     }
     catch (const std::exception& e)
     {
-        vm.RaiseError(std::string("Module loading failed: ") + e.what());
-        return 0;
+        return { 0, std::string("Module loading failed: ") + e.what() };
     }
     catch (...)
     {
-        vm.RaiseError("Module loading failed with an unknown exception");
+        return { 0, "Module loading failed with an unknown exception" };
+    }
+}
+
+static int LoadModuleImpl(lua_State* L, void* ctx, const char* path, const char* chunkname, const char* loadname)
+{
+    const char* errorMessage = nullptr;
+    int resultCount = 0;
+    {
+        ModuleLoadResult result = LoadModuleNoJump(L, ctx, path, chunkname, loadname);
+        resultCount = result.resultCount;
+        if (!result.error.empty())
+        {
+            // Intern the message while the result is alive. The C++ result is
+            // destroyed before luaL_error can longjmp through this callback.
+            lua_pushlstring(L, result.error.data(), result.error.size());
+            errorMessage = lua_tostring(L, -1);
+        }
+    }
+
+    if (errorMessage)
+    {
+        luaL_error(L, "%s", errorMessage);
         return 0;
     }
+    return resultCount;
 }
 
 std::string GetCallerChunkName(lua_State* L)
