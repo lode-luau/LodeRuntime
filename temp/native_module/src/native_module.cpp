@@ -143,6 +143,24 @@ LODE_MODULE(vm)
         return args.Size() > 0 && args[0].IsVector() ? args[0].ToValue() : Lode::Value();
     }));
 
+    Lode::Table modernObject = vm.CreateTable();
+    Lode::Metatable modernMetatable = vm.CreateMetatable();
+    modernMetatable.SetIntegerDivide([](Lode::State&, Lode::Value, Lode::Value) {
+        return Lode::Value(21.0);
+    });
+    modernMetatable.SetLength([](Lode::State&, Lode::Value) {
+        return Lode::Value(42.0);
+    });
+    Lode::Value iterator = vm.CreateFunction([](Lode::State&, const std::vector<Lode::Value>& args) {
+        int64_t current = args.size() > 1 ? args[1].AsInteger() : 0;
+        return current < 3 ? Lode::Value(current + 1) : Lode::Value();
+    });
+    modernMetatable.SetIter([iterator](Lode::State&, Lode::Value object) {
+        return std::vector<Lode::Value>{ iterator, object, Lode::Value() };
+    });
+    modernObject.SetMetatable(modernMetatable);
+    exports.Set("modernObject", Lode::Value(modernObject));
+
     exports.Set("bufferBoundsProbe", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs args) -> Lode::Value {
         if (args.Size() == 0 || !args[0].IsBuffer()) return Lode::Value();
         Lode::Buffer buffer = args[0].ToValue().AsBufferObj();

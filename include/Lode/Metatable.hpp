@@ -49,6 +49,12 @@ public:
     void SetMul(const std::function<Value(State& vm, Value a, Value b)>& fn);
     /** @brief Sets __div metamethod. */
     void SetDiv(const std::function<Value(State& vm, Value a, Value b)>& fn);
+    /** @brief Sets __idiv metamethod. */
+    void SetIntegerDivide(const std::function<Value(State& vm, Value a, Value b)>& fn);
+    /** @brief Sets __len metamethod. */
+    void SetLength(const std::function<Value(State& vm, Value object)>& fn);
+    /** @brief Sets __iter metamethod. */
+    void SetIter(const std::function<std::vector<Value>(State& vm, Value object)>& fn);
     /** @brief Sets __eq metamethod. */
     void SetEq(const std::function<bool(State& vm, Value a, Value b)>& fn);
 

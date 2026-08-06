@@ -22,6 +22,15 @@ assert(type(roundTripVector) == "vector", "vector type round-trip failed")
 assert(roundTripVector.x == 1.25 and roundTripVector.y == -2.5 and roundTripVector.z == 3.75, "vector component round-trip failed")
 print("[Native Module DLL] vector round-trip:", roundTripVector.x, roundTripVector.y, roundTripVector.z)
 
+local modernObject = NativeMod.modernObject
+assert(modernObject // 2 == 21, "__idiv helper failed")
+assert(#modernObject == 42, "__len helper failed")
+local iterated = {}
+for value in modernObject do
+    table.insert(iterated, value)
+end
+assert(#iterated == 3 and tostring(iterated[1]) == "1" and tostring(iterated[3]) == "3", "__iter helper failed")
+
 local sysInfo = NativeMod.getSystemInfo()
 print("[Native Module DLL] System Info: Platform =", sysInfo.platform, "| Arch =", sysInfo.arch)
 

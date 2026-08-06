@@ -47,6 +47,7 @@ export type NativeModule = {
     makeLargeInteger: () -> number,
     makeVector: () -> vector,
     roundTripVector: (value: vector) -> vector,
+    modernObject: any,
     bufferBoundsProbe: (buf: buffer) -> number,
     throwCpp: () -> (),
     getSystemInfo: () -> { platform: string, arch: string },
