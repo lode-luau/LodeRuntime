@@ -160,6 +160,7 @@ target_link_libraries(LodeCore PUBLIC
     Luau.Require
     Luau.CodeGen
     uv_a
+    ${CMAKE_DL_LIBS}
 )
 
 # Main Executable LodeRuntime (lode_runtime on Linux/macOS, lode_runtime.exe on Windows)
