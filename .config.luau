@@ -17,6 +17,8 @@ return {
             path = "modules/path",
             sanity = "modules/sanity",
             toml = "modules/toml",
+            http = "modules/http",
+            json = "modules/json",
         }
     }
 }
