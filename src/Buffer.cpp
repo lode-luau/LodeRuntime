@@ -332,7 +332,7 @@ void Buffer::CopyFrom(size_t targetOffset, const Buffer& source, size_t sourceOf
     
     if (copyCount > 0)
     {
-        std::memcpy(targetSpan.data() + targetOffset, sourceSpan.data() + sourceOffset, copyCount);
+        std::memmove(targetSpan.data() + targetOffset, sourceSpan.data() + sourceOffset, copyCount);
     }
 }
 

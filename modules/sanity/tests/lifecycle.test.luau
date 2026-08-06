@@ -56,10 +56,36 @@ describe("runtime lifecycle and error handling", function()
         expect(native.bufferBoundsProbe(buffer)).toBe(0)
     end)
 
+    it("copies overlapping buffer ranges safely", function()
+        expect(native.bufferOverlapProbe()).toBe("AABC")
+    end)
+
+    it("rejects invalid timer durations", function()
+        local invalid = { -1, math.huge, -math.huge, 0 / 0 }
+        for _, duration in ipairs(invalid) do
+            local ok = pcall(function()
+                task.setTimeout(function() end, duration)
+            end)
+            expect(ok).toBe(false)
+        end
+    end)
+
     it("converts native callback exceptions into Lua errors", function()
         local ok, err = pcall(function() native.throwCpp() end)
         expect(ok).toBe(false)
         expect(typeof(err)).toBe("string")
+    end)
+
+    it("contains exceptions from raw exports and metamethod callbacks", function()
+        local okExport, exportError = pcall(function() native.throwRaw() end)
+        expect(okExport).toBe(false)
+        expect(typeof(exportError)).toBe("string")
+
+        local okMetatable, metatableError = pcall(function()
+            local _ = native.throwingObject.missing
+        end)
+        expect(okMetatable).toBe(false)
+        expect(typeof(metatableError)).toBe("string")
     end)
 
     it("reports malformed native module metadata as a Lua error", function()
@@ -69,5 +95,15 @@ describe("runtime lifecycle and error handling", function()
         end)
         expect(ok).toBe(false)
         expect(typeof(err)).toBe("string")
+    end)
+
+    it("rejects native libraries outside the module directory", function()
+        local req: (string) -> any = require
+        local ok, err = pcall(function()
+            req("../../../temp/path_escape_module")
+        end)
+        expect(ok).toBe(false)
+        expect(typeof(err)).toBe("string")
+        expect(string.find(tostring(err), "inside module directory", 1, true) ~= nil).toBe(true)
     end)
 end)

@@ -8,6 +8,7 @@
 #include "Luau/LuauConfig.h"
 #include <cstdlib>
 #include <cstring>
+#include <algorithm>
 #include <array>
 #include <vector>
 #include <sstream>
@@ -15,6 +16,10 @@
 #include <iostream>
 #include <filesystem>
 #include <chrono>
+#include <cstddef>
+#include <limits>
+#include <random>
+#include <thread>
 
 #include "Luau/Parser.h"
 #include "Luau/Scope.h"
@@ -365,6 +370,62 @@ namespace
         }
         return out;
     }
+
+    static std::array<uint8_t, 32> HmacSha256(std::string_view key, std::string_view data)
+    {
+        std::array<uint8_t, 64> paddedKey{};
+        if (key.size() > paddedKey.size())
+        {
+            auto keyHash = Sha256(key);
+            std::copy(keyHash.begin(), keyHash.end(), paddedKey.begin());
+        }
+        else
+        {
+            std::copy(key.begin(), key.end(), paddedKey.begin());
+        }
+
+        std::string inner(paddedKey.size(), '\0');
+        for (size_t i = 0; i < paddedKey.size(); ++i)
+            inner[i] = static_cast<char>(paddedKey[i] ^ 0x36);
+        inner.append(data);
+        auto innerHash = Sha256(inner);
+
+        std::string outer(paddedKey.size(), '\0');
+        for (size_t i = 0; i < paddedKey.size(); ++i)
+            outer[i] = static_cast<char>(paddedKey[i] ^ 0x5c);
+        outer.append(reinterpret_cast<const char*>(innerHash.data()), innerHash.size());
+        return Sha256(outer);
+    }
+
+    static std::string GetCacheSecret(const fs::path& cacheDir)
+    {
+        fs::path secretPath = cacheDir / "cache.key";
+        std::ifstream secretInput(secretPath, std::ios::binary);
+        if (secretInput.is_open())
+        {
+            std::string existing((std::istreambuf_iterator<char>(secretInput)), std::istreambuf_iterator<char>());
+            if (existing.size() == 32)
+                return existing;
+        }
+
+        std::string secret(32, '\0');
+        std::random_device random;
+        for (char& byte : secret)
+            byte = static_cast<char>(random());
+
+        std::ofstream output(secretPath, std::ios::binary | std::ios::trunc);
+        if (output.is_open())
+        {
+            output.write(secret.data(), secret.size());
+            output.close();
+
+            std::error_code ec;
+            fs::permissions(secretPath,
+                fs::perms::owner_read | fs::perms::owner_write,
+                fs::perm_options::replace, ec);
+        }
+        return secret;
+    }
 }
 
 
@@ -590,10 +651,23 @@ std::string Compiler::CompileWithResult(std::string_view source, std::vector<Dia
 
 std::string Compiler::GetCacheDirectory()
 {
-    fs::path tempDir = fs::temp_directory_path();
-    fs::path lodeCacheDir = tempDir / "lode_cache";
+    fs::path cacheBase;
+#ifdef _WIN32
+    if (const char* localAppData = std::getenv("LOCALAPPDATA"))
+        cacheBase = fs::path(localAppData) / "LodeRuntime";
+#else
+    if (const char* home = std::getenv("HOME"))
+        cacheBase = fs::path(home) / ".cache" / "lode-runtime";
+#endif
+    if (cacheBase.empty())
+        cacheBase = fs::temp_directory_path() / "lode-runtime";
+
+    fs::path lodeCacheDir = cacheBase / "cache";
     std::error_code ec;
     fs::create_directories(lodeCacheDir, ec);
+    fs::permissions(lodeCacheDir,
+        fs::perms::owner_all,
+        fs::perm_options::replace, ec);
     // Evict entries older than 30 days the first time the cache is touched.
     PruneCache(30);
     return lodeCacheDir.string();
@@ -707,7 +781,9 @@ std::string Compiler::CompileWithCache(std::string_view source, std::string_view
         srcPath = fs::path(filePath);
 
     std::string cacheFileName = srcPath.stem().string() + "_" + ToHex(keyHash) + ".luac";
-    fs::path cachePath = fs::path(GetCacheDirectory()) / cacheFileName;
+    fs::path cacheDir = fs::path(GetCacheDirectory());
+    fs::path cachePath = cacheDir / cacheFileName;
+    std::string cacheSecret = GetCacheSecret(cacheDir);
 
     struct CacheHeader
     {
@@ -715,6 +791,7 @@ std::string Compiler::CompileWithCache(std::string_view source, std::string_view
         uint8_t version;         // Luau bytecode version (LBC_VERSION_TARGET) at write time
         uint8_t contentHash[32]; // SHA-256 of the source (extra validation)
         uint32_t size;           // Bytecode size
+        uint8_t authTag[32];     // HMAC-SHA256 over the header and bytecode
     };
 
     // Try reading from the cache first. The filename encodes the content hash,
@@ -726,16 +803,25 @@ std::string Compiler::CompileWithCache(std::string_view source, std::string_view
         std::ifstream cacheFile(cachePath, std::ios::binary);
         if (cacheFile.is_open())
         {
+            cacheFile.seekg(0, std::ios::end);
+            std::streamoff fileSize = cacheFile.tellg();
+            cacheFile.seekg(0, std::ios::beg);
             CacheHeader header{};
             cacheFile.read(reinterpret_cast<char*>(&header), sizeof(CacheHeader));
             if (cacheFile.gcount() == sizeof(CacheHeader) &&
                 std::memcmp(header.magic, "LODE", 4) == 0 &&
                 header.version == static_cast<uint8_t>(LuauBytecodeTag::LBC_VERSION_TARGET) &&
-                std::memcmp(header.contentHash, contentHash.data(), 32) == 0)
+                std::memcmp(header.contentHash, contentHash.data(), 32) == 0 &&
+                fileSize >= static_cast<std::streamoff>(sizeof(CacheHeader)) &&
+                header.size == static_cast<uint64_t>(fileSize - sizeof(CacheHeader)))
             {
                 std::string cachedBytecode(header.size, '\0');
                 cacheFile.read(cachedBytecode.data(), header.size);
-                if (cacheFile.gcount() == static_cast<std::streamsize>(header.size))
+                std::string authData(reinterpret_cast<const char*>(&header), offsetof(CacheHeader, authTag));
+                authData.append(cachedBytecode);
+                auto expectedTag = HmacSha256(cacheSecret, authData);
+                if (cacheFile.gcount() == static_cast<std::streamsize>(header.size) &&
+                    std::memcmp(header.authTag, expectedTag.data(), expectedTag.size()) == 0)
                 {
                     return cachedBytecode;
                 }
@@ -757,8 +843,7 @@ std::string Compiler::CompileWithCache(std::string_view source, std::string_view
     // signal a failed compile, so those must be re-validated on every run.
     if (compiledBytecode[0] != 0)
     {
-        std::ofstream cacheOut(cachePath, std::ios::binary);
-        if (cacheOut.is_open())
+        if (compiledBytecode.size() <= std::numeric_limits<uint32_t>::max())
         {
             CacheHeader header{};
             std::memcpy(header.magic, "LODE", 4);
@@ -766,8 +851,27 @@ std::string Compiler::CompileWithCache(std::string_view source, std::string_view
             std::memcpy(header.contentHash, contentHash.data(), 32);
             header.size = static_cast<uint32_t>(compiledBytecode.size());
 
-            cacheOut.write(reinterpret_cast<const char*>(&header), sizeof(CacheHeader));
-            cacheOut.write(compiledBytecode.data(), compiledBytecode.size());
+            std::string authData(reinterpret_cast<const char*>(&header), offsetof(CacheHeader, authTag));
+            authData.append(compiledBytecode);
+            auto authTag = HmacSha256(cacheSecret, authData);
+            std::memcpy(header.authTag, authTag.data(), authTag.size());
+
+            fs::path temporaryPath = cachePath;
+            temporaryPath += ".tmp." + std::to_string(std::hash<std::thread::id>{}(std::this_thread::get_id()));
+            temporaryPath += "." + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+
+            std::ofstream temporaryOut(temporaryPath, std::ios::binary | std::ios::trunc);
+            if (temporaryOut.is_open())
+            {
+                temporaryOut.write(reinterpret_cast<const char*>(&header), sizeof(CacheHeader));
+                temporaryOut.write(compiledBytecode.data(), compiledBytecode.size());
+                temporaryOut.close();
+
+                std::error_code renameError;
+                fs::rename(temporaryPath, cachePath, renameError);
+                if (renameError)
+                    fs::remove(temporaryPath, renameError);
+            }
         }
     }
 

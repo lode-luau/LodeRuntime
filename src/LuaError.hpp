@@ -1,6 +1,8 @@
 #pragma once
 
 #include "lua.h"
+#include "lualib.h"
+#include <exception>
 #include <string>
 
 namespace Lode
@@ -17,6 +19,18 @@ inline std::string LuaErrorMessage(lua_State* L, int index)
 
     const char* typeName = lua_typename(L, lua_type(L, index));
     return std::string("Lua error (value of type ") + (typeName ? typeName : "unknown") + ")";
+}
+
+inline int RaiseCppException(lua_State* L, const char* context, const std::exception& error)
+{
+    luaL_error(L, "%s: %s", context, error.what());
+    return 0;
+}
+
+inline int RaiseCppException(lua_State* L, const char* context)
+{
+    luaL_error(L, "%s", context);
+    return 0;
 }
 
 } // namespace Lode

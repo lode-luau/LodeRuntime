@@ -17,6 +17,7 @@
 #include "Lode/Task.hpp"
 #include "Lode/Coroutine.hpp"
 #include "Lode/Buffer.hpp"
+#include "Lode/Numeric.hpp"
 #include "Lode/Compiler.hpp"
 #include <string>
 #include <vector>
@@ -306,7 +307,11 @@ public:
     Lode::Value read(Lode::State& vm, const std::vector<Lode::Value>& args) {
         mainL = vm.GetMainThread();
         PendingRead req;
-        req.requestedBytes = (args.size() > 0 && args[0].IsNumber()) ? static_cast<size_t>(args[0].AsNumber()) : 0;
+        if (args.size() > 0 && args[0].IsNumber()) {
+            auto result = Lode::Numeric::ToSize(args[0].AsNumber(), "read length");
+            if (result.IsError()) { vm.RaiseError(result.GetError().ErrorMessage()); return Lode::Value(); }
+            req.requestedBytes = result.GetValue();
+        }
         
         Lode::Value resultValue;
         if (tryResolve(vm, req, resultValue)) return resultValue;
@@ -322,7 +327,11 @@ public:
         mainL = vm.GetMainThread();
         PendingRead req;
         req.isBuffer = true;
-        req.requestedBytes = (args.size() > 0 && args[0].IsNumber()) ? static_cast<size_t>(args[0].AsNumber()) : 0;
+        if (args.size() > 0 && args[0].IsNumber()) {
+            auto result = Lode::Numeric::ToSize(args[0].AsNumber(), "read length");
+            if (result.IsError()) { vm.RaiseError(result.GetError().ErrorMessage()); return Lode::Value(); }
+            req.requestedBytes = result.GetValue();
+        }
         
         Lode::Value resultValue;
         if (tryResolve(vm, req, resultValue)) return resultValue;
@@ -356,11 +365,20 @@ public:
         PendingRead req;
         req.isInto = true;
         req.targetBufferValue = args[0];
-        req.offset = (args.size() > 1 && args[1].IsNumber()) ? static_cast<size_t>(args[1].AsNumber()) : 0;
+        if (args.size() > 1 && args[1].IsNumber()) {
+            auto result = Lode::Numeric::ToSize(args[1].AsNumber(), "buffer offset");
+            if (result.IsError()) { vm.RaiseError(result.GetError().ErrorMessage()); return Lode::Value(); }
+            req.offset = result.GetValue();
+        }
         size_t bSize = 0;
         (void)args[0].AsBuffer(&bSize);
         size_t maxAvailable = (bSize > req.offset) ? (bSize - req.offset) : 0;
-        size_t length = (args.size() > 2 && args[2].IsNumber()) ? static_cast<size_t>(args[2].AsNumber()) : maxAvailable;
+        size_t length = maxAvailable;
+        if (args.size() > 2 && args[2].IsNumber()) {
+            auto result = Lode::Numeric::ToSize(args[2].AsNumber(), "read length");
+            if (result.IsError()) { vm.RaiseError(result.GetError().ErrorMessage()); return Lode::Value(); }
+            length = result.GetValue();
+        }
         req.requestedBytes = (std::min)(length, maxAvailable);
         
         Lode::Value resultValue;
@@ -380,7 +398,11 @@ public:
         PendingRead req;
         req.isCallback = true;
         req.callback = args[0];
-        req.requestedBytes = (args.size() > 1 && args[1].IsNumber()) ? static_cast<size_t>(args[1].AsNumber()) : 0;
+        if (args.size() > 1 && args[1].IsNumber()) {
+            auto result = Lode::Numeric::ToSize(args[1].AsNumber(), "read length");
+            if (result.IsError()) { vm.RaiseError(result.GetError().ErrorMessage()); return Lode::Value(); }
+            req.requestedBytes = result.GetValue();
+        }
         
         Lode::Value resultValue;
         if (tryResolve(vm, req, resultValue)) {
@@ -402,7 +424,11 @@ public:
         req.isCallback = true;
         req.callback = args[0];
         req.isBuffer = true;
-        req.requestedBytes = (args.size() > 1 && args[1].IsNumber()) ? static_cast<size_t>(args[1].AsNumber()) : 0;
+        if (args.size() > 1 && args[1].IsNumber()) {
+            auto result = Lode::Numeric::ToSize(args[1].AsNumber(), "read length");
+            if (result.IsError()) { vm.RaiseError(result.GetError().ErrorMessage()); return Lode::Value(); }
+            req.requestedBytes = result.GetValue();
+        }
         
         Lode::Value resultValue;
         if (tryResolve(vm, req, resultValue)) {
@@ -425,11 +451,20 @@ public:
         req.targetBufferValue = args[0];
         req.callback = args[1];
         req.isInto = true;
-        req.offset = (args.size() > 2 && args[2].IsNumber()) ? static_cast<size_t>(args[2].AsNumber()) : 0;
+        if (args.size() > 2 && args[2].IsNumber()) {
+            auto result = Lode::Numeric::ToSize(args[2].AsNumber(), "buffer offset");
+            if (result.IsError()) { vm.RaiseError(result.GetError().ErrorMessage()); return Lode::Value(); }
+            req.offset = result.GetValue();
+        }
         size_t bSize = 0;
         (void)args[0].AsBuffer(&bSize);
         size_t maxAvailable = (bSize > req.offset) ? (bSize - req.offset) : 0;
-        size_t length = (args.size() > 3 && args[3].IsNumber()) ? static_cast<size_t>(args[3].AsNumber()) : maxAvailable;
+        size_t length = maxAvailable;
+        if (args.size() > 3 && args[3].IsNumber()) {
+            auto result = Lode::Numeric::ToSize(args[3].AsNumber(), "read length");
+            if (result.IsError()) { vm.RaiseError(result.GetError().ErrorMessage()); return Lode::Value(); }
+            length = result.GetValue();
+        }
         req.requestedBytes = (std::min)(length, maxAvailable);
         
         Lode::Value resultValue;
