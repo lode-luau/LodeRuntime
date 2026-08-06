@@ -268,6 +268,23 @@ static bool check_path_exists(const fs::path& p)
     return false;
 }
 
+static bool IsPathInside(const fs::path& candidate, const fs::path& root)
+{
+    std::error_code ec;
+    fs::path canonicalRoot = fs::weakly_canonical(root, ec);
+    if (ec) return false;
+
+    fs::path canonicalCandidate = fs::weakly_canonical(candidate, ec);
+    if (ec) return false;
+
+    fs::path relative = canonicalCandidate.lexically_relative(canonicalRoot);
+    if (relative.empty() || relative.is_absolute())
+        return false;
+
+    auto first = relative.begin();
+    return first != relative.end() && *first != "..";
+}
+
 static bool is_module_present(lua_State* L, void* ctx)
 {
     LodeNavigationContext* nav = static_cast<LodeNavigationContext*>(ctx);
@@ -458,6 +475,12 @@ static int LoadModuleImpl(lua_State* L, void* ctx, const char* path, const char*
 
                 std::string relLibPath = libraryEntry.get<std::string>();
                 fs::path fullLibPath = dirPath / relLibPath;
+
+                if (relLibPath.empty() || !IsPathInside(fullLibPath, dirPath))
+                {
+                    vm.RaiseError("Native library path must remain inside module directory: " + relLibPath);
+                    return 0;
+                }
 
                 // Prefer the module binary next to the executable: the build drops a
                 // config-matched copy there (Debug or Release), while the lode.json
