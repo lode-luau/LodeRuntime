@@ -12,6 +12,8 @@
 #include <vector>
 #include <string>
 #include <filesystem>
+#include <algorithm>
+#include <cctype>
 
 namespace fs = std::filesystem;
 
@@ -69,7 +71,12 @@ int main(int argc, char* argv[])
     file.close();
 
     std::string bytecode;
-    if (filePath.size() >= 5 && filePath.substr(filePath.size() - 5) == ".luau")
+    std::string extension = fs::path(filePath).extension().string();
+    std::transform(extension.begin(), extension.end(), extension.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+
+    if (extension == ".luau")
     {
         // Cached compile: on a cache hit the source is not type-checked again,
         // so warm runs start near-instantly. Diagnostics are only produced on a
