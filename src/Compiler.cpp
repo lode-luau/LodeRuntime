@@ -31,6 +31,17 @@ namespace fs = std::filesystem;
 
 namespace
 {
+    fs::path PathFromUtf8(std::string_view path)
+    {
+        return fs::u8path(path);
+    }
+
+    std::string PathToUtf8(const fs::path& path)
+    {
+        std::u8string utf8 = path.u8string();
+        return std::string(reinterpret_cast<const char*>(utf8.data()), utf8.size());
+    }
+
     class SimpleFileResolver : public Luau::FileResolver
     {
     public:
@@ -48,7 +59,7 @@ namespace
                 return sc;
             }
             
-            std::ifstream file(name);
+            std::ifstream file(PathFromUtf8(name));
             if (file.is_open())
             {
                 std::string contents((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
@@ -77,7 +88,7 @@ namespace
                     {
                         // @self resolves to the package's own directory (the folder
                         // containing init.luau or lode.json), mirroring the runtime.
-                        fs::path requirerPath(context ? context->name : "");
+                        fs::path requirerPath = PathFromUtf8(context ? context->name : "");
                         fs::path pkgDir = Lode::FindLodeJson(requirerPath);
                         if (pkgDir.empty())
                             pkgDir = requirerPath.parent_path();
@@ -86,14 +97,16 @@ namespace
                         if (!remainder.empty())
                             resolvedPath /= remainder;
 
-                        std::string finalPath = resolvedPath.string();
-                        if (!fs::is_regular_file(finalPath) && fs::is_regular_file(finalPath + ".luau"))
-                            finalPath += ".luau";
+                        fs::path finalPath = resolvedPath;
+                        fs::path luauPath = finalPath;
+                        luauPath += ".luau";
+                        if (!fs::is_regular_file(finalPath) && fs::is_regular_file(luauPath))
+                            finalPath = luauPath;
                         else if (fs::is_regular_file(resolvedPath / "init.luau"))
-                            finalPath = (resolvedPath / "init.luau").string();
+                            finalPath = resolvedPath / "init.luau";
 
-                        try { finalPath = fs::weakly_canonical(finalPath).string(); } catch(...) {}
-                        return Luau::ModuleInfo{finalPath};
+                        try { finalPath = fs::weakly_canonical(finalPath); } catch(...) {}
+                        return Luau::ModuleInfo{PathToUtf8(finalPath)};
                     }
 
                     if (configResolver_)
@@ -102,18 +115,20 @@ namespace
                         auto it = config.aliases.find(aliasName);
                         if (it != nullptr)
                         {
-                            fs::path resolvedPath = fs::path(std::string(it->configLocation)).parent_path() / it->value;
+                            fs::path resolvedPath = PathFromUtf8(std::string(it->configLocation)).parent_path() / it->value;
                             if (!remainder.empty())
                                 resolvedPath /= remainder;
                             
-                            std::string finalPath = resolvedPath.string();
-                            if (!fs::is_regular_file(finalPath) && fs::is_regular_file(finalPath + ".luau"))
-                                finalPath += ".luau";
+                            fs::path finalPath = resolvedPath;
+                            fs::path luauPath = finalPath;
+                            luauPath += ".luau";
+                            if (!fs::is_regular_file(finalPath) && fs::is_regular_file(luauPath))
+                                finalPath = luauPath;
                             else if (fs::is_regular_file(resolvedPath / "init.luau"))
-                                finalPath = (resolvedPath / "init.luau").string();
+                                finalPath = resolvedPath / "init.luau";
 
-                            try { finalPath = fs::weakly_canonical(finalPath).string(); } catch(...) {}
-                            return Luau::ModuleInfo{finalPath};
+                            try { finalPath = fs::weakly_canonical(finalPath); } catch(...) {}
+                            return Luau::ModuleInfo{PathToUtf8(finalPath)};
                         }
                     }
                 }
@@ -123,7 +138,7 @@ namespace
                     if (relPath.rfind("./", 0) == 0)
                         relPath = relPath.substr(2);
                     
-                    fs::path ctxPath(context->name);
+                    fs::path ctxPath = PathFromUtf8(context->name);
                     fs::path dirPath = ctxPath.has_parent_path() ? ctxPath.parent_path() : ctxPath;
                     if (ctxPath.filename() == "init.luau" || ctxPath.filename() == "init.lua")
                     {
@@ -132,14 +147,16 @@ namespace
                     }
                     fs::path resolvedPath = dirPath / relPath;
                     
-                    std::string finalPath = resolvedPath.string();
-                    if (!fs::is_regular_file(finalPath) && fs::is_regular_file(finalPath + ".luau"))
-                        finalPath += ".luau";
+                    fs::path finalPath = resolvedPath;
+                    fs::path luauPath = finalPath;
+                    luauPath += ".luau";
+                    if (!fs::is_regular_file(finalPath) && fs::is_regular_file(luauPath))
+                        finalPath = luauPath;
                     else if (fs::is_regular_file(resolvedPath / "init.luau"))
-                        finalPath = (resolvedPath / "init.luau").string();
+                        finalPath = resolvedPath / "init.luau";
 
-                    try { finalPath = fs::weakly_canonical(finalPath).string(); } catch(...) {}
-                    return Luau::ModuleInfo{finalPath};
+                    try { finalPath = fs::weakly_canonical(finalPath); } catch(...) {}
+                    return Luau::ModuleInfo{PathToUtf8(finalPath)};
                 }
             }
             return std::nullopt;
@@ -189,9 +206,9 @@ namespace
             if (!filePath.empty())
             {
                 std::error_code ec;
-                fs::path scriptDir = fs::absolute(fs::path(filePath), ec).parent_path();
+                fs::path scriptDir = fs::absolute(PathFromUtf8(filePath), ec).parent_path();
                 if (!ec)
-                    scriptDir_ = scriptDir.string();
+                    scriptDir_ = PathToUtf8(scriptDir);
             }
         }
 
@@ -202,9 +219,9 @@ namespace
             if (!name.empty())
             {
                 std::error_code ec;
-                fs::path p = fs::absolute(fs::path(name), ec);
+                fs::path p = fs::absolute(PathFromUtf8(name), ec);
                 if (!ec && fs::exists(p, ec))
-                    dir = p.parent_path().string();
+                    dir = PathToUtf8(p.parent_path());
             }
             if (dir.empty())
                 dir = scriptDir_;
@@ -241,14 +258,15 @@ namespace
 
             // Walk up to the parent directory
             std::error_code ec;
-            fs::path parentPath = fs::path(dir).parent_path();
-            bool hasParent = (parentPath != fs::path(dir)) && !parentPath.empty();
+            fs::path dirPath = PathFromUtf8(dir);
+            fs::path parentPath = dirPath.parent_path();
+            bool hasParent = (parentPath != dirPath) && !parentPath.empty();
 
             // Inherit config from the parent (recursive)
-            Luau::Config result = hasParent ? readConfigRec(parentPath.string()) : defaultConfig_;
+            Luau::Config result = hasParent ? readConfigRec(PathToUtf8(parentPath)) : defaultConfig_;
 
-            fs::path luaurcPath = fs::path(dir) / Luau::kConfigName;       // .luaurc
-            fs::path luauConfigPath = fs::path(dir) / Luau::kLuauConfigName; // .config.luau
+            fs::path luaurcPath = dirPath / Luau::kConfigName;       // .luaurc
+            fs::path luauConfigPath = dirPath / Luau::kLuauConfigName; // .config.luau
 
             bool luaurcExists = fs::exists(luaurcPath, ec) && !ec;
             bool luauConfigExists = fs::exists(luauConfigPath, ec) && !ec;
@@ -262,7 +280,7 @@ namespace
                 if (std::optional<std::string> contents = readTextFile(luaurcPath))
                 {
                     Luau::ConfigOptions::AliasOptions aliasOpts;
-                    aliasOpts.configLocation = luaurcPath.string();
+                    aliasOpts.configLocation = PathToUtf8(luaurcPath);
                     aliasOpts.overwriteAliases = true;
                     Luau::ConfigOptions opts;
                     opts.aliasOptions = std::move(aliasOpts);
@@ -274,7 +292,7 @@ namespace
                 if (std::optional<std::string> contents = readTextFile(luauConfigPath))
                 {
                     Luau::ConfigOptions::AliasOptions aliasOpts;
-                    aliasOpts.configLocation = luauConfigPath.string();
+                    aliasOpts.configLocation = PathToUtf8(luauConfigPath);
                     aliasOpts.overwriteAliases = true;
                     Luau::InterruptCallbacks callbacks{};
                     Luau::extractLuauConfig(*contents, result, aliasOpts, std::move(callbacks));
@@ -707,11 +725,11 @@ static std::array<uint8_t, 32> ConfigFingerprint(std::string_view source, std::s
     if (!filePath.empty())
     {
         std::error_code ec;
-        fs::path p = fs::absolute(fs::path(filePath), ec);
+        fs::path p = fs::absolute(PathFromUtf8(filePath), ec);
         if (!ec)
         {
             Luau::TypeCheckLimits limits;
-            resolver.getConfig(p.string(), limits);
+            resolver.getConfig(PathToUtf8(p), limits);
         }
     }
     const Luau::Config& config = resolver.getScriptConfig();
@@ -776,11 +794,11 @@ std::string Compiler::CompileWithCache(std::string_view source, std::string_view
     std::array<uint8_t, 32> keyHash = Sha256(keyMaterial);
 
     std::error_code ec;
-    fs::path srcPath = fs::absolute(filePath, ec);
+    fs::path srcPath = fs::absolute(PathFromUtf8(filePath), ec);
     if (ec)
-        srcPath = fs::path(filePath);
+        srcPath = PathFromUtf8(filePath);
 
-    std::string cacheFileName = srcPath.stem().string() + "_" + ToHex(keyHash) + ".luac";
+    std::string cacheFileName = PathToUtf8(srcPath.stem()) + "_" + ToHex(keyHash) + ".luac";
     fs::path cacheDir = fs::path(GetCacheDirectory());
     fs::path cachePath = cacheDir / cacheFileName;
     std::string cacheSecret = GetCacheSecret(cacheDir);
