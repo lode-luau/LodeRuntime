@@ -12,6 +12,10 @@ local NativeMod, MetaInfo = require("./native_module")
 print("[Native Module DLL] Greet:", NativeMod.greet("Developer"))
 print("[Native Module DLL] Square(9):", NativeMod.square(9))
 
+local largeInteger = NativeMod.makeLargeInteger()
+assert(NativeMod.roundTripInteger(largeInteger) == largeInteger, "64-bit integer round-trip failed")
+print("[Native Module DLL] 64-bit integer round-trip:", NativeMod.roundTripInteger(largeInteger))
+
 local sysInfo = NativeMod.getSystemInfo()
 print("[Native Module DLL] System Info: Platform =", sysInfo.platform, "| Arch =", sysInfo.arch)
 

@@ -43,6 +43,8 @@ export type NativeModule = {
     processBuffer: (buf: buffer, str: string) -> number,
     roundTripReference: (value: any) -> any,
     roundTripString: (value: string) -> string,
+    roundTripInteger: (value: number) -> number,
+    makeLargeInteger: () -> number,
     bufferBoundsProbe: (buf: buffer) -> number,
     throwCpp: () -> (),
     getSystemInfo: () -> { platform: string, arch: string },

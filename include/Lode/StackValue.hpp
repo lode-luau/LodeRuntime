@@ -57,7 +57,7 @@ public:
     /** @brief Fast unsafe cast to double. */
     [[nodiscard]] double AsNumber() const;
     /** @brief Fast unsafe cast to integer. */
-    [[nodiscard]] int AsInteger() const;
+    [[nodiscard]] int64_t AsInteger() const;
     /** @brief Fast unsafe cast to string. */
     [[nodiscard]] std::string AsString() const;
     /** @brief Zero-copy view into the string on the stack. */

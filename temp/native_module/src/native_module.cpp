@@ -98,7 +98,7 @@ LODE_MODULE(vm)
             std::memcpy(buf.data(), str.data(), copyCount);
         }
         
-        return Lode::Value(static_cast<int>(copyCount));
+        return Lode::Value(static_cast<double>(copyCount));
     }));
 
     // Exercise reference transfer through a separate coroutine. This keeps the
@@ -121,6 +121,14 @@ LODE_MODULE(vm)
 
     exports.Set("roundTripString", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs args) -> Lode::Value {
         return args.Size() > 0 ? args[0].ToValue() : Lode::Value();
+    }));
+
+    exports.Set("roundTripInteger", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs args) -> Lode::Value {
+        return args.Size() > 0 && args[0].IsInteger() ? args[0].ToValue() : Lode::Value();
+    }));
+
+    exports.Set("makeLargeInteger", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs) -> Lode::Value {
+        return Lode::Value(static_cast<int64_t>(0x123456789abcdefLL));
     }));
 
     exports.Set("bufferBoundsProbe", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs args) -> Lode::Value {
