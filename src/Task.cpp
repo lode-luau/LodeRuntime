@@ -34,7 +34,9 @@ static TaskContext* GetOrCreateContext(lua_State* L)
     if (TaskContext* existing = GetContext(L))
         return existing;
 
-    auto* mem = static_cast<TaskContext*>(lua_newuserdata(L, sizeof(TaskContext)));
+    auto* mem = static_cast<TaskContext*>(lua_newuserdatadtor(L, sizeof(TaskContext), [](void* ptr) {
+        static_cast<TaskContext*>(ptr)->~TaskContext();
+    }));
     new (mem) TaskContext();
     lua_pushvalue(L, -1);
     lua_setfield(L, LUA_REGISTRYINDEX, kTaskCtxKey);
@@ -134,10 +136,8 @@ void Task::Shutdown(State& vm)
     }
     shutdownHooks.clear();
 
-    // Destroy the per-State context before the VM is released; the timers (and
-    // the Value/Coroutine references they hold) are freed below while the VM is
-    // still alive, so lua_unref runs against an open lua_State.
-    ctx->~TaskContext();
+    // The userdata destructor owns the context lifetime. The timer and hook
+    // containers are cleared here while the Lua state is still usable.
     lua_pushnil(L);
     lua_setfield(L, LUA_REGISTRYINDEX, kTaskCtxKey);
     lua_pop(L, 1);

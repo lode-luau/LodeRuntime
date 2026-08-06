@@ -243,14 +243,6 @@ public:
             return Value();
         }));
 
-        // Automatic Garbage Collection __gc
-        using Holder = std::shared_ptr<T>;
-        vm_.SetUserdataGC(metatable_, [](void* ptr) {
-            if (ptr) {
-                auto* holder = static_cast<Holder*>(ptr);
-                holder->~Holder();
-            }
-        });
     }
 
     /**
@@ -267,7 +259,9 @@ public:
             {
                 auto instance = std::make_shared<T>();
                 using Holder = std::shared_ptr<T>;
-                void* userMemory = vm.CreateUserdata(sizeof(Holder));
+                void* userMemory = vm.CreateUserdata(sizeof(Holder), [](void* ptr) {
+                    static_cast<Holder*>(ptr)->~Holder();
+                });
                 new (userMemory) Holder(instance);
 
                 vm.SetUserdataMetatable(-1, meta);
@@ -298,7 +292,9 @@ public:
                 auto instance = factory(vm, args);
                 if (!instance) instance = std::make_shared<T>();
                 using Holder = std::shared_ptr<T>;
-                void* userMemory = vm.CreateUserdata(sizeof(Holder));
+                void* userMemory = vm.CreateUserdata(sizeof(Holder), [](void* ptr) {
+                    static_cast<Holder*>(ptr)->~Holder();
+                });
                 new (userMemory) Holder(instance);
 
                 vm.SetUserdataMetatable(-1, meta);

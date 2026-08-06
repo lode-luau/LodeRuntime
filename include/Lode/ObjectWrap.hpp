@@ -31,7 +31,9 @@ public:
     static void Wrap(State& vm, std::shared_ptr<T> instance, const Table& metatable)
     {
         using Holder = std::shared_ptr<T>;
-        void* userMemory = vm.CreateUserdata(sizeof(Holder));
+        void* userMemory = vm.CreateUserdata(sizeof(Holder), [](void* ptr) {
+            static_cast<Holder*>(ptr)->~Holder();
+        });
         new (userMemory) Holder(instance);
 
         vm.SetUserdataMetatable(-1, metatable);

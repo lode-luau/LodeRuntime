@@ -241,19 +241,10 @@ Value State::CreateFunction(const std::function<Value(State& vm, const std::vect
     {
         std::function<Value(State& vm, const std::vector<Value>& args)> func;
     };
-    // GC-tracked userdata owns the payload: it is freed (destructor runs) when
-    // the closure is collected, instead of leaking on every CreateFunction call.
-    auto* data = static_cast<ClosureData*>(lua_newuserdata(L_, sizeof(ClosureData)));
+    auto* data = static_cast<ClosureData*>(lua_newuserdatadtor(L_, sizeof(ClosureData), [](void* ptr) {
+        static_cast<ClosureData*>(ptr)->~ClosureData();
+    }));
     new (data) ClosureData{ fn };
-
-    lua_newtable(L_);
-    lua_pushcfunction(L_, [](lua_State* L) -> int {
-        auto* d = static_cast<ClosureData*>(lua_touserdata(L, 1));
-        if (d) d->~ClosureData();
-        return 0;
-    }, "__gc");
-    lua_setfield(L_, -2, "__gc");
-    lua_setmetatable(L_, -2);
 
     auto cfunc = [](lua_State* L) -> int {
         auto* data = static_cast<ClosureData*>(lua_touserdata(L, lua_upvalueindex(1)));
@@ -306,19 +297,10 @@ Value State::CreateFastFunction(const std::function<Value(State& vm, StackArgs a
     {
         std::function<Value(State& vm, StackArgs args)> func;
     };
-    // GC-tracked userdata owns the payload: it is freed (destructor runs) when
-    // the closure is collected, instead of leaking on every CreateFastFunction call.
-    auto* data = static_cast<ClosureData*>(lua_newuserdata(L_, sizeof(ClosureData)));
+    auto* data = static_cast<ClosureData*>(lua_newuserdatadtor(L_, sizeof(ClosureData), [](void* ptr) {
+        static_cast<ClosureData*>(ptr)->~ClosureData();
+    }));
     new (data) ClosureData{ fn };
-
-    lua_newtable(L_);
-    lua_pushcfunction(L_, [](lua_State* L) -> int {
-        auto* d = static_cast<ClosureData*>(lua_touserdata(L, 1));
-        if (d) d->~ClosureData();
-        return 0;
-    }, "__gc");
-    lua_setfield(L_, -2, "__gc");
-    lua_setmetatable(L_, -2);
 
     auto cfunc = [](lua_State* L) -> int {
         auto* data = static_cast<ClosureData*>(lua_touserdata(L, lua_upvalueindex(1)));
@@ -374,6 +356,11 @@ void* State::CreateUserdata(size_t size)
     return L_ ? lua_newuserdata(L_, size) : nullptr;
 }
 
+void* State::CreateUserdata(size_t size, void(*destructor)(void* ptr))
+{
+    return L_ ? lua_newuserdatadtor(L_, size, destructor) : nullptr;
+}
+
 Value State::CreateBuffer(size_t size)
 {
     if (!L_) return Value();
@@ -392,27 +379,8 @@ void State::SetUserdataMetatable(int index, const Table& metatable)
 
 void State::SetUserdataGC(const Table& metatable, void(*destructor)(void* ptr))
 {
-    if (!L_) return;
-    metatable.PushToLuaState(L_);
-    // Store the destructor in a full userdata (a real object pointer) and copy its
-    // bytes with memcpy, instead of reinterpret_cast-ing the function pointer to
-    // void*. Casting between function-pointer and object-pointer types is
-    // conditionally-supported / implementation-defined, so the lightuserdata route
-    // is not portable (see issue #12). The closure keeps the userdata alive as an
-    // upvalue, and reads the destructor back out by copying the bytes.
-    void* storage = lua_newuserdata(L_, sizeof(void(*)(void*)));
-    std::memcpy(storage, &destructor, sizeof(destructor));
-    auto gcFunc = [](lua_State* L) -> int {
-        void (*dt)(void*) = nullptr;
-        if (void* storage = lua_touserdata(L, lua_upvalueindex(1)))
-            std::memcpy(&dt, storage, sizeof(dt));
-        if (void* ud = lua_touserdata(L, 1))
-            dt(ud);
-        return 0;
-    };
-    lua_pushcclosure(L_, gcFunc, "__gc", 1);
-    lua_setfield(L_, -2, "__gc");
-    lua_pop(L_, 1);
+    (void)metatable;
+    (void)destructor;
 }
 
 int State::YieldThread()

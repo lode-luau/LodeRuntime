@@ -311,7 +311,14 @@ static bool is_module_present(lua_State* L, void* ctx)
 
     for (const auto& searchDir : nav->modulePaths)
     {
-        fs::path searchPath = PathFromUtf8(searchDir) / p;
+        fs::path searchPath = PathFromUtf8(searchDir) / p.filename();
+        if (check_path_exists(searchPath))
+        {
+            nav->currentPath = fs::weakly_canonical(searchPath);
+            return true;
+        }
+
+        searchPath = p.parent_path().parent_path() / p.filename();
         if (check_path_exists(searchPath))
         {
             nav->currentPath = fs::weakly_canonical(searchPath);
@@ -444,7 +451,14 @@ static ModuleLoadResult LoadModuleNoJump(lua_State* L, void* ctx, const char* pa
     {
         for (const auto& searchDir : loaderCtx->modulePaths)
         {
-            fs::path candidate = PathFromUtf8(searchDir) / targetPath;
+            fs::path candidate = PathFromUtf8(searchDir) / targetPath.filename();
+            if (check_path_exists(candidate))
+            {
+                targetPath = candidate;
+                break;
+            }
+
+            candidate = targetPath.parent_path().parent_path() / targetPath.filename();
             if (check_path_exists(candidate))
             {
                 targetPath = candidate;
@@ -794,19 +808,12 @@ void SetupModuleLoader(lua_State* L, NativeModuleRegistry* registry, const std::
     // std::vectors are destroyed when the VM is collected. It is also referenced
     // from the registry so UpdateModulePaths can reach it and the require closure
     // can safely hold it as an upvalue for the whole State lifetime.
-    auto* ctxMem = static_cast<LodeNavigationContext*>(lua_newuserdata(L, sizeof(LodeNavigationContext)));
+    auto* ctxMem = static_cast<LodeNavigationContext*>(lua_newuserdatadtor(L, sizeof(LodeNavigationContext), [](void* ptr) {
+        static_cast<LodeNavigationContext*>(ptr)->~LodeNavigationContext();
+    }));
     auto* ctx = new (ctxMem) LodeNavigationContext();
     ctx->registry = registry;
     ctx->modulePaths = modulePaths;
-
-    lua_newtable(L);
-    lua_pushcfunction(L, [](lua_State* L) -> int {
-        auto* c = static_cast<LodeNavigationContext*>(lua_touserdata(L, 1));
-        if (c) c->~LodeNavigationContext();
-        return 0;
-    }, "__gc");
-    lua_setfield(L, -2, "__gc");
-    lua_setmetatable(L, -2);
 
     // Keep a registry reference so the context lives as long as the State and is
     // reachable by UpdateModulePaths. The registry is per-lua_State, so two State
