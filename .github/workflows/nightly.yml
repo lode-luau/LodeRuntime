@@ -1,0 +1,65 @@
+name: nightly
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * *"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-publish:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute nightly version
+        id: version
+        shell: bash
+        run: |
+          DATE_UTC=$(date -u +%Y%m%d)
+          COUNT=$(git ls-remote --tags origin "refs/tags/0.1.0-nightly.${DATE_UTC}-*" | wc -l)
+          N=$((COUNT + 1))
+          echo "version=0.1.0-nightly.${DATE_UTC}-${N}" >> "$GITHUB_OUTPUT"
+          echo "date=${DATE_UTC}" >> "$GITHUB_OUTPUT"
+
+      - name: Configure
+        run: cmake -B build
+
+      - name: Build Debug
+        run: cmake --build build --config Debug
+
+      - name: Build Release
+        run: cmake --build build --config Release
+
+      - name: Validate Debug (sanity suite)
+        run: ./build/bin/Debug/lode_runtime.exe modules/sanity/run.luau
+
+      - name: Validate Release (sanity suite)
+        run: ./build/bin/Release/lode_runtime.exe modules/sanity/run.luau
+
+      - name: Validate Debug (integration test)
+        run: ./build/bin/Debug/lode_runtime.exe temp/test.luau
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $ver = "${{ steps.version.outputs.version }}"
+          $dist = "dist/$ver"
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+          Copy-Item build/bin/Release/lode_runtime.exe $dist
+          Copy-Item build/bin/Release/LodeCore.dll $dist
+          Copy-Item build/bin/Release/stdio.dll $dist
+          Copy-Item build/bin/Release/path.dll $dist
+          Copy-Item build/bin/Release/filesystem.dll $dist
+          Copy-Item include/Lode $dist/Lode -Recurse
+          Copy-Item LICENSE, README.md $dist
+          Set-Content -Path "$dist/VERSION" -Value $ver
+          Compress-Archive -Path $dist -DestinationPath "lode-windows-x64-$ver.zip"
+
+      - name: Publish nightly release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.version.outputs.version }}" "lode-windows-x64-${{ steps.version.outputs.version }}.zip" --title "Nightly ${{ steps.version.outputs.version }}" --notes "Automated nightly build. Built and validated on the sanity suite and integration tests." --prerelease
