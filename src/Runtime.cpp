@@ -40,6 +40,19 @@ int main(int argc, char* argv[])
         return 1;
     }
 
+    if (!fs::is_regular_file(filePath))
+    {
+        Lode::Diagnostic diag;
+        diag.filePath = filePath;
+        diag.message = fs::is_directory(filePath)
+            ? "Path is a directory, expected a .luau or .luac file: " + filePath
+            : "Path is not a regular file: " + filePath;
+        diag.code = "E0003";
+        diag.helps.push_back("Pass a .luau or .luac file as the script argument.");
+        Lode::Logger::EmitDiagnostic(diag);
+        return 1;
+    }
+
     std::ifstream file(filePath, std::ios::binary);
     if (!file.is_open())
     {
