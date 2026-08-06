@@ -532,10 +532,17 @@ static ModuleLoadResult LoadModuleNoJump(lua_State* L, void* ctx, const char* pa
                         lua_pushstring(L, nativeModulePath.c_str());
                         lua_setfield(L, LUA_REGISTRYINDEX, "_LODE_NATIVE_MODULE_PATH");
 
-                        int nret = initFn(L);
+                        struct NativeModulePathGuard
+                        {
+                            lua_State* state;
+                            ~NativeModulePathGuard()
+                            {
+                                lua_pushnil(state);
+                                lua_setfield(state, LUA_REGISTRYINDEX, "_LODE_NATIVE_MODULE_PATH");
+                            }
+                        } pathGuard{L};
 
-                        lua_pushnil(L);
-                        lua_setfield(L, LUA_REGISTRYINDEX, "_LODE_NATIVE_MODULE_PATH");
+                        int nret = initFn(L);
 
                         return { nret, {} };
                     }
