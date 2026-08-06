@@ -114,7 +114,7 @@ int main(int argc, char* argv[])
     }
 
     // Process all pending libuv timers, I/O events, and coroutine resumes
-    Lode::EventLoop::Default().Run(vm);
+    vm.GetEventLoop().Run(vm);
 
     // If the top-level script failed while yielding (e.g. error() inside a coroutine
     // resumed by the event loop), the error is surfaced here instead of being lost.

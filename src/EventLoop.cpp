@@ -7,18 +7,20 @@
 namespace Lode
 {
 
-EventLoop& EventLoop::Default()
-{
-    static EventLoop instance;
-    return instance;
-}
-
 EventLoop::EventLoop()
 {
-    loop_ = uv_default_loop();
+    loop_ = new uv_loop_t;
+    if (uv_loop_init(loop_) != 0)
+    {
+        delete loop_;
+        loop_ = nullptr;
+    }
 }
 
-EventLoop::~EventLoop() = default;
+EventLoop::~EventLoop()
+{
+    Close();
+}
 
 void EventLoop::Run(State& vm)
 {
@@ -42,6 +44,22 @@ void EventLoop::Stop()
     {
         uv_stop(loop_);
     }
+}
+
+void EventLoop::Close()
+{
+    if (!loop_)
+        return;
+
+    uv_stop(loop_);
+    while (uv_loop_alive(loop_))
+    {
+        uv_run(loop_, UV_RUN_NOWAIT);
+    }
+
+    uv_loop_close(loop_);
+    delete loop_;
+    loop_ = nullptr;
 }
 
 } // namespace Lode
