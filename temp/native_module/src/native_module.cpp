@@ -189,6 +189,34 @@ LODE_MODULE(vm)
         return Lode::Value(std::string(buffer.ReadString(0, 4)));
     }));
 
+    // Call a table with a __call metamethod through the Value call API.
+    exports.Set("callCallable", vm.CreateFunction([](Lode::State& vm, const std::vector<Lode::Value>& args) -> Lode::Value {
+        if (args.empty())
+        {
+            vm.RaiseError("callCallable expects a callable value");
+            return Lode::Value();
+        }
+        Lode::Value callable = args[0];
+        std::vector<Lode::Value> passArgs(args.begin() + 1, args.end());
+        auto result = callable.CallSingle(vm, passArgs);
+        if (result.IsError())
+        {
+            vm.RaiseError(result.GetError().ErrorMessage());
+            return Lode::Value();
+        }
+        return result.GetValue();
+    }));
+
+    // Prove that non-callable values still fail through the Value call API.
+    exports.Set("callNonCallable", vm.CreateFunction([](Lode::State& vm, const std::vector<Lode::Value>& args) -> Lode::Value {
+        Lode::Value nonCallable = args.empty() ? Lode::Value() : args[0];
+        auto result = nonCallable.CallSingle(vm);
+        Lode::Table out = vm.CreateTable();
+        out.Set("ok", Lode::Value(result.IsOk()));
+        out.Set("error", Lode::Value(result.IsError() ? std::string(result.GetError().ErrorMessage()) : std::string()));
+        return Lode::Value(out);
+    }));
+
     exports.Set("throwCpp", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs) -> Lode::Value {
         throw std::runtime_error("native callback failure");
     }));

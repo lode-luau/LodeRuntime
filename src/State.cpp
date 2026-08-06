@@ -36,7 +36,20 @@ State::State() : L_(luaL_newstate()), ownsState_(true), impl_(std::make_unique<I
     if (L_)
     {
         impl_->lifetime = Detail::RegisterStateLifetime(L_);
-        impl_->ownedEventLoop = std::make_unique<EventLoop>();
+        try
+        {
+            impl_->ownedEventLoop = std::make_unique<EventLoop>();
+        }
+        catch (const std::exception&)
+        {
+            // An unusable event loop makes async operations fail silently, so a
+            // State that cannot own a loop must not be handed out. Release the
+            // lua_State before rethrowing so the caller sees a clean error.
+            Detail::InvalidateStateLifetime(L_);
+            lua_close(L_);
+            L_ = nullptr;
+            throw;
+        }
         impl_->eventLoop = impl_->ownedEventLoop.get();
         lua_pushlightuserdata(L_, impl_->eventLoop);
         lua_setfield(L_, LUA_REGISTRYINDEX, "_LODE_EVENT_LOOP");
@@ -118,12 +131,19 @@ State& State::operator=(State&& other) noexcept
 
 Result<State> State::Create()
 {
-    State s;
-    if (!s.L_)
+    try
     {
-        return Error::Platform("Failed to initialize Luau VM state");
+        State s;
+        if (!s.L_)
+        {
+            return Error::Platform("Failed to initialize Luau VM state");
+        }
+        return s;
     }
-    return s;
+    catch (const std::exception& e)
+    {
+        return Error::Platform(std::string("Failed to initialize runtime state: ") + e.what());
+    }
 }
 
 Result<void> State::ExecuteBytecode(std::string_view bytecode, std::string_view chunkName)

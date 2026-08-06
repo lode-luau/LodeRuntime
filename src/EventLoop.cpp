@@ -3,6 +3,7 @@
 #include "Lode/EventLoop.hpp"
 #include "Lode/State.hpp"
 #include "uv.h"
+#include <stdexcept>
 
 namespace Lode
 {
@@ -10,10 +11,12 @@ namespace Lode
 EventLoop::EventLoop()
 {
     loop_ = new uv_loop_t;
-    if (uv_loop_init(loop_) != 0)
+    int status = uv_loop_init(loop_);
+    if (status != 0)
     {
         delete loop_;
         loop_ = nullptr;
+        throw std::runtime_error(std::string("Failed to initialize event loop: ") + uv_strerror(status));
     }
 }
 
