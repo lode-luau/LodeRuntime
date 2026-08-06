@@ -216,7 +216,7 @@ namespace
 {
     // Shared multi-return call core: pushes the function and its arguments, runs
     // lua_pcall with LUA_MULTRET, and collects every returned Value.
-    Result<std::vector<Value>> CallMultiReturn(lua_State* L, const Value& fn, const std::vector<Value>& args)
+    Result<std::vector<Value>> CallMultiReturn(lua_State* L, const Value& fn, std::span<const Value> args)
     {
         if (!L || fn.GetType() != ValueType::Function)
         {
@@ -255,7 +255,7 @@ namespace
 
     // Shared single-return call core: pushes the function and its arguments, runs
     // lua_pcall expecting one result, and returns the first returned Value.
-    Result<Value> CallSingleReturn(lua_State* L, const Value& fn, const std::vector<Value>& args)
+    Result<Value> CallSingleReturn(lua_State* L, const Value& fn, std::span<const Value> args)
     {
         if (!L || fn.GetType() != ValueType::Function)
         {
@@ -290,24 +290,24 @@ lua_State* Value::GetCapturedState() const
     return nullptr;
 }
 
-Result<std::vector<Value>> Value::CallArgs(State& vm, std::vector<Value> args) const
+Result<std::vector<Value>> Value::CallArgs(State& vm, Detail::SmallValueList args) const
 {
-    return CallMultiReturn(vm.GetLuaState(), *this, args);
+    return CallMultiReturn(vm.GetLuaState(), *this, args.AsSpan());
 }
 
-Result<std::vector<Value>> Value::CallArgs(std::vector<Value> args) const
+Result<std::vector<Value>> Value::CallArgs(Detail::SmallValueList args) const
 {
-    return CallMultiReturn(GetCapturedState(), *this, args);
+    return CallMultiReturn(GetCapturedState(), *this, args.AsSpan());
 }
 
-Result<Value> Value::CallSingleArgs(State& vm, std::vector<Value> args) const
+Result<Value> Value::CallSingleArgs(State& vm, Detail::SmallValueList args) const
 {
-    return CallSingleReturn(vm.GetLuaState(), *this, args);
+    return CallSingleReturn(vm.GetLuaState(), *this, args.AsSpan());
 }
 
-Result<Value> Value::CallSingleArgs(std::vector<Value> args) const
+Result<Value> Value::CallSingleArgs(Detail::SmallValueList args) const
 {
-    return CallSingleReturn(GetCapturedState(), *this, args);
+    return CallSingleReturn(GetCapturedState(), *this, args.AsSpan());
 }
 
 Value Value::FromLuaState(lua_State* L, int index)
