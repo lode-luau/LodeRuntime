@@ -1,4 +1,4 @@
-# LodeRuntime
+# LodeRuntime [![nightly](https://github.com/lode-luau/LodeRuntime/actions/workflows/nightly.yml/badge.svg)](https://github.com/lode-luau/LodeRuntime/actions/workflows/nightly.yml)
 
 A fast, modular runtime environment for executing Luau scripts.
 
