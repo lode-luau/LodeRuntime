@@ -5,6 +5,7 @@
 #include "LuaError.hpp"
 #include "lua.h"
 #include "lualib.h"
+#include "StateLifetime.hpp"
 #include <stdexcept>
 
 namespace Lode
@@ -15,10 +16,11 @@ struct Coroutine::RefData
     lua_State* mainL = nullptr;
     lua_State* coL = nullptr;
     int threadRef = -1;
+    std::shared_ptr<Detail::StateLifetime> lifetime;
 
     ~RefData()
     {
-        if (mainL && threadRef != LUA_NOREF && threadRef != LUA_REFNIL)
+        if (mainL && lifetime && lifetime->alive.load() && threadRef != LUA_NOREF && threadRef != LUA_REFNIL)
         {
             lua_unref(mainL, threadRef);
         }
@@ -32,6 +34,7 @@ Coroutine::Coroutine(lua_State* L, int fnRef)
     if (!L) return;
     refData_ = std::make_shared<RefData>();
     refData_->mainL = L;
+    refData_->lifetime = Detail::GetStateLifetime(L);
     refData_->coL = lua_newthread(L);
     refData_->threadRef = lua_ref(L, -1);
     lua_pop(L, 1);
@@ -51,6 +54,7 @@ Coroutine::Coroutine(State& vm, const Value& fn)
 
     refData_ = std::make_shared<RefData>();
     refData_->mainL = L;
+    refData_->lifetime = Detail::GetStateLifetime(L);
     refData_->coL = lua_newthread(L);
     refData_->threadRef = lua_ref(L, -1);
     lua_pop(L, 1);
@@ -65,6 +69,7 @@ Coroutine::Coroutine(lua_State* threadState)
     if (!threadState) return;
     refData_ = std::make_shared<RefData>();
     refData_->mainL = lua_mainthread(threadState);
+    refData_->lifetime = Detail::GetStateLifetime(threadState);
     refData_->coL = threadState;
     if (refData_->mainL)
     {

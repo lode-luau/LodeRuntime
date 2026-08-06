@@ -5,6 +5,7 @@
 #include "Lode/State.hpp"
 #include "lua.h"
 #include "lualib.h"
+#include "StateLifetime.hpp"
 #include <stdexcept>
 
 namespace Lode
@@ -14,10 +15,11 @@ struct Table::RefData
 {
     lua_State* L = nullptr;
     int refId = -1;
+    std::shared_ptr<Detail::StateLifetime> lifetime;
 
     ~RefData()
     {
-        if (L && refId != LUA_NOREF && refId != LUA_REFNIL)
+        if (L && lifetime && lifetime->alive.load() && refId != LUA_NOREF && refId != LUA_REFNIL)
         {
             lua_unref(L, refId);
         }
@@ -32,6 +34,7 @@ Table::Table(lua_State* L, int index)
     {
         refData_ = std::make_shared<RefData>();
         refData_->L = lua_mainthread(L);
+        refData_->lifetime = Detail::GetStateLifetime(L);
         refData_->refId = lua_ref(L, index);
     }
 }

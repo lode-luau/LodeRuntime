@@ -11,17 +11,20 @@
 #include "lualib.h"
 #include "Luau/Compiler.h"
 #include "Luau/CodeGen.h"
+#include "StateLifetime.hpp"
 #include <stdexcept>
 #include <iostream>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 
 namespace Lode
 {
 
 struct State::Impl
 {
+    std::shared_ptr<Detail::StateLifetime> lifetime;
     NativeModuleRegistry registry;
     std::vector<std::string> modulePaths;
     std::unique_ptr<EventLoop> ownedEventLoop;
@@ -32,6 +35,7 @@ State::State() : L_(luaL_newstate()), ownsState_(true), impl_(std::make_unique<I
 {
     if (L_)
     {
+        impl_->lifetime = Detail::RegisterStateLifetime(L_);
         impl_->ownedEventLoop = std::make_unique<EventLoop>();
         impl_->eventLoop = impl_->ownedEventLoop.get();
         lua_pushlightuserdata(L_, impl_->eventLoop);
@@ -50,6 +54,7 @@ State::State(lua_State* L) : L_(L), ownsState_(false), impl_(std::make_unique<Im
 {
     if (L_)
     {
+        impl_->lifetime = Detail::GetStateLifetime(L_);
         lua_getfield(L_, LUA_REGISTRYINDEX, "_LODE_EVENT_LOOP");
         impl_->eventLoop = static_cast<EventLoop*>(lua_touserdata(L_, -1));
         lua_pop(L_, 1);
@@ -78,6 +83,7 @@ State::~State()
         Lode::Task::Shutdown(*this);
         if (impl_ && impl_->ownedEventLoop)
             impl_->ownedEventLoop->Close();
+        Detail::InvalidateStateLifetime(L_);
         lua_close(L_);
         L_ = nullptr;
     }

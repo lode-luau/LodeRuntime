@@ -46,6 +46,7 @@ class Buffer;
 namespace Detail
 {
     class SmallValueList;
+    struct StateLifetime;
 }
 
 /**
@@ -133,6 +134,7 @@ public:
      * @return The Buffer, or an empty Buffer if the value is not of buffer type.
      */
     [[nodiscard]] Buffer AsBufferObj() const;
+    [[nodiscard]] Coroutine AsCoroutine() const;
 
     /** @brief Safely attempts to cast to boolean. */
     [[nodiscard]] Result<bool> TryAsBoolean() const;
@@ -201,7 +203,9 @@ private:
     struct RefData
     {
         lua_State* L = nullptr;
+        lua_State* thread = nullptr;
         int refId = -1;
+        std::shared_ptr<Detail::StateLifetime> lifetime;
         ~RefData();
     };
 
