@@ -2,6 +2,7 @@
 #include "lua.h"
 
 #include <cmath>
+#include <limits>
 #include <cstdint>
 
 namespace Lode
@@ -37,7 +38,9 @@ bool StackValue::IsInteger() const
     if (lua_type(L_, index_) == LUA_TINTEGER) return true;
     if (!lua_isnumber(L_, index_)) return false;
     double d = lua_tonumber(L_, index_);
-    return std::isfinite(d) && d == std::trunc(d) && std::fabs(d) <= static_cast<double>(INT64_MAX);
+    return std::isfinite(d) && d == std::trunc(d) &&
+        d >= static_cast<double>(std::numeric_limits<int>::min()) &&
+        d < static_cast<double>(std::numeric_limits<int>::max()) + 1.0;
 }
 bool StackValue::IsString() const { return lua_isstring(L_, index_); }
 bool StackValue::IsBuffer() const { return lua_type(L_, index_) == LUA_TBUFFER; }
@@ -58,7 +61,12 @@ double StackValue::AsNumber() const
 
 int StackValue::AsInteger() const
 {
-    return static_cast<int>(lua_tointeger(L_, index_));
+    double value = lua_tonumber(L_, index_);
+    if (!std::isfinite(value) || value != std::trunc(value) ||
+        value < static_cast<double>(std::numeric_limits<int>::min()) ||
+        value >= static_cast<double>(std::numeric_limits<int>::max()) + 1.0)
+        return 0;
+    return static_cast<int>(value);
 }
 
 std::string StackValue::AsString() const
