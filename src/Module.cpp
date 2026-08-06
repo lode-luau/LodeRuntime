@@ -42,6 +42,8 @@ void Exports::Function(const std::string& name, const std::function<Value(State&
         {
             State vm(L);
             Value result = data->func(vm, args);
+            if (lua_status(L) == LUA_YIELD)
+                return lua_yield(L, 0);
             result.PushToLuaState(L);
             return 1;
         }

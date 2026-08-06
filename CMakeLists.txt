@@ -111,6 +111,7 @@ set(LODE_CORE_SOURCES
     src/Compiler.cpp
     src/Gc.cpp
     src/Logger.cpp
+    src/Json.cpp
     src/TaskContext.hpp
     src/Platform/Platform.cpp
     src/Platform/WindowsDll.cpp
@@ -139,6 +140,7 @@ set(LODE_CORE_HEADERS
     include/Lode/Compiler.hpp
     include/Lode/Gc.hpp
     include/Lode/Logger.hpp
+    include/Lode/Json.hpp
     src/Platform/Platform.hpp
     src/Platform/CrashHandler.hpp
     src/Platform/WindowsCrashHandler.hpp
@@ -161,7 +163,8 @@ target_link_libraries(LodeCore PUBLIC
     Luau.Analysis
     Luau.Require
     Luau.CodeGen
-    uv_a
+    Luau.VM.Internals
+    uv
     ${CMAKE_DL_LIBS}
 )
 
@@ -195,4 +198,12 @@ endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/modules/filesystem/CMakeLists.txt")
     add_subdirectory(modules/filesystem)
+endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/modules/http/CMakeLists.txt")
+    add_subdirectory(modules/http)
+endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/modules/json/CMakeLists.txt")
+    add_subdirectory(modules/json)
 endif()
