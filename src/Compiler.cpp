@@ -140,11 +140,6 @@ namespace
                     
                     fs::path ctxPath = PathFromUtf8(context->name);
                     fs::path dirPath = ctxPath.has_parent_path() ? ctxPath.parent_path() : ctxPath;
-                    if (ctxPath.filename() == "init.luau" || ctxPath.filename() == "init.lua")
-                    {
-                        if (dirPath.has_parent_path())
-                            dirPath = dirPath.parent_path();
-                    }
                     fs::path resolvedPath = dirPath / relPath;
                     
                     fs::path finalPath = resolvedPath;
