@@ -5,6 +5,7 @@
 #include "Lode/Task.hpp"
 #include "Lode/Coroutine.hpp"
 #include "Lode/Buffer.hpp"
+#include "Lode/Numeric.hpp"
 #include "ModuleLoader.hpp"
 #include <uv.h>
 #include <filesystem>
@@ -450,7 +451,14 @@ static Lode::Value CreateAsyncMethod(Lode::State& vmOuter, FsOp op, bool isYield
                 if (!isYield && args.Size() > 2 && args[2].IsFunction()) nextArgIdx = 3; 
                 // offset is after callback if callback is present, or after buffer if yield
                 if (args.Size() > nextArgIdx && args[nextArgIdx].IsNumber()) {
-                    ctx->bufferOffset = static_cast<size_t>(args[nextArgIdx].AsNumber());
+                    auto offsetResult = Lode::Numeric::ToSize(args[nextArgIdx].AsNumber(), "buffer offset");
+                    if (offsetResult.IsError())
+                    {
+                        delete ctx;
+                        vm.RaiseError(offsetResult.GetError().ErrorMessage());
+                        return Lode::Value();
+                    }
+                    ctx->bufferOffset = offsetResult.GetValue();
                 }
             } else {
                 if (isYield) { delete ctx; vm.RaiseError("Expected buffer as second argument"); return Lode::Value(); }

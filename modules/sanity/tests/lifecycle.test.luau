@@ -56,6 +56,16 @@ describe("runtime lifecycle and error handling", function()
         expect(native.bufferBoundsProbe(buffer)).toBe(0)
     end)
 
+    it("rejects invalid timer durations", function()
+        local invalid = { -1, math.huge, -math.huge, 0 / 0 }
+        for _, duration in ipairs(invalid) do
+            local ok = pcall(function()
+                task.setTimeout(function() end, duration)
+            end)
+            expect(ok).toBe(false)
+        end
+    end)
+
     it("converts native callback exceptions into Lua errors", function()
         local ok, err = pcall(function() native.throwCpp() end)
         expect(ok).toBe(false)

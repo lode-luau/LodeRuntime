@@ -7,6 +7,7 @@
 #include "uv.h"
 #include "lua.h"
 #include "Lode/Logger.hpp"
+#include "Lode/Numeric.hpp"
 #include <unordered_map>
 #include <vector>
 #include <exception>
@@ -227,7 +228,17 @@ int Task::Wait(State& vm, double seconds)
     };
 
     uv_update_time(loop);
-    uint64_t timeout = static_cast<uint64_t>(seconds > 0 ? seconds * 1000.0 : 1);
+    auto timeoutResult = Numeric::ToMilliseconds(seconds, 1000.0, "wait duration");
+    if (timeoutResult.IsError())
+    {
+        int timerId = timerData->timerId;
+        ctx->timers.erase(timerId);
+        SafeDestroyTimer(timerData);
+        vm.RaiseError(timeoutResult.GetError().ErrorMessage());
+        return 0;
+    }
+    uint64_t timeout = timeoutResult.GetValue();
+    if (timeout == 0) timeout = 1;
     int startStatus = uv_timer_start(&timerData->handle, onTimer, timeout, 0);
     if (startStatus != 0)
     {
@@ -304,7 +315,16 @@ int Task::SetTimeout(State& vm, const Value& callback, double delayMs, const std
     };
 
     uv_update_time(loop);
-    uint64_t timeout = static_cast<uint64_t>(delayMs > 0 ? delayMs : 1);
+    auto timeoutResult = Numeric::ToMilliseconds(delayMs, 1.0, "timeout delay");
+    if (timeoutResult.IsError())
+    {
+        ctx->timers.erase(id);
+        SafeDestroyTimer(timerData);
+        vm.RaiseError(timeoutResult.GetError().ErrorMessage());
+        return -1;
+    }
+    uint64_t timeout = timeoutResult.GetValue();
+    if (timeout == 0) timeout = 1;
     int startStatus = uv_timer_start(&timerData->handle, onTimer, timeout, 0);
     if (startStatus != 0)
     {
@@ -390,7 +410,16 @@ int Task::SetInterval(State& vm, const Value& callback, double intervalMs, const
     };
 
     uv_update_time(loop);
-    uint64_t repeat = static_cast<uint64_t>(intervalMs > 0 ? intervalMs : 1);
+    auto repeatResult = Numeric::ToMilliseconds(intervalMs, 1.0, "interval duration");
+    if (repeatResult.IsError())
+    {
+        ctx->timers.erase(id);
+        SafeDestroyTimer(timerData);
+        vm.RaiseError(repeatResult.GetError().ErrorMessage());
+        return -1;
+    }
+    uint64_t repeat = repeatResult.GetValue();
+    if (repeat == 0) repeat = 1;
     int startStatus = uv_timer_start(&timerData->handle, onTimer, repeat, repeat);
     if (startStatus != 0)
     {
