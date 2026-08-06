@@ -129,6 +129,13 @@ LODE_MODULE(vm)
         return Lode::Value(static_cast<int>(buffer.ReadUInt32(std::numeric_limits<size_t>::max())));
     }));
 
+    exports.Set("bufferOverlapProbe", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs) -> Lode::Value {
+        Lode::Buffer buffer = vm.CreateBuffer(4).AsBufferObj();
+        buffer.WriteString(0, "ABCD");
+        buffer.CopyFrom(1, buffer, 0, 3);
+        return Lode::Value(std::string(buffer.ReadString(0, 4)));
+    }));
+
     exports.Set("throwCpp", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs) -> Lode::Value {
         throw std::runtime_error("native callback failure");
     }));

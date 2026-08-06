@@ -56,6 +56,10 @@ describe("runtime lifecycle and error handling", function()
         expect(native.bufferBoundsProbe(buffer)).toBe(0)
     end)
 
+    it("copies overlapping buffer ranges safely", function()
+        expect(native.bufferOverlapProbe()).toBe("AABC")
+    end)
+
     it("rejects invalid timer durations", function()
         local invalid = { -1, math.huge, -math.huge, 0 / 0 }
         for _, duration in ipairs(invalid) do
