@@ -1,6 +1,7 @@
 // Copyright (c) 2026 yanlvl99, Lode Runtime Contributors
 // SPDX-License-Identifier: MIT
 #include "Lode/Module.hpp"
+#include "NativeCallback.hpp"
 #include "LuaError.hpp"
 #include "lua.h"
 #include "lualib.h"
@@ -26,8 +27,6 @@ void Exports::Function(const std::string& name, const std::function<Value(State&
     {
         std::function<Value(State& vm, const std::vector<Value>& args)> func;
     };
-
-    auto* data = new ClosureData{ fn };
 
     auto cfunc = [](lua_State* L) -> int {
         auto* data = static_cast<ClosureData*>(lua_touserdata(L, lua_upvalueindex(1)));
@@ -57,7 +56,8 @@ void Exports::Function(const std::string& name, const std::function<Value(State&
     };
 
     exportsTable_.PushToLuaState(L_);
-    lua_pushlightuserdata(L_, data);
+    auto* data = Detail::NewLuaOwnedCallbackData(L_, ClosureData{ fn });
+    (void)data;
     lua_pushcclosure(L_, cfunc, name.c_str(), 1);
     lua_setfield(L_, -2, name.c_str());
     lua_pop(L_, 1);
