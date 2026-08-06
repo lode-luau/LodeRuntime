@@ -5,6 +5,7 @@
 #include "Lode/Export.hpp"
 #include "Lode/Result.hpp"
 #include "Lode/Error.hpp"
+#include "Lode/Vector.hpp"
 #include <string>
 #include <memory>
 #include <vector>
@@ -43,13 +44,6 @@ class State;
 class Table;
 class Coroutine;
 class Buffer;
-
-/** @brief Stores a Luau vector with its configured component count. */
-struct Vector
-{
-    std::array<float, 4> components{};
-    size_t size = 3;
-};
 
 namespace Detail
 {
