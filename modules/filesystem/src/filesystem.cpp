@@ -6,6 +6,7 @@
 #include "Lode/Coroutine.hpp"
 #include "Lode/Buffer.hpp"
 #include "Lode/Numeric.hpp"
+#include "Lode/Logger.hpp"
 #include "ModuleLoader.hpp"
 #include <uv.h>
 #include <filesystem>
@@ -220,11 +221,12 @@ static bool SubmitWork(Lode::State& vm, FsWorkContext* ctx) {
                     ctx->success = false;
                     ctx->errorMsg = "ENOENT: no such file or directory, open '" + ctx->targetPath.string() + "'";
                 } else {
-                    void* rawPtr = ctx->userBufferPtr;
                     size_t bufSize = ctx->userBufferSize;
-                    if (rawPtr && ctx->bufferOffset <= bufSize) {
-                        file.read((char*)rawPtr + ctx->bufferOffset, bufSize - ctx->bufferOffset);
+                    if (ctx->bufferOffset <= bufSize) {
+                        ctx->readDataStr.resize(bufSize - ctx->bufferOffset);
+                        file.read(ctx->readDataStr.data(), static_cast<std::streamsize>(ctx->readDataStr.size()));
                         ctx->statSize = static_cast<uint64_t>(file.gcount());
+                        ctx->readDataStr.resize(static_cast<size_t>(ctx->statSize));
                         ctx->success = true;
                     } else {
                         ctx->success = false;
@@ -367,6 +369,12 @@ static bool SubmitWork(Lode::State& vm, FsWorkContext* ctx) {
                     args.push_back(Lode::Value(ctx->readDataStr));
                 }
             } else if (ctx->op == FsOp::ReadToBuffer) {
+                size_t size = 0;
+                void* ptr = ctx->userBuffer.AsBuffer(&size);
+                size_t available = size > ctx->bufferOffset ? size - ctx->bufferOffset : 0;
+                size_t copySize = static_cast<size_t>(ctx->statSize) < available ? static_cast<size_t>(ctx->statSize) : available;
+                if (ptr && copySize > 0)
+                    std::memcpy(static_cast<uint8_t*>(ptr) + ctx->bufferOffset, ctx->readDataStr.data(), copySize);
                 args.push_back(Lode::Value(static_cast<double>(ctx->statSize)));
             } else if (ctx->op == FsOp::Realpath) {
                 args.push_back(Lode::Value(ctx->readDataStr));
@@ -392,12 +400,23 @@ static bool SubmitWork(Lode::State& vm, FsWorkContext* ctx) {
         
         if (ctx->isYield) {
             if (!ctx->success) {
-                ctx->coroutine.ResumeError(ctx->errorMsg);
+                auto result = ctx->coroutine.ResumeError(ctx->errorMsg);
+                if (result.IsError())
+                {
+                    if (Lode::Task::IsMainThread(vm, ctx->coroutine.GetThreadState()))
+                        Lode::Task::SetMainThreadError(vm, result.GetError().ErrorMessage());
+                    else
+                        Lode::Logger::Error("Unhandled filesystem error: " + result.GetError().ErrorMessage());
+                }
             } else {
-                ctx->coroutine.Resume(args);
+                auto result = ctx->coroutine.Resume(args);
+                if (result.IsError() && Lode::Task::IsMainThread(vm, ctx->coroutine.GetThreadState()))
+                    Lode::Task::SetMainThreadError(vm, result.GetError().ErrorMessage());
             }
         } else if (!ctx->isYield && ctx->callback.IsFunction()) {
-            ctx->callback.Call(vm, args);
+            auto result = ctx->callback.Call(vm, args);
+            if (result.IsError())
+                Lode::Logger::Error("Unhandled filesystem callback error: " + result.GetError().ErrorMessage());
         }
         
         delete ctx;
