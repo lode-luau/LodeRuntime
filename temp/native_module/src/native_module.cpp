@@ -179,7 +179,7 @@ LODE_MODULE(vm)
     exports.Set("bufferBoundsProbe", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs args) -> Lode::Value {
         if (args.Size() == 0 || !args[0].IsBuffer()) return Lode::Value();
         Lode::Buffer buffer = args[0].ToValue().AsBufferObj();
-        return Lode::Value(static_cast<int>(buffer.ReadUInt32(std::numeric_limits<size_t>::max())));
+        return Lode::Value(static_cast<double>(buffer.ReadUInt32(std::numeric_limits<size_t>::max())));
     }));
 
     exports.Set("bufferOverlapProbe", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs) -> Lode::Value {
