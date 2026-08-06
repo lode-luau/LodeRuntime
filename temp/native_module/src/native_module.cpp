@@ -31,6 +31,22 @@ LODE_MODULE(vm)
 {
     Lode::Table exports = vm.CreateTable();
 
+    Lode::Exports rawExports(vm);
+    rawExports.Function("throwRaw", [](Lode::State&, const std::vector<Lode::Value>&) -> Lode::Value {
+        throw std::runtime_error("raw export failure");
+    });
+    auto rawThrow = rawExports.GetExportTable().Get("throwRaw");
+    if (rawThrow.IsOk())
+        exports.Set("throwRaw", rawThrow.GetValue());
+
+    Lode::Table throwingObject = vm.CreateTable();
+    Lode::Metatable throwingMetatable = vm.CreateMetatable();
+    throwingMetatable.SetIndexFunction([](Lode::State&, Lode::Value) -> Lode::Value {
+        throw std::runtime_error("metatable callback failure");
+    });
+    throwingObject.SetMetatable(throwingMetatable);
+    exports.Set("throwingObject", Lode::Value(throwingObject));
+
     // --- Test 1: require("@self/utils") ---
     // Loads native_module/utils/init.luau — internal to this package.
     // @self always resolves to the package directory (the folder containing lode.json),

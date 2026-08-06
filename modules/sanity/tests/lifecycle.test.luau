@@ -72,6 +72,18 @@ describe("runtime lifecycle and error handling", function()
         expect(typeof(err)).toBe("string")
     end)
 
+    it("contains exceptions from raw exports and metamethod callbacks", function()
+        local okExport, exportError = pcall(function() native.throwRaw() end)
+        expect(okExport).toBe(false)
+        expect(typeof(exportError)).toBe("string")
+
+        local okMetatable, metatableError = pcall(function()
+            local _ = native.throwingObject.missing
+        end)
+        expect(okMetatable).toBe(false)
+        expect(typeof(metatableError)).toBe("string")
+    end)
+
     it("reports malformed native module metadata as a Lua error", function()
         local req: (string) -> any = require
         local ok, err = pcall(function()

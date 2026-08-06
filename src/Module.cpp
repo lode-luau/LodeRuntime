@@ -1,6 +1,7 @@
 // Copyright (c) 2026 yanlvl99, Lode Runtime Contributors
 // SPDX-License-Identifier: MIT
 #include "Lode/Module.hpp"
+#include "LuaError.hpp"
 #include "lua.h"
 #include "lualib.h"
 #include <vector>
@@ -38,10 +39,21 @@ void Exports::Function(const std::string& name, const std::function<Value(State&
             args.push_back(Value::FromLuaState(L, i));
         }
 
-        State vm(L);
-        Value result = data->func(vm, args);
-        result.PushToLuaState(L);
-        return 1;
+        try
+        {
+            State vm(L);
+            Value result = data->func(vm, args);
+            result.PushToLuaState(L);
+            return 1;
+        }
+        catch (const std::exception& error)
+        {
+            return RaiseCppException(L, "C++ native callback exception", error);
+        }
+        catch (...)
+        {
+            return RaiseCppException(L, "C++ native callback threw an unknown exception");
+        }
     };
 
     exportsTable_.PushToLuaState(L_);

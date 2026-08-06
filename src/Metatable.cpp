@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 #include "Lode/Metatable.hpp"
 #include "Lode/State.hpp"
+#include "LuaError.hpp"
 #include "lua.h"
 
 namespace Lode
@@ -36,10 +37,21 @@ void Metatable::SetIndexFunction(const std::function<Value(State& vm, Value key)
     auto cfunc = [](lua_State* L) -> int {
         auto* data = static_cast<ClosureData*>(lua_touserdata(L, lua_upvalueindex(1)));
         Value key = Value::FromLuaState(L, 2);
-        State vm(L);
-        Value res = data->func(vm, key);
-        res.PushToLuaState(L);
-        return 1;
+        try
+        {
+            State vm(L);
+            Value res = data->func(vm, key);
+            res.PushToLuaState(L);
+            return 1;
+        }
+        catch (const std::exception& error)
+        {
+            return RaiseCppException(L, "C++ __index callback exception", error);
+        }
+        catch (...)
+        {
+            return RaiseCppException(L, "C++ __index callback threw an unknown exception");
+        }
     };
 
     table_.PushToLuaState(L);
@@ -64,9 +76,20 @@ void Metatable::SetNewIndexFunction(const std::function<void(State& vm, Value ke
         auto* data = static_cast<ClosureData*>(lua_touserdata(L, lua_upvalueindex(1)));
         Value key = Value::FromLuaState(L, 2);
         Value val = Value::FromLuaState(L, 3);
-        State vm(L);
-        data->func(vm, key, val);
-        return 0;
+        try
+        {
+            State vm(L);
+            data->func(vm, key, val);
+            return 0;
+        }
+        catch (const std::exception& error)
+        {
+            return RaiseCppException(L, "C++ __newindex callback exception", error);
+        }
+        catch (...)
+        {
+            return RaiseCppException(L, "C++ __newindex callback threw an unknown exception");
+        }
     };
 
     table_.PushToLuaState(L);
@@ -89,10 +112,21 @@ void Metatable::SetToString(const std::function<std::string(State& vm)>& fn)
 
     auto cfunc = [](lua_State* L) -> int {
         auto* data = static_cast<ClosureData*>(lua_touserdata(L, lua_upvalueindex(1)));
-        State vm(L);
-        std::string str = data->func(vm);
-        lua_pushlstring(L, str.data(), str.length());
-        return 1;
+        try
+        {
+            State vm(L);
+            std::string str = data->func(vm);
+            lua_pushlstring(L, str.data(), str.length());
+            return 1;
+        }
+        catch (const std::exception& error)
+        {
+            return RaiseCppException(L, "C++ __tostring callback exception", error);
+        }
+        catch (...)
+        {
+            return RaiseCppException(L, "C++ __tostring callback threw an unknown exception");
+        }
     };
 
     table_.PushToLuaState(L);
@@ -115,10 +149,23 @@ void Metatable::SetGC(const std::function<void(State& vm)>& fn)
 
     auto cfunc = [](lua_State* L) -> int {
         auto* data = static_cast<ClosureData*>(lua_touserdata(L, lua_upvalueindex(1)));
-        State vm(L);
-        data->func(vm);
-        delete data;
-        return 0;
+        try
+        {
+            State vm(L);
+            data->func(vm);
+            delete data;
+            return 0;
+        }
+        catch (const std::exception& error)
+        {
+            delete data;
+            return RaiseCppException(L, "C++ __gc callback exception", error);
+        }
+        catch (...)
+        {
+            delete data;
+            return RaiseCppException(L, "C++ __gc callback threw an unknown exception");
+        }
     };
 
     table_.PushToLuaState(L);
@@ -147,10 +194,21 @@ void Metatable::SetCall(const std::function<Value(State& vm, const std::vector<V
         {
             args.push_back(Value::FromLuaState(L, i));
         }
-        State vm(L);
-        Value res = data->func(vm, args);
-        res.PushToLuaState(L);
-        return 1;
+        try
+        {
+            State vm(L);
+            Value res = data->func(vm, args);
+            res.PushToLuaState(L);
+            return 1;
+        }
+        catch (const std::exception& error)
+        {
+            return RaiseCppException(L, "C++ __call callback exception", error);
+        }
+        catch (...)
+        {
+            return RaiseCppException(L, "C++ __call callback threw an unknown exception");
+        }
     };
 
     table_.PushToLuaState(L);
@@ -172,10 +230,21 @@ void Metatable::SetAdd(const std::function<Value(State& vm, Value a, Value b)>& 
         auto* data = static_cast<ClosureData*>(lua_touserdata(L, lua_upvalueindex(1)));
         Value a = Value::FromLuaState(L, 1);
         Value b = Value::FromLuaState(L, 2);
-        State vm(L);
-        Value res = data->func(vm, a, b);
-        res.PushToLuaState(L);
-        return 1;
+        try
+        {
+            State vm(L);
+            Value res = data->func(vm, a, b);
+            res.PushToLuaState(L);
+            return 1;
+        }
+        catch (const std::exception& error)
+        {
+            return RaiseCppException(L, "C++ __add callback exception", error);
+        }
+        catch (...)
+        {
+            return RaiseCppException(L, "C++ __add callback threw an unknown exception");
+        }
     };
 
     table_.PushToLuaState(L);
@@ -197,10 +266,21 @@ void Metatable::SetSub(const std::function<Value(State& vm, Value a, Value b)>& 
         auto* data = static_cast<ClosureData*>(lua_touserdata(L, lua_upvalueindex(1)));
         Value a = Value::FromLuaState(L, 1);
         Value b = Value::FromLuaState(L, 2);
-        State vm(L);
-        Value res = data->func(vm, a, b);
-        res.PushToLuaState(L);
-        return 1;
+        try
+        {
+            State vm(L);
+            Value res = data->func(vm, a, b);
+            res.PushToLuaState(L);
+            return 1;
+        }
+        catch (const std::exception& error)
+        {
+            return RaiseCppException(L, "C++ __sub callback exception", error);
+        }
+        catch (...)
+        {
+            return RaiseCppException(L, "C++ __sub callback threw an unknown exception");
+        }
     };
 
     table_.PushToLuaState(L);
@@ -222,10 +302,21 @@ void Metatable::SetMul(const std::function<Value(State& vm, Value a, Value b)>& 
         auto* data = static_cast<ClosureData*>(lua_touserdata(L, lua_upvalueindex(1)));
         Value a = Value::FromLuaState(L, 1);
         Value b = Value::FromLuaState(L, 2);
-        State vm(L);
-        Value res = data->func(vm, a, b);
-        res.PushToLuaState(L);
-        return 1;
+        try
+        {
+            State vm(L);
+            Value res = data->func(vm, a, b);
+            res.PushToLuaState(L);
+            return 1;
+        }
+        catch (const std::exception& error)
+        {
+            return RaiseCppException(L, "C++ __mul callback exception", error);
+        }
+        catch (...)
+        {
+            return RaiseCppException(L, "C++ __mul callback threw an unknown exception");
+        }
     };
 
     table_.PushToLuaState(L);
@@ -247,10 +338,21 @@ void Metatable::SetDiv(const std::function<Value(State& vm, Value a, Value b)>& 
         auto* data = static_cast<ClosureData*>(lua_touserdata(L, lua_upvalueindex(1)));
         Value a = Value::FromLuaState(L, 1);
         Value b = Value::FromLuaState(L, 2);
-        State vm(L);
-        Value res = data->func(vm, a, b);
-        res.PushToLuaState(L);
-        return 1;
+        try
+        {
+            State vm(L);
+            Value res = data->func(vm, a, b);
+            res.PushToLuaState(L);
+            return 1;
+        }
+        catch (const std::exception& error)
+        {
+            return RaiseCppException(L, "C++ __div callback exception", error);
+        }
+        catch (...)
+        {
+            return RaiseCppException(L, "C++ __div callback threw an unknown exception");
+        }
     };
 
     table_.PushToLuaState(L);
@@ -272,10 +374,21 @@ void Metatable::SetEq(const std::function<bool(State& vm, Value a, Value b)>& fn
         auto* data = static_cast<ClosureData*>(lua_touserdata(L, lua_upvalueindex(1)));
         Value a = Value::FromLuaState(L, 1);
         Value b = Value::FromLuaState(L, 2);
-        State vm(L);
-        bool res = data->func(vm, a, b);
-        lua_pushboolean(L, res ? 1 : 0);
-        return 1;
+        try
+        {
+            State vm(L);
+            bool res = data->func(vm, a, b);
+            lua_pushboolean(L, res ? 1 : 0);
+            return 1;
+        }
+        catch (const std::exception& error)
+        {
+            return RaiseCppException(L, "C++ __eq callback exception", error);
+        }
+        catch (...)
+        {
+            return RaiseCppException(L, "C++ __eq callback threw an unknown exception");
+        }
     };
 
     table_.PushToLuaState(L);
