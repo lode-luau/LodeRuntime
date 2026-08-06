@@ -202,3 +202,8 @@ endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/modules/http/CMakeLists.txt")
     add_subdirectory(modules/http)
+endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/modules/json/CMakeLists.txt")
+    add_subdirectory(modules/json)
+endif()
