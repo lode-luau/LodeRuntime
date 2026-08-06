@@ -43,6 +43,11 @@
 - Add `Note on the API` or `Additional note` only when it provides relevant technical context.
 - Acceptance criteria must be concrete, testable, and include regression coverage when applicable.
 
+## Security triage
+- Judge potential security issues against the threat model in `SECURITY.md`.
+- Native modules and Luau scripts are trusted-by-design (like Node.js): do not report missing sandboxing, missing permission models, or unrestricted `require` path traversal as vulnerabilities.
+- The `lode.json` path constraint and the `LodeModuleInit` entrypoint contract are interface/packaging checks, not security boundaries.
+
 ## Notes
 - Do not keep temporary probe executables/targets in the repo; validate through the real runtime path (`lode_runtime` + `.luau`), not standalone probes that link Luau twice.
 - Native modules and asynchronous resources must be tested through the real runtime path and must be shut down before the owning `State` is destroyed.
