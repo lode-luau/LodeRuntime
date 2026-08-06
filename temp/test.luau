@@ -16,6 +16,12 @@ local largeInteger = NativeMod.makeLargeInteger()
 assert(NativeMod.roundTripInteger(largeInteger) == largeInteger, "64-bit integer round-trip failed")
 print("[Native Module DLL] 64-bit integer round-trip:", NativeMod.roundTripInteger(largeInteger))
 
+local nativeVector = NativeMod.makeVector()
+local roundTripVector = NativeMod.roundTripVector(nativeVector)
+assert(type(roundTripVector) == "vector", "vector type round-trip failed")
+assert(roundTripVector.x == 1.25 and roundTripVector.y == -2.5 and roundTripVector.z == 3.75, "vector component round-trip failed")
+print("[Native Module DLL] vector round-trip:", roundTripVector.x, roundTripVector.y, roundTripVector.z)
+
 local sysInfo = NativeMod.getSystemInfo()
 print("[Native Module DLL] System Info: Platform =", sysInfo.platform, "| Arch =", sysInfo.arch)
 

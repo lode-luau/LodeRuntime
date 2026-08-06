@@ -30,6 +30,7 @@ Value::Value(bool b) : type_(ValueType::Boolean), data_(b) {}
 Value::Value(double n) : type_(ValueType::Number), data_(n) {}
 Value::Value(int i) : Value(static_cast<int64_t>(i)) {}
 Value::Value(int64_t i) : type_(ValueType::Integer), data_(i) {}
+Value::Value(const Vector& vector) : type_(ValueType::Vector), data_(vector) {}
 Value::Value(const char* str) : type_(ValueType::String), data_(std::string(str ? str : "")) {}
 Value::Value(const std::string& str) : type_(ValueType::String), data_(str) {}
 Value::Value(void* lightUserdata) : type_(ValueType::LightUserdata), data_(lightUserdata) {}
@@ -121,6 +122,11 @@ int64_t Value::AsInteger() const {
             return static_cast<int64_t>(*n);
     }
     return 0;
+}
+Vector Value::AsVector() const
+{
+    if (auto* vector = std::get_if<Vector>(&data_)) return *vector;
+    return Vector();
 }
 std::string Value::AsString() const {
     if (auto* s = std::get_if<std::string>(&data_)) return *s;
@@ -222,6 +228,12 @@ Result<int64_t> Value::TryAsInteger() const
         return Error::Type("Number is outside the integer range");
     }
     return Error::Type("Value is not an integer");
+}
+
+Result<Vector> Value::TryAsVector() const
+{
+    if (auto* vector = std::get_if<Vector>(&data_)) return *vector;
+    return Error::Type("Value is not a vector");
 }
 
 Result<std::string> Value::TryAsString() const
@@ -361,6 +373,20 @@ Value Value::FromLuaState(lua_State* L, int index)
         val.type_ = ValueType::Integer;
         val.data_ = lua_tointeger64(L, index, nullptr);
         break;
+    case LUA_TVECTOR:
+        val.type_ = ValueType::Vector;
+        {
+            const float* components = lua_tovector(L, index);
+            Vector vector;
+            vector.size = LUA_VECTOR_SIZE;
+            if (components)
+            {
+                for (size_t i = 0; i < vector.size; ++i)
+                    vector.components[i] = components[i];
+            }
+            val.data_ = vector;
+        }
+        break;
     case LUA_TSTRING:
         val.type_ = ValueType::String;
         {
@@ -421,6 +447,24 @@ void Value::PushToLuaState(lua_State* L) const
     case ValueType::Integer:
         if (auto* i = std::get_if<int64_t>(&data_)) lua_pushinteger64(L, *i);
         else lua_pushinteger(L, 0);
+        break;
+    case ValueType::Vector:
+        if (auto* vector = std::get_if<Vector>(&data_))
+        {
+#if LUA_VECTOR_SIZE == 4
+            lua_pushvector(L, vector->components[0], vector->components[1], vector->components[2], vector->components[3]);
+#else
+            lua_pushvector(L, vector->components[0], vector->components[1], vector->components[2]);
+#endif
+        }
+        else
+        {
+#if LUA_VECTOR_SIZE == 4
+            lua_pushvector(L, 0.0f, 0.0f, 0.0f, 0.0f);
+#else
+            lua_pushvector(L, 0.0f, 0.0f, 0.0f);
+#endif
+        }
         break;
     case ValueType::String:
         if (auto* s = std::get_if<std::string>(&data_)) lua_pushlstring(L, s->data(), s->size());

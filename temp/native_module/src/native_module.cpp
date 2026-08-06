@@ -131,6 +131,18 @@ LODE_MODULE(vm)
         return Lode::Value(static_cast<int64_t>(0x123456789abcdefLL));
     }));
 
+    exports.Set("makeVector", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs) -> Lode::Value {
+        Lode::Vector vector;
+        vector.components[0] = 1.25f;
+        vector.components[1] = -2.5f;
+        vector.components[2] = 3.75f;
+        return Lode::Value(vector);
+    }));
+
+    exports.Set("roundTripVector", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs args) -> Lode::Value {
+        return args.Size() > 0 && args[0].IsVector() ? args[0].ToValue() : Lode::Value();
+    }));
+
     exports.Set("bufferBoundsProbe", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs args) -> Lode::Value {
         if (args.Size() == 0 || !args[0].IsBuffer()) return Lode::Value();
         Lode::Buffer buffer = args[0].ToValue().AsBufferObj();

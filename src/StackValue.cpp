@@ -19,6 +19,7 @@ ValueType StackValue::GetType() const
     case LUA_TBOOLEAN: return ValueType::Boolean;
     case LUA_TNUMBER: return ValueType::Number; // Could be Integer, but Lua API just returns Number
     case LUA_TINTEGER: return ValueType::Integer;
+    case LUA_TVECTOR: return ValueType::Vector;
     case LUA_TSTRING: return ValueType::String;
     case LUA_TTABLE: return ValueType::Table;
     case LUA_TFUNCTION: return ValueType::Function;
@@ -33,6 +34,7 @@ ValueType StackValue::GetType() const
 bool StackValue::IsNil() const { return lua_isnil(L_, index_); }
 bool StackValue::IsBoolean() const { return lua_isboolean(L_, index_); }
 bool StackValue::IsNumber() const { return lua_isnumber(L_, index_); }
+bool StackValue::IsVector() const { return lua_isvector(L_, index_); }
 bool StackValue::IsInteger() const
 {
     if (lua_type(L_, index_) == LUA_TINTEGER) return true;
@@ -72,6 +74,19 @@ int64_t StackValue::AsInteger() const
         value < int64Min || value >= int64ExclusiveMax)
         return 0;
     return static_cast<int64_t>(value);
+}
+
+Vector StackValue::AsVector() const
+{
+    Vector vector;
+    const float* components = lua_tovector(L_, index_);
+    vector.size = LUA_VECTOR_SIZE;
+    if (components)
+    {
+        for (size_t i = 0; i < vector.size; ++i)
+            vector.components[i] = components[i];
+    }
+    return vector;
 }
 
 std::string StackValue::AsString() const
