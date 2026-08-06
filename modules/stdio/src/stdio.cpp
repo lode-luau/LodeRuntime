@@ -280,7 +280,9 @@ public:
                     if (resultValue.IsString() || resultValue.IsBuffer() || resultValue.IsNumber()) {
                         resArgs.push_back(resultValue);
                     }
-                    currentReq.coroutine.Resume(resArgs);
+                    auto result = currentReq.coroutine.Resume(resArgs);
+                    if (result.IsError() && Lode::Task::IsMainThread(vm, currentReq.coroutine.GetThreadState()))
+                        Lode::Task::SetMainThreadError(vm, result.GetError().ErrorMessage());
                 } else if (currentReq.isCallback && currentReq.callback.IsFunction()) {
                     std::vector<Lode::Value> cbArgs;
                     if (resultValue.IsString() || resultValue.IsBuffer() || resultValue.IsNumber()) {
