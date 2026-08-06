@@ -260,9 +260,9 @@ namespace
     // lua_pcall with LUA_MULTRET, and collects every returned Value.
     Result<std::vector<Value>> CallMultiReturn(lua_State* L, const Value& fn, std::span<const Value> args)
     {
-        if (!L || fn.GetType() != ValueType::Function)
+        if (!L)
         {
-            return Error::Type("Value is not callable");
+            return Error::Runtime("Cannot call a value without a Lua state");
         }
 
         // Record the stack top before pushing anything so we can calculate how many
@@ -299,9 +299,9 @@ namespace
     // lua_pcall expecting one result, and returns the first returned Value.
     Result<Value> CallSingleReturn(lua_State* L, const Value& fn, std::span<const Value> args)
     {
-        if (!L || fn.GetType() != ValueType::Function)
+        if (!L)
         {
-            return Error::Type("Value is not callable");
+            return Error::Runtime("Cannot call a value without a Lua state");
         }
 
         fn.PushToLuaState(L);
