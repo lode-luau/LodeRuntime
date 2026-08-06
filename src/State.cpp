@@ -3,6 +3,7 @@
 #include "Lode/State.hpp"
 #include "Lode/Metatable.hpp"
 #include "Lode/Task.hpp"
+#include "Lode/EventLoop.hpp"
 #include "ModuleLoader.hpp"
 #include "Registry.hpp"
 #include "LuaError.hpp"
@@ -23,12 +24,18 @@ struct State::Impl
 {
     NativeModuleRegistry registry;
     std::vector<std::string> modulePaths;
+    std::unique_ptr<EventLoop> ownedEventLoop;
+    EventLoop* eventLoop = nullptr;
 };
 
 State::State() : L_(luaL_newstate()), ownsState_(true), impl_(std::make_unique<Impl>())
 {
     if (L_)
     {
+        impl_->ownedEventLoop = std::make_unique<EventLoop>();
+        impl_->eventLoop = impl_->ownedEventLoop.get();
+        lua_pushlightuserdata(L_, impl_->eventLoop);
+        lua_setfield(L_, LUA_REGISTRYINDEX, "_LODE_EVENT_LOOP");
         luaL_openlibs(L_);
         SetupModuleLoader(L_, &impl_->registry, impl_->modulePaths);
 
@@ -41,11 +48,24 @@ State::State() : L_(luaL_newstate()), ownsState_(true), impl_(std::make_unique<I
 
 State::State(lua_State* L) : L_(L), ownsState_(false), impl_(std::make_unique<Impl>())
 {
+    if (L_)
+    {
+        lua_getfield(L_, LUA_REGISTRYINDEX, "_LODE_EVENT_LOOP");
+        impl_->eventLoop = static_cast<EventLoop*>(lua_touserdata(L_, -1));
+        lua_pop(L_, 1);
+    }
 }
 
 lua_State* State::GetMainThread() const
 {
     return L_ ? lua_mainthread(L_) : nullptr;
+}
+
+EventLoop& State::GetEventLoop() const
+{
+    if (!impl_ || !impl_->eventLoop)
+        throw std::logic_error("State has no event loop");
+    return *impl_->eventLoop;
 }
 
 State::~State()
@@ -56,6 +76,8 @@ State::~State()
         // Timers hold Value/Coroutine references to this lua_State, so they
         // must be released while the state is still open (see issue #9).
         Lode::Task::Shutdown(*this);
+        if (impl_ && impl_->ownedEventLoop)
+            impl_->ownedEventLoop->Close();
         lua_close(L_);
         L_ = nullptr;
     }
@@ -75,6 +97,8 @@ State& State::operator=(State&& other) noexcept
         if (ownsState_ && L_)
         {
             Task::Shutdown(*this);
+            if (impl_ && impl_->ownedEventLoop)
+                impl_->ownedEventLoop->Close();
             lua_close(L_);
         }
         L_ = other.L_;

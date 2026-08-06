@@ -494,7 +494,7 @@ public:
 LODE_MODULE(vm)
 {
     Lode::Table exports = vm.CreateTable();
-    uv_loop_t* loop = Lode::EventLoop::Default().GetUVLoop();
+    uv_loop_t* loop = vm.GetEventLoop().GetUVLoop();
 
     auto createWrite = [loop](int fd) {
         uv_handle_type type = uv_guess_handle(fd);

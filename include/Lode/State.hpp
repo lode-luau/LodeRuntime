@@ -23,6 +23,7 @@ namespace Lode
 {
 
 class Metatable;
+class EventLoop;
 
 /**
  * @brief Represents an isolated Luau virtual machine instance or a thread state.
@@ -234,6 +235,9 @@ public:
      * all registry operations while the State is alive.
      */
     [[nodiscard]] lua_State* GetMainThread() const;
+
+    /** @brief Returns the event loop owned by this State. */
+    [[nodiscard]] EventLoop& GetEventLoop() const;
 
 private:
     struct Impl;

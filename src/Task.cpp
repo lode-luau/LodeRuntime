@@ -113,7 +113,7 @@ void Task::Shutdown(State& vm)
         return;
     }
 
-    uv_loop_t* loop = EventLoop::Default().GetUVLoop();
+    uv_loop_t* loop = vm.GetEventLoop().GetUVLoop();
     for (auto& [id, data] : ctx->timers)
     {
         (void)id;
@@ -171,7 +171,7 @@ int Task::Wait(State& vm, double seconds)
     timerData->ctx = ctx;
     timerData->coroutine = Coroutine(vm.GetLuaState());
     timerData->recurring = false;
-    uv_loop_t* loop = EventLoop::Default().GetUVLoop();
+    uv_loop_t* loop = vm.GetEventLoop().GetUVLoop();
     int initStatus = loop ? uv_timer_init(loop, &timerData->handle) : UV_EINVAL;
     if (initStatus != 0)
     {
@@ -265,7 +265,7 @@ int Task::SetTimeout(State& vm, const Value& callback, double delayMs, const std
     timerData->recurring = false;
     timerData->args = args;
 
-    uv_loop_t* loop = EventLoop::Default().GetUVLoop();
+    uv_loop_t* loop = vm.GetEventLoop().GetUVLoop();
     int initStatus = loop ? uv_timer_init(loop, &timerData->handle) : UV_EINVAL;
     if (initStatus != 0)
     {
@@ -364,7 +364,7 @@ int Task::SetInterval(State& vm, const Value& callback, double intervalMs, const
     timerData->recurring = true;
     timerData->args = args;
 
-    uv_loop_t* loop = EventLoop::Default().GetUVLoop();
+    uv_loop_t* loop = vm.GetEventLoop().GetUVLoop();
     int initStatus = loop ? uv_timer_init(loop, &timerData->handle) : UV_EINVAL;
     if (initStatus != 0)
     {

@@ -143,6 +143,8 @@ struct FsWorkContext {
     fs::path targetPath;
     fs::path destPath;
     Lode::Value userBuffer;
+    void* userBufferPtr = nullptr;
+    size_t userBufferSize = 0;
     size_t bufferOffset = 0;
     std::string writeData;
     bool recursive = false;
@@ -188,7 +190,7 @@ static void ShutdownWork(const std::shared_ptr<FsWorkState>& lifecycle, uv_loop_
 }
 
 static bool SubmitWork(Lode::State& vm, FsWorkContext* ctx) {
-    uv_loop_t* loop = Lode::EventLoop::Default().GetUVLoop();
+    uv_loop_t* loop = vm.GetEventLoop().GetUVLoop();
     if (!loop) {
         delete ctx;
         return false;
@@ -218,8 +220,8 @@ static bool SubmitWork(Lode::State& vm, FsWorkContext* ctx) {
                     ctx->success = false;
                     ctx->errorMsg = "ENOENT: no such file or directory, open '" + ctx->targetPath.string() + "'";
                 } else {
-                    size_t bufSize = 0;
-                    void* rawPtr = ctx->userBuffer.AsBuffer(&bufSize);
+                    void* rawPtr = ctx->userBufferPtr;
+                    size_t bufSize = ctx->userBufferSize;
                     if (rawPtr && ctx->bufferOffset <= bufSize) {
                         file.read((char*)rawPtr + ctx->bufferOffset, bufSize - ctx->bufferOffset);
                         ctx->statSize = static_cast<uint64_t>(file.gcount());
@@ -447,6 +449,7 @@ static Lode::Value CreateAsyncMethod(Lode::State& vmOuter, FsOp op, bool isYield
         } else if (op == FsOp::ReadToBuffer) {
             if (args.Size() > 1 && args[1].IsBuffer()) {
                 ctx->userBuffer = args[1].ToValue();
+                ctx->userBufferPtr = ctx->userBuffer.AsBuffer(&ctx->userBufferSize);
                 int nextArgIdx = 2;
                 if (!isYield && args.Size() > 2 && args[2].IsFunction()) nextArgIdx = 3; 
                 // offset is after callback if callback is present, or after buffer if yield

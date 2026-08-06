@@ -10,6 +10,7 @@
 #include <vector>
 #include <variant>
 #include <span>
+#include <array>
 #include <cstdint>
 #include <utility>
 #include <type_traits>
@@ -41,6 +42,11 @@ class State;
 class Table;
 class Coroutine;
 class Buffer;
+
+namespace Detail
+{
+    class SmallValueList;
+}
 
 /**
  * @brief Represents a generic Luau value that can hold any primitive or reference type.
@@ -184,10 +190,10 @@ public:
 
 private:
     // Shared implementation used by the Call/CallSingle templates.
-    Result<std::vector<Value>> CallArgs(State& vm, std::vector<Value> args) const;
-    Result<std::vector<Value>> CallArgs(std::vector<Value> args) const;
-    Result<Value> CallSingleArgs(State& vm, std::vector<Value> args) const;
-    Result<Value> CallSingleArgs(std::vector<Value> args) const;
+    Result<std::vector<Value>> CallArgs(State& vm, Detail::SmallValueList args) const;
+    Result<std::vector<Value>> CallArgs(Detail::SmallValueList args) const;
+    Result<Value> CallSingleArgs(State& vm, Detail::SmallValueList args) const;
+    Result<Value> CallSingleArgs(Detail::SmallValueList args) const;
 
     // Returns the lua_State* pinned by this value's reference, or nullptr.
     lua_State* GetCapturedState() const;
@@ -205,32 +211,82 @@ private:
 
 namespace Detail
 {
-    // Appends arguments to the call vector. A std::vector<Value> passed as a single
+    // Most native calls use only a handful of arguments. Keep those values in
+    // the caller's stack frame and spill to a vector only for larger calls.
+    class SmallValueList
+    {
+    public:
+        static constexpr size_t InlineCapacity = 8;
+
+        SmallValueList() = default;
+        SmallValueList(const SmallValueList&) = default;
+        SmallValueList(SmallValueList&&) noexcept = default;
+        SmallValueList& operator=(const SmallValueList&) = default;
+        SmallValueList& operator=(SmallValueList&&) noexcept = default;
+
+        void push_back(Value value)
+        {
+            if (overflow_.empty() && size_ < InlineCapacity)
+            {
+                inlineValues_[size_++] = std::move(value);
+                return;
+            }
+
+            if (overflow_.empty())
+            {
+                overflow_.reserve(InlineCapacity * 2);
+                for (size_t i = 0; i < size_; ++i)
+                    overflow_.push_back(std::move(inlineValues_[i]));
+            }
+            overflow_.push_back(std::move(value));
+            ++size_;
+        }
+
+        [[nodiscard]] size_t size() const { return size_; }
+
+        [[nodiscard]] const Value& operator[](size_t index) const
+        {
+            return overflow_.empty() ? inlineValues_[index] : overflow_[index];
+        }
+
+        [[nodiscard]] std::span<const Value> AsSpan() const
+        {
+            if (overflow_.empty())
+                return std::span<const Value>(inlineValues_.data(), size_);
+            return std::span<const Value>(overflow_.data(), overflow_.size());
+        }
+
+    private:
+        std::array<Value, InlineCapacity> inlineValues_{};
+        std::vector<Value> overflow_;
+        size_t size_ = 0;
+    };
+
+    // Appends arguments to the call list. A std::vector<Value> passed as a single
     // argument is spread as multiple arguments, so callers that already hold the
-    // argument list as a vector (e.g. State::CallFunction forwarding a vector) keep
-    // working without wrapping it.
-    inline void AppendArgs(std::vector<Value>&) {}
+    // argument list as a vector keep working without wrapping it.
+    inline void AppendArgs(SmallValueList&) {}
 
     template <typename T, typename... Rest>
-    void AppendArgs(std::vector<Value>& out, T&& arg, Rest&&... rest)
+    void AppendArgs(SmallValueList& out, T&& arg, Rest&&... rest)
     {
         if constexpr (std::is_same_v<std::decay_t<T>, std::vector<Value>>)
         {
-            out.insert(out.end(), arg.begin(), arg.end());
+            for (const Value& value : arg)
+                out.push_back(value);
         }
         else
         {
-            out.emplace_back(std::forward<T>(arg));
+            out.push_back(Value(std::forward<T>(arg)));
         }
         AppendArgs(out, std::forward<Rest>(rest)...);
     }
 
-    // Collects the call arguments into a vector, converting each one to a Value.
+    // Collects call arguments without allocating for the common small-call case.
     template <typename... Args>
-    std::vector<Value> MakeArgs(Args&&... args)
+    SmallValueList MakeArgs(Args&&... args)
     {
-        std::vector<Value> out;
-        out.reserve(sizeof...(Args));
+        SmallValueList out;
         AppendArgs(out, std::forward<Args>(args)...);
         return out;
     }

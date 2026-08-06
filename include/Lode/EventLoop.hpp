@@ -18,9 +18,6 @@ class State;
 class LODE_API EventLoop
 {
 public:
-    /** @brief Retrieves the default, singleton event loop. */
-    static EventLoop& Default();
-
     /** @brief Constructs a new, isolated event loop. */
     EventLoop();
     ~EventLoop();
@@ -34,6 +31,9 @@ public:
     void Step(State& vm);
     /** @brief Stops the event loop. */
     void Stop();
+
+    /** @brief Closes the loop after all owned handles have been drained. */
+    void Close();
 
     /** @brief Retrieves the underlying raw libuv loop pointer. */
     [[nodiscard]] uv_loop_t* GetUVLoop() const { return loop_; }
