@@ -232,6 +232,9 @@ static luarequire_NavigateResult jump_to_alias(lua_State* L, void* ctx, const ch
             return NAVIGATE_SUCCESS;
         }
 
+        if (!aliasStr.empty() && aliasStr[0] == '@')
+            return NAVIGATE_NOT_FOUND;
+
         fs::path p = PathFromUtf8(aliasStr);
         if (p.is_relative())
         {
