@@ -35,6 +35,10 @@ A fast, modular runtime environment for executing Luau scripts.
 
     ./build/bin/Release/lode_runtime temp/test.luau
 
+## Contributing
+
+Please read our [Contributing Guide](CONTRIBUTING.md) and [Code of Conduct](CODE_OF_CONDUCT.md). For security matters, see [SECURITY.md](SECURITY.md).
+
 ## License
 
 This project is available under the terms of the [MIT License](LICENSE).
