@@ -162,6 +162,7 @@ target_link_libraries(LodeCore PUBLIC
     Luau.Require
     Luau.CodeGen
     Luau.VM.Internals
+    uv
     ${CMAKE_DL_LIBS}
 )
 

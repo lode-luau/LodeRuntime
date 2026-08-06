@@ -53,6 +53,7 @@ jobs:
           Copy-Item build/bin/Release/stdio.dll $dist
           Copy-Item build/bin/Release/path.dll $dist
           Copy-Item build/bin/Release/filesystem.dll $dist
+          Copy-Item build/bin/Release/uv.dll $dist
           Copy-Item include/Lode $dist/Lode -Recurse
           Copy-Item LICENSE, README.md $dist
           Set-Content -Path "$dist/VERSION" -Value $ver
