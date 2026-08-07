@@ -7,23 +7,15 @@
 #include "Lode/Coroutine.hpp"
 #include "LuaError.hpp"
 #include "StateLifetime.hpp"
+#include "PinnedRef.hpp"
 #include "lua.h"
 #include "lualib.h"
 #include "lstate.h"
 #include <stdexcept>
 #include <cmath>
-#include <limits>
 
 namespace Lode
 {
-
-Value::RefData::~RefData()
-{
-    if (L && lifetime && lifetime->alive.load() && refId != LUA_NOREF && refId != LUA_REFNIL)
-    {
-        lua_unref(L, refId);
-    }
-}
 
 Value::Value() = default;
 
@@ -43,11 +35,7 @@ Value::Value(const Table& table)
     {
         table.PushToLuaState(L);
         type_ = ValueType::Table;
-        auto ref = std::make_shared<RefData>();
-        ref->L = lua_mainthread(L);
-        ref->lifetime = Detail::GetStateLifetime(L);
-        ref->refId = lua_ref(L, -1);
-        data_ = ref;
+        data_ = std::make_shared<Detail::PinnedRef>(Detail::CaptureRef(L, -1));
         lua_pop(L, 1);
     }
 }
@@ -68,12 +56,7 @@ Value::Value(const Coroutine& coroutine)
         }
         lua_pushthread(co);
         type_ = ValueType::Thread;
-        auto ref = std::make_shared<RefData>();
-        ref->L = lua_mainthread(co);
-        ref->thread = co;
-        ref->lifetime = Detail::GetStateLifetime(co);
-        ref->refId = lua_ref(co, -1);
-        data_ = ref;
+        data_ = std::make_shared<Detail::PinnedRef>(Detail::CaptureRef(co, -1));
         lua_pop(co, 1);
     }
 }
@@ -85,11 +68,7 @@ Value::Value(const Buffer& buffer)
     {
         buffer.PushToLuaState(L);
         type_ = ValueType::Buffer;
-        auto ref = std::make_shared<RefData>();
-        ref->L = lua_mainthread(L);
-        ref->lifetime = Detail::GetStateLifetime(L);
-        ref->refId = lua_ref(L, -1);
-        data_ = ref;
+        data_ = std::make_shared<Detail::PinnedRef>(Detail::CaptureRef(L, -1));
         lua_pop(L, 1);
     }
 }
@@ -97,7 +76,7 @@ Value::Value(const Buffer& buffer)
 Coroutine Value::AsCoroutine() const
 {
     if (type_ != ValueType::Thread) return Coroutine();
-    auto* ref = std::get_if<std::shared_ptr<RefData>>(&data_);
+    auto* ref = std::get_if<std::shared_ptr<Detail::PinnedRef>>(&data_);
     if (!ref || !*ref || !(*ref)->L || !(*ref)->lifetime || !(*ref)->lifetime->alive.load()) return Coroutine();
     return Coroutine((*ref)->thread);
 }
@@ -151,13 +130,14 @@ void* Value::AsBuffer(size_t* sizeOut) const
 {
     if (type_ == ValueType::Buffer)
     {
-        if (auto* ref = std::get_if<std::shared_ptr<RefData>>(&data_))
+        if (auto* ref = std::get_if<std::shared_ptr<Detail::PinnedRef>>(&data_))
         {
             if (*ref && (*ref)->L)
             {
-                lua_getref((*ref)->L, (*ref)->refId);
-                void* ptr = lua_tobuffer((*ref)->L, -1, sizeOut);
-                lua_pop((*ref)->L, 1);
+                lua_State* L = (*ref)->L;
+                Detail::PushRef(L, **ref);
+                void* ptr = lua_tobuffer(L, -1, sizeOut);
+                lua_pop(L, 1);
                 return ptr;
             }
         }
@@ -178,12 +158,12 @@ Table Value::AsTable() const
 {
     if (type_ == ValueType::Table)
     {
-        if (auto* ref = std::get_if<std::shared_ptr<RefData>>(&data_))
+        if (auto* ref = std::get_if<std::shared_ptr<Detail::PinnedRef>>(&data_))
         {
             if (*ref && (*ref)->L)
             {
                 lua_State* L = (*ref)->L;
-                lua_getref(L, (*ref)->refId);
+                Detail::PushRef(L, **ref);
                 Table t(L, -1);
                 lua_pop(L, 1);
                 return t;
@@ -197,12 +177,12 @@ Buffer Value::AsBufferObj() const
 {
     if (type_ == ValueType::Buffer)
     {
-        if (auto* ref = std::get_if<std::shared_ptr<RefData>>(&data_))
+        if (auto* ref = std::get_if<std::shared_ptr<Detail::PinnedRef>>(&data_))
         {
             if (*ref && (*ref)->L)
             {
                 lua_State* L = (*ref)->L;
-                lua_getref(L, (*ref)->refId);
+                Detail::PushRef(L, **ref);
                 Buffer b(L, -1);
                 lua_pop(L, 1);
                 return b;
@@ -266,17 +246,15 @@ Result<Buffer> Value::TryAsBufferObj() const
 
 namespace
 {
-    // Shared multi-return call core: pushes the function and its arguments, runs
-    // lua_pcall with LUA_MULTRET, and collects every returned Value.
-    Result<std::vector<Value>> CallMultiReturn(lua_State* L, const Value& fn, std::span<const Value> args)
+    // Shared call core: pushes the function and its arguments, runs lua_pcall
+    // requesting `nresults`, and collects every returned Value.
+    Result<std::vector<Value>> CallCore(lua_State* L, const Value& fn, std::span<const Value> args, int nresults)
     {
         if (!L)
         {
             return Error::Runtime("Cannot call a value without a Lua state");
         }
 
-        // Record the stack top before pushing anything so we can calculate how many
-        // values the function actually returned after lua_pcall with LUA_MULTRET.
         int topBefore = lua_gettop(L);
 
         fn.PushToLuaState(L);
@@ -285,7 +263,7 @@ namespace
             arg.PushToLuaState(L);
         }
 
-        int status = lua_pcall(L, static_cast<int>(args.size()), LUA_MULTRET, 0);
+        int status = lua_pcall(L, static_cast<int>(args.size()), nresults, 0);
         if (status != LUA_OK)
         {
             std::string errStr = LuaErrorMessage(L, -1);
@@ -293,49 +271,29 @@ namespace
             return Error::Runtime("Function execution failed: " + errStr);
         }
 
-        // Collect only the values that the function pushed onto the stack.
-        int nresults = lua_gettop(L) - topBefore;
+        int nresultsActual = lua_gettop(L) - topBefore;
         std::vector<Value> results;
-        results.reserve(nresults);
-        for (int i = topBefore + 1; i <= topBefore + nresults; ++i)
+        results.reserve(nresultsActual);
+        for (int i = topBefore + 1; i <= topBefore + nresultsActual; ++i)
         {
             results.push_back(Value::FromLuaState(L, i));
         }
-        lua_pop(L, nresults);
+        lua_pop(L, nresultsActual);
         return results;
     }
 
-    // Shared single-return call core: pushes the function and its arguments, runs
-    // lua_pcall expecting one result, and returns the first returned Value.
-    Result<Value> CallSingleReturn(lua_State* L, const Value& fn, std::span<const Value> args)
+    Result<Value> CallSingleCore(lua_State* L, const Value& fn, std::span<const Value> args)
     {
-        if (!L)
-        {
-            return Error::Runtime("Cannot call a value without a Lua state");
-        }
-
-        fn.PushToLuaState(L);
-        for (const auto& arg : args)
-        {
-            arg.PushToLuaState(L);
-        }
-
-        int status = lua_pcall(L, static_cast<int>(args.size()), 1, 0);
-        if (status != LUA_OK)
-        {
-            std::string errStr = LuaErrorMessage(L, -1);
-            lua_pop(L, 1);
-            return Error::Runtime("Function execution failed: " + errStr);
-        }
-        Value result = Value::FromLuaState(L, -1);
-        lua_pop(L, 1);
-        return result;
+        Result<std::vector<Value>> res = CallCore(L, fn, args, 1);
+        if (res.IsError()) return res.GetError();
+        const auto& values = res.GetValue();
+        return values.empty() ? Result<Value>(Value()) : Result<Value>(values.front());
     }
 } // namespace
 
 lua_State* Value::GetCapturedState() const
 {
-    if (auto* ref = std::get_if<std::shared_ptr<RefData>>(&data_))
+    if (auto* ref = std::get_if<std::shared_ptr<Detail::PinnedRef>>(&data_))
     {
         if (*ref) return (*ref)->L;
     }
@@ -344,22 +302,22 @@ lua_State* Value::GetCapturedState() const
 
 Result<std::vector<Value>> Value::CallArgs(State& vm, Detail::SmallValueList args) const
 {
-    return CallMultiReturn(vm.GetLuaState(), *this, args.AsSpan());
+    return CallCore(vm.GetLuaState(), *this, args.AsSpan(), LUA_MULTRET);
 }
 
 Result<std::vector<Value>> Value::CallArgs(Detail::SmallValueList args) const
 {
-    return CallMultiReturn(GetCapturedState(), *this, args.AsSpan());
+    return CallCore(GetCapturedState(), *this, args.AsSpan(), LUA_MULTRET);
 }
 
 Result<Value> Value::CallSingleArgs(State& vm, Detail::SmallValueList args) const
 {
-    return CallSingleReturn(vm.GetLuaState(), *this, args.AsSpan());
+    return CallSingleCore(vm.GetLuaState(), *this, args.AsSpan());
 }
 
 Result<Value> Value::CallSingleArgs(Detail::SmallValueList args) const
 {
-    return CallSingleReturn(GetCapturedState(), *this, args.AsSpan());
+    return CallSingleCore(GetCapturedState(), *this, args.AsSpan());
 }
 
 Value Value::FromLuaState(lua_State* L, int index)
@@ -419,14 +377,7 @@ Value Value::FromLuaState(lua_State* L, int index)
                     (type == LUA_TFUNCTION) ? ValueType::Function :
                     (type == LUA_TTHREAD) ? ValueType::Thread : 
                     (type == LUA_TBUFFER) ? ValueType::Buffer : ValueType::Userdata;
-        auto ref = std::make_shared<RefData>();
-        ref->L = lua_mainthread(L);
-        ref->lifetime = Detail::GetStateLifetime(L);
-        if (type == LUA_TTHREAD) ref->thread = lua_tothread(L, index);
-        lua_pushvalue(L, index);
-        ref->refId = lua_ref(L, -1);
-        lua_pop(L, 1);
-        val.data_ = ref;
+        val.data_ = std::make_shared<Detail::PinnedRef>(Detail::CaptureRef(L, index));
         break;
     }
     default:
@@ -489,27 +440,12 @@ void Value::PushToLuaState(lua_State* L) const
     case ValueType::Thread:
     case ValueType::Userdata:
     case ValueType::Buffer:
-        if (auto* ref = std::get_if<std::shared_ptr<RefData>>(&data_))
+        if (auto* ref = std::get_if<std::shared_ptr<Detail::PinnedRef>>(&data_))
         {
-            if (*ref && (*ref)->L && (*ref)->refId != LUA_NOREF && (*ref)->refId != LUA_REFNIL)
-            {
-                // References are resolved on their owning main thread. A value can
-                // then be moved to another thread in the same VM, but never to an
-                // unrelated lua_State.
-                if (lua_mainthread(L) != (*ref)->L)
-                {
-                    lua_pushnil(L);
-                    break;
-                }
-
-                lua_getref((*ref)->L, (*ref)->refId);
-                if (L != (*ref)->L)
-                    lua_xmove((*ref)->L, L, 1);
-            }
+            if (*ref)
+                Detail::PushRef(L, **ref);
             else
-            {
                 lua_pushnil(L);
-            }
         }
         else
         {
