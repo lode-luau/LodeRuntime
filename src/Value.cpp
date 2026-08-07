@@ -17,6 +17,27 @@
 namespace Lode
 {
 
+namespace
+{
+    // Captures the value at the top of the stack into a pinned reference and
+    // removes it from the stack.
+    std::shared_ptr<Detail::PinnedRef> PinStackTop(lua_State* L)
+    {
+        auto ref = std::make_shared<Detail::PinnedRef>(Detail::CaptureRef(L, -1));
+        lua_pop(L, 1);
+        return ref;
+    }
+
+    // Pushes the referenced value onto its owning state and returns that state.
+    // Returns nullptr (pushing nothing) when the reference is empty.
+    lua_State* PushValueRef(const std::shared_ptr<Detail::PinnedRef>& ref)
+    {
+        if (!ref || !ref->L) return nullptr;
+        Detail::PushRef(ref->L, *ref);
+        return ref->L;
+    }
+}
+
 Value::Value() = default;
 
 Value::Value(bool b) : type_(ValueType::Boolean), data_(b) {}
@@ -35,8 +56,7 @@ Value::Value(const Table& table)
     {
         table.PushToLuaState(L);
         type_ = ValueType::Table;
-        data_ = std::make_shared<Detail::PinnedRef>(Detail::CaptureRef(L, -1));
-        lua_pop(L, 1);
+        data_ = PinStackTop(L);
     }
 }
 
@@ -56,8 +76,7 @@ Value::Value(const Coroutine& coroutine)
         }
         lua_pushthread(co);
         type_ = ValueType::Thread;
-        data_ = std::make_shared<Detail::PinnedRef>(Detail::CaptureRef(co, -1));
-        lua_pop(co, 1);
+        data_ = PinStackTop(co);
     }
 }
 
@@ -68,8 +87,7 @@ Value::Value(const Buffer& buffer)
     {
         buffer.PushToLuaState(L);
         type_ = ValueType::Buffer;
-        data_ = std::make_shared<Detail::PinnedRef>(Detail::CaptureRef(L, -1));
-        lua_pop(L, 1);
+        data_ = PinStackTop(L);
     }
 }
 
@@ -132,10 +150,8 @@ void* Value::AsBuffer(size_t* sizeOut) const
     {
         if (auto* ref = std::get_if<std::shared_ptr<Detail::PinnedRef>>(&data_))
         {
-            if (*ref && (*ref)->L)
+            if (lua_State* L = PushValueRef(*ref))
             {
-                lua_State* L = (*ref)->L;
-                Detail::PushRef(L, **ref);
                 void* ptr = lua_tobuffer(L, -1, sizeOut);
                 lua_pop(L, 1);
                 return ptr;
@@ -160,10 +176,8 @@ Table Value::AsTable() const
     {
         if (auto* ref = std::get_if<std::shared_ptr<Detail::PinnedRef>>(&data_))
         {
-            if (*ref && (*ref)->L)
+            if (lua_State* L = PushValueRef(*ref))
             {
-                lua_State* L = (*ref)->L;
-                Detail::PushRef(L, **ref);
                 Table t(L, -1);
                 lua_pop(L, 1);
                 return t;
@@ -179,10 +193,8 @@ Buffer Value::AsBufferObj() const
     {
         if (auto* ref = std::get_if<std::shared_ptr<Detail::PinnedRef>>(&data_))
         {
-            if (*ref && (*ref)->L)
+            if (lua_State* L = PushValueRef(*ref))
             {
-                lua_State* L = (*ref)->L;
-                Detail::PushRef(L, **ref);
                 Buffer b(L, -1);
                 lua_pop(L, 1);
                 return b;

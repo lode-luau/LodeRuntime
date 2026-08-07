@@ -6,6 +6,7 @@
 #include "Lode/Result.hpp"
 #include "Lode/EventLoop.hpp"
 #include "Lode/Task.hpp"
+#include "PathUtil.hpp"
 #include "Platform/CrashHandler.hpp"
 
 #include <fstream>
@@ -17,11 +18,7 @@
 
 namespace fs = std::filesystem;
 
-static std::string PathToUtf8(const fs::path& path)
-{
-    std::u8string utf8 = path.u8string();
-    return std::string(reinterpret_cast<const char*>(utf8.data()), utf8.size());
-}
+using Lode::Detail::PathToUtf8;
 
 #if defined(_WIN32)
 int wmain(int argc, wchar_t* argv[])

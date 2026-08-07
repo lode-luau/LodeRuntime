@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 #include "Lode/Compiler.hpp"
 #include "ModuleLoader.hpp"
+#include "PathUtil.hpp"
 #include "Luau/Compiler.h"
 #include "Luau/ParseOptions.h"
 #include "Luau/Config.h"
@@ -31,16 +32,8 @@ namespace fs = std::filesystem;
 
 namespace
 {
-    fs::path PathFromUtf8(std::string_view path)
-    {
-        return fs::u8path(path);
-    }
-
-    std::string PathToUtf8(const fs::path& path)
-    {
-        std::u8string utf8 = path.u8string();
-        return std::string(reinterpret_cast<const char*>(utf8.data()), utf8.size());
-    }
+    using Lode::Detail::PathFromUtf8;
+    using Lode::Detail::PathToUtf8;
 
     // Resolves a module path to a regular file: prefers the exact path, then the
     // .luau variant, then init.luau in the directory. Canonicalizes the result.

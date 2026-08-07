@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 #include "ModuleLoader.hpp"
 #include "Lode/Compiler.hpp"
+#include "PathUtil.hpp"
 #include "Platform/Platform.hpp"
 #include "Luau/Require.h"
 #include "Luau/Compiler.h"
@@ -23,16 +24,8 @@ namespace fs = std::filesystem;
 namespace Lode
 {
 
-static fs::path PathFromUtf8(std::string_view path)
-{
-    return fs::u8path(path);
-}
-
-static std::string PathToUtf8(const fs::path& path)
-{
-    std::u8string utf8 = path.u8string();
-    return std::string(reinterpret_cast<const char*>(utf8.data()), utf8.size());
-}
+using Lode::Detail::PathFromUtf8;
+using Lode::Detail::PathToUtf8;
 
 fs::path FindLodeJson(const fs::path& startPath)
 {
