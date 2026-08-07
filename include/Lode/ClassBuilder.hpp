@@ -181,20 +181,9 @@ public:
                     vm.RaiseError("Attempt to access property '" + key + "' on invalid or null " + className + " instance");
                     return Value();
                 }
-                try
-                {
+                return GuardCall(vm, "property getter '" + key + "' of " + className, [&]() -> Value {
                     return it->second.getter(*instance);
-                }
-                catch (const std::exception& e)
-                {
-                    vm.RaiseError("C++ Exception in property getter '" + key + "' of " + className + ": " + e.what());
-                    return Value();
-                }
-                catch (...)
-                {
-                    vm.RaiseError("Unknown C++ Exception in property getter '" + key + "' of " + className);
-                    return Value();
-                }
+                });
             }
 
             return Value();
@@ -222,21 +211,10 @@ public:
                     return Value();
                 }
 
-                try
-                {
+                return GuardCall(vm, "property setter '" + key + "' of " + className, [&]() -> Value {
                     it->second.setter(*instance, val);
                     return Value();
-                }
-                catch (const std::exception& e)
-                {
-                    vm.RaiseError("C++ Exception in property setter '" + key + "' of " + className + ": " + e.what());
-                    return Value();
-                }
-                catch (...)
-                {
-                    vm.RaiseError("Unknown C++ Exception in property setter '" + key + "' of " + className);
-                    return Value();
-                }
+                });
             }
 
             vm.RaiseError("Property '" + key + "' does not exist on " + className);
@@ -255,8 +233,7 @@ public:
         std::string className = className_;
 
         methodsTable_.Set("new", vm_.CreateFunction([meta, className](State& vm, const std::vector<Value>& args) -> Value {
-            try
-            {
+            return GuardCall(vm, "constructor of " + className, [&]() -> Value {
                 auto instance = std::make_shared<T>();
                 using Holder = std::shared_ptr<T>;
                 void* userMemory = vm.CreateUserdata(sizeof(Holder), [](void* ptr) {
@@ -266,12 +243,7 @@ public:
 
                 vm.SetUserdataMetatable(-1, meta);
                 return vm.GetValue(-1);
-            }
-            catch (const std::exception& e)
-            {
-                vm.RaiseError("C++ Exception in constructor of " + className + ": " + e.what());
-                return Value();
-            }
+            });
         }));
 
         return *this;
@@ -287,8 +259,7 @@ public:
         std::string className = className_;
 
         methodsTable_.Set("new", vm_.CreateFunction([meta, factory, className](State& vm, const std::vector<Value>& args) -> Value {
-            try
-            {
+            return GuardCall(vm, "custom constructor of " + className, [&]() -> Value {
                 auto instance = factory(vm, args);
                 if (!instance) instance = std::make_shared<T>();
                 using Holder = std::shared_ptr<T>;
@@ -299,12 +270,7 @@ public:
 
                 vm.SetUserdataMetatable(-1, meta);
                 return vm.GetValue(-1);
-            }
-            catch (const std::exception& e)
-            {
-                vm.RaiseError("C++ Exception in custom constructor of " + className + ": " + e.what());
-                return Value();
-            }
+            });
         }));
         return *this;
     }
@@ -319,15 +285,7 @@ public:
         std::string className = className_;
 
         methodsTable_.Set(name, vm_.CreateFunction([fn, name, className](State& vm, const std::vector<Value>& args) -> Value {
-            auto instance = ObjectWrap<T>::Unwrap(vm, 1);
-            if (!instance)
-            {
-                vm.RaiseError("Invalid self object passed to method " + className + ":" + name);
-                return Value();
-            }
-
-            try
-            {
+            return BindMethod(vm, className, name, [&](State& vm, T* instance) -> Value {
                 // Zero-allocation argument passing
                 if (args.size() <= 1)
                 {
@@ -337,17 +295,7 @@ public:
 
                 std::vector<Value> methodArgs(args.begin() + 1, args.end());
                 return fn(*instance, vm, methodArgs);
-            }
-            catch (const std::exception& e)
-            {
-                vm.RaiseError("C++ Exception in method " + className + ":" + name + ": " + e.what());
-                return Value();
-            }
-            catch (...)
-            {
-                vm.RaiseError("Unknown C++ Exception in method " + className + ":" + name);
-                return Value();
-            }
+            });
         }));
         return *this;
     }
@@ -363,27 +311,9 @@ public:
         std::string className = className_;
 
         methodsTable_.Set(name, vm_.CreateFunction([methodPtr, name, className](State& vm, const std::vector<Value>& args) -> Value {
-            auto instance = ObjectWrap<T>::Unwrap(vm, 1);
-            if (!instance)
-            {
-                vm.RaiseError("Invalid self object passed to method " + className + ":" + name);
-                return Value();
-            }
-
-            try
-            {
-                return InvokeMemberFunction<Ret, Args...>(vm, instance.get(), methodPtr, args, std::index_sequence_for<Args...>{});
-            }
-            catch (const std::exception& e)
-            {
-                vm.RaiseError("C++ Exception in method " + className + ":" + name + ": " + e.what());
-                return Value();
-            }
-            catch (...)
-            {
-                vm.RaiseError("Unknown C++ Exception in method " + className + ":" + name);
-                return Value();
-            }
+            return BindMethod(vm, className, name, [&](State& vm, T* instance) -> Value {
+                return InvokeMemberFunction<Ret, Args...>(vm, instance, methodPtr, args, std::index_sequence_for<Args...>{});
+            });
         }));
         return *this;
     }
@@ -399,27 +329,9 @@ public:
         std::string className = className_;
 
         methodsTable_.Set(name, vm_.CreateFunction([methodPtr, name, className](State& vm, const std::vector<Value>& args) -> Value {
-            auto instance = ObjectWrap<T>::Unwrap(vm, 1);
-            if (!instance)
-            {
-                vm.RaiseError("Invalid self object passed to method " + className + ":" + name);
-                return Value();
-            }
-
-            try
-            {
-                return InvokeConstMemberFunction<Ret, Args...>(vm, instance.get(), methodPtr, args, std::index_sequence_for<Args...>{});
-            }
-            catch (const std::exception& e)
-            {
-                vm.RaiseError("C++ Exception in method " + className + ":" + name + ": " + e.what());
-                return Value();
-            }
-            catch (...)
-            {
-                vm.RaiseError("Unknown C++ Exception in method " + className + ":" + name);
-                return Value();
-            }
+            return BindMethod(vm, className, name, [&](State& vm, T* instance) -> Value {
+                return InvokeConstMemberFunction<Ret, Args...>(vm, instance, methodPtr, args, std::index_sequence_for<Args...>{});
+            });
         }));
         return *this;
     }
@@ -435,27 +347,9 @@ public:
         std::string className = className_;
 
         methodsTable_.Set(name, vm_.CreateFunction([methodPtr, name, className](State& vm, const std::vector<Value>& args) -> Value {
-            auto instance = ObjectWrap<T>::Unwrap(vm, 1);
-            if (!instance)
-            {
-                vm.RaiseError("Invalid self object passed to method " + className + ":" + name);
-                return Value();
-            }
-
-            try
-            {
-                return InvokeMemberFunctionWithState<Ret, Args...>(vm, instance.get(), methodPtr, args, std::index_sequence_for<Args...>{});
-            }
-            catch (const std::exception& e)
-            {
-                vm.RaiseError("C++ Exception in method " + className + ":" + name + ": " + e.what());
-                return Value();
-            }
-            catch (...)
-            {
-                vm.RaiseError("Unknown C++ Exception in method " + className + ":" + name);
-                return Value();
-            }
+            return BindMethod(vm, className, name, [&](State& vm, T* instance) -> Value {
+                return InvokeMemberFunctionWithState<Ret, Args...>(vm, instance, methodPtr, args, std::index_sequence_for<Args...>{});
+            });
         }));
         return *this;
     }
@@ -471,27 +365,9 @@ public:
         std::string className = className_;
 
         methodsTable_.Set(name, vm_.CreateFunction([methodPtr, name, className](State& vm, const std::vector<Value>& args) -> Value {
-            auto instance = ObjectWrap<T>::Unwrap(vm, 1);
-            if (!instance)
-            {
-                vm.RaiseError("Invalid self object passed to method " + className + ":" + name);
-                return Value();
-            }
-
-            try
-            {
-                return InvokeConstMemberFunctionWithState<Ret, Args...>(vm, instance.get(), methodPtr, args, std::index_sequence_for<Args...>{});
-            }
-            catch (const std::exception& e)
-            {
-                vm.RaiseError("C++ Exception in method " + className + ":" + name + ": " + e.what());
-                return Value();
-            }
-            catch (...)
-            {
-                vm.RaiseError("Unknown C++ Exception in method " + className + ":" + name);
-                return Value();
-            }
+            return BindMethod(vm, className, name, [&](State& vm, T* instance) -> Value {
+                return InvokeConstMemberFunctionWithState<Ret, Args...>(vm, instance, methodPtr, args, std::index_sequence_for<Args...>{});
+            });
         }));
         return *this;
     }
@@ -505,37 +381,19 @@ public:
         std::string className = className_;
 
         methodsTable_.Set(name, vm_.CreateFunction([methodPtr, name, className](State& vm, const std::vector<Value>& args) -> Value {
-            auto instance = ObjectWrap<T>::Unwrap(vm, 1);
-            if (!instance)
-            {
-                vm.RaiseError("Invalid self object passed to method " + className + ":" + name);
-                return Value();
-            }
-
-            try
-            {
+            return BindMethod(vm, className, name, [&](State& vm, T* instance) -> Value {
                 std::vector<Value> methodArgs(args.begin() + 1, args.end());
                 if constexpr (std::is_same_v<Ret, void>)
                 {
-                    (instance.get()->*methodPtr)(vm, methodArgs);
+                    (instance->*methodPtr)(vm, methodArgs);
                     return Value();
                 }
                 else
                 {
-                    auto res = (instance.get()->*methodPtr)(vm, methodArgs);
+                    auto res = (instance->*methodPtr)(vm, methodArgs);
                     return Detail::ValueReturner<Ret>::ToValue(&vm, std::move(res));
                 }
-            }
-            catch (const std::exception& e)
-            {
-                vm.RaiseError("C++ Exception in method " + className + ":" + name + ": " + e.what());
-                return Value();
-            }
-            catch (...)
-            {
-                vm.RaiseError("Unknown C++ Exception in method " + className + ":" + name);
-                return Value();
-            }
+            });
         }));
         return *this;
     }
@@ -582,15 +440,9 @@ public:
             auto instance = ObjectWrap<T>::Unwrap(vm, 1);
             if (!instance) return Value("nullptr");
 
-            try
-            {
+            return GuardCall(vm, "__tostring of " + className, [&]() -> Value {
                 return Value(fn(*instance));
-            }
-            catch (const std::exception& e)
-            {
-                vm.RaiseError("C++ Exception in __tostring of " + className + ": " + e.what());
-                return Value("nullptr");
-            }
+            });
         }));
         return *this;
     }
@@ -605,6 +457,41 @@ public:
     }
 
 private:
+    // Converts C++ exceptions from a native call into Lua errors tagged with
+    // the given context, e.g. "C++ Exception in method Foo:bar".
+    template <typename Fn>
+    static Value GuardCall(State& vm, const std::string& context, Fn&& call)
+    {
+        try
+        {
+            return call();
+        }
+        catch (const std::exception& e)
+        {
+            vm.RaiseError("C++ Exception in " + context + ": " + e.what());
+            return Value();
+        }
+        catch (...)
+        {
+            vm.RaiseError("Unknown C++ Exception in " + context);
+            return Value();
+        }
+    }
+
+    // Unwraps the self argument and runs the invocation under GuardCall.
+    template <typename Fn>
+    static Value BindMethod(State& vm, const std::string& className, const std::string& name, Fn&& invoke)
+    {
+        auto instance = ObjectWrap<T>::Unwrap(vm, 1);
+        if (!instance)
+        {
+            vm.RaiseError("Invalid self object passed to method " + className + ":" + name);
+            return Value();
+        }
+        return GuardCall(vm, "method " + className + ":" + name, [&]() -> Value {
+            return invoke(vm, instance.get());
+        });
+    }
     template <typename Ret, typename... Args, size_t... Is>
     static Value InvokeMemberFunction(State& vm, T* instance, Ret (T::* methodPtr)(Args...), const std::vector<Value>& args, std::index_sequence<Is...>)
     {
