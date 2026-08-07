@@ -158,6 +158,7 @@ set(LODE_CORE_HEADERS
     src/Platform/Platform.hpp
     src/Platform/CrashHandler.hpp
     src/Platform/WindowsCrashHandler.hpp
+    src/PathUtil.hpp
 )
 
 # LodeCore SHARED Library Target (Shared DLL linked dynamically by runtime and native modules)
