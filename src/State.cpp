@@ -7,17 +7,15 @@
 #include "ModuleLoader.hpp"
 #include "Registry.hpp"
 #include "LuaError.hpp"
+#include "NativeClosure.hpp"
 #include "lua.h"
 #include "lualib.h"
 #include "Luau/Compiler.h"
 #include "Luau/CodeGen.h"
 #include "StateLifetime.hpp"
 #include <stdexcept>
-#include <iostream>
 #include <cmath>
 #include <cstdint>
-#include <cstring>
-#include <limits>
 
 namespace Lode
 {
@@ -86,6 +84,17 @@ EventLoop& State::GetEventLoop() const
     return *impl_->eventLoop;
 }
 
+namespace
+{
+    // Cancels pending async work owned by this State (timers, event loop).
+    void CloseAsyncResources(State& vm, EventLoop* eventLoop)
+    {
+        Task::Shutdown(vm);
+        if (eventLoop)
+            eventLoop->Close();
+    }
+}
+
 State::~State()
 {
     if (ownsState_ && L_)
@@ -93,9 +102,7 @@ State::~State()
         // Cancel every pending timer for this State before the VM is closed.
         // Timers hold Value/Coroutine references to this lua_State, so they
         // must be released while the state is still open (see issue #9).
-        Lode::Task::Shutdown(*this);
-        if (impl_ && impl_->ownedEventLoop)
-            impl_->ownedEventLoop->Close();
+        CloseAsyncResources(*this, impl_ ? impl_->ownedEventLoop.get() : nullptr);
         Detail::InvalidateStateLifetime(L_);
         lua_close(L_);
         L_ = nullptr;
@@ -115,9 +122,7 @@ State& State::operator=(State&& other) noexcept
     {
         if (ownsState_ && L_)
         {
-            Task::Shutdown(*this);
-            if (impl_ && impl_->ownedEventLoop)
-                impl_->ownedEventLoop->Close();
+            CloseAsyncResources(*this, impl_ ? impl_->ownedEventLoop.get() : nullptr);
             lua_close(L_);
         }
         L_ = other.L_;
@@ -256,24 +261,7 @@ Metatable State::CreateMetatable()
 Value State::CreateFunction(const std::function<Value(State& vm, const std::vector<Value>& args)>& fn)
 {
     if (!L_) return Value();
-
-    struct ClosureData
-    {
-        std::function<Value(State& vm, const std::vector<Value>& args)> func;
-    };
-    auto* data = static_cast<ClosureData*>(lua_newuserdatadtor(L_, sizeof(ClosureData), [](void* ptr) {
-        static_cast<ClosureData*>(ptr)->~ClosureData();
-    }));
-    new (data) ClosureData{ fn };
-
-    auto cfunc = [](lua_State* L) -> int {
-        auto* data = static_cast<ClosureData*>(lua_touserdata(L, lua_upvalueindex(1)));
-        if (!data)
-        {
-            luaL_error(L, "C++ callback data is unavailable");
-            return 0;
-        }
-
+    return Detail::CreateClosure(L_, "CFunction", [fn](State& vm, lua_State* L) -> Value {
         int top = lua_gettop(L);
         std::vector<Value> args;
         args.reserve(top);
@@ -281,82 +269,16 @@ Value State::CreateFunction(const std::function<Value(State& vm, const std::vect
         {
             args.push_back(Value::FromLuaState(L, i));
         }
-        try
-        {
-            State vm(L);
-            Value res = data->func(vm, args);
-            if (lua_status(L) == LUA_YIELD)
-                return lua_yield(L, 0);
-            res.PushToLuaState(L);
-            return 1;
-        }
-        catch (const std::exception& e)
-        {
-            luaL_error(L, "C++ callback exception: %s", e.what());
-            return 0;
-        }
-        catch (...)
-        {
-            luaL_error(L, "C++ callback threw an unknown exception");
-            return 0;
-        }
-    };
-
-    // The userdata (at -1) is captured as the closure upvalue.
-    lua_pushcclosure(L_, cfunc, "CFunction", 1);
-    Value val = Value::FromLuaState(L_, -1);
-    lua_pop(L_, 1);
-    return val;
+        return fn(vm, args);
+    });
 }
 
 Value State::CreateFastFunction(const std::function<Value(State& vm, StackArgs args)>& fn)
 {
     if (!L_) return Value();
-
-    struct ClosureData
-    {
-        std::function<Value(State& vm, StackArgs args)> func;
-    };
-    auto* data = static_cast<ClosureData*>(lua_newuserdatadtor(L_, sizeof(ClosureData), [](void* ptr) {
-        static_cast<ClosureData*>(ptr)->~ClosureData();
-    }));
-    new (data) ClosureData{ fn };
-
-    auto cfunc = [](lua_State* L) -> int {
-        auto* data = static_cast<ClosureData*>(lua_touserdata(L, lua_upvalueindex(1)));
-        if (!data)
-        {
-            luaL_error(L, "C++ callback data is unavailable");
-            return 0;
-        }
-
-        StackArgs args(L);
-        try
-        {
-            State vm(L);
-            Value res = data->func(vm, args);
-            if (lua_status(L) == LUA_YIELD)
-                return lua_yield(L, 0);
-            res.PushToLuaState(L);
-            return 1;
-        }
-        catch (const std::exception& e)
-        {
-            luaL_error(L, "C++ callback exception: %s", e.what());
-            return 0;
-        }
-        catch (...)
-        {
-            luaL_error(L, "C++ callback threw an unknown exception");
-            return 0;
-        }
-    };
-
-    // The userdata (at -1) is captured as the closure upvalue.
-    lua_pushcclosure(L_, cfunc, "CFunctionFast", 1);
-    Value val = Value::FromLuaState(L_, -1);
-    lua_pop(L_, 1);
-    return val;
+    return Detail::CreateClosure(L_, "CFunctionFast", [fn](State& vm, lua_State* L) -> Value {
+        return fn(vm, StackArgs(L));
+    });
 }
 
 Coroutine State::CreateCoroutine(const Value& fn)
@@ -409,6 +331,23 @@ int State::YieldThread()
     return lua_yield(L_, 0);
 }
 
+namespace
+{
+    // Pushes the require global and the module name; returns false when the
+    // global is missing (leaving the stack balanced).
+    bool PushRequireCall(lua_State* L, std::string_view moduleName)
+    {
+        lua_getglobal(L, "require");
+        if (!lua_isfunction(L, -1))
+        {
+            lua_pop(L, 1);
+            return false;
+        }
+        lua_pushlstring(L, moduleName.data(), moduleName.size());
+        return true;
+    }
+}
+
 Value State::Require(std::string_view moduleName)
 {
     // Mirrors Luau's built-in require(): if the module is not found or fails to load,
@@ -417,13 +356,8 @@ Value State::Require(std::string_view moduleName)
     // With no Lua state there is no error context to raise into, so return Nil instead
     // of passing a null lua_State* to luaL_error (which would dereference it and crash).
     if (!L_) return Value();
-    lua_getglobal(L_, "require");
-    if (!lua_isfunction(L_, -1))
-    {
-        lua_pop(L_, 1);
+    if (!PushRequireCall(L_, moduleName))
         luaL_error(L_, "Global require function is not available");
-    }
-    lua_pushlstring(L_, moduleName.data(), moduleName.size());
     // lua_call propagates errors via longjmp, identical to calling require() from Luau.
     lua_call(L_, 1, 1);
     Value val = Value::FromLuaState(L_, -1);
@@ -436,13 +370,8 @@ Result<Value> State::TryRequire(std::string_view moduleName)
     // Protected variant: catches any Lua error and returns it as a Result.
     // Use this when you want to inspect or recover from a missing module.
     if (!L_) return Error::Runtime("State is null");
-    lua_getglobal(L_, "require");
-    if (!lua_isfunction(L_, -1))
-    {
-        lua_pop(L_, 1);
+    if (!PushRequireCall(L_, moduleName))
         return Error::Runtime("Global require is missing");
-    }
-    lua_pushlstring(L_, moduleName.data(), moduleName.size());
     int status = lua_pcall(L_, 1, 1, 0);
     if (status != LUA_OK)
     {

@@ -17,6 +17,7 @@ namespace Lode
 {
 
 class Metatable;
+namespace Detail { struct PinnedRef; }
 
 /**
  * @brief Represents a Luau table mapped to C++.
@@ -155,8 +156,7 @@ public:
     [[nodiscard]] lua_State* GetLuaState() const;
 
 private:
-    struct RefData;
-    std::shared_ptr<RefData> refData_;
+    std::shared_ptr<Detail::PinnedRef> refData_;
 };
 
 } // namespace Lode

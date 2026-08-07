@@ -1,0 +1,61 @@
+#pragma once
+
+#include "Lode/State.hpp"
+#include "lua.h"
+#include "lualib.h"
+#include <utility>
+
+namespace Lode::Detail
+{
+// Installs a C++ callable as a Luau closure backed by GC-owned userdata.
+// The callable receives a State and the raw lua_State (for StackArgs access).
+// The wrapper propagates LUA_YIELD and converts C++ exceptions into Lua
+// errors, keeping every closure created by the runtime on the same code path.
+template <typename Fn>
+Value CreateClosure(lua_State* L, const char* name, Fn&& fn)
+{
+    struct ClosureData
+    {
+        Fn func;
+    };
+    auto* data = static_cast<ClosureData*>(lua_newuserdatadtor(L, sizeof(ClosureData), [](void* ptr) {
+        static_cast<ClosureData*>(ptr)->~ClosureData();
+    }));
+    new (data) ClosureData{ std::forward<Fn>(fn) };
+
+    auto cfunc = [](lua_State* L) -> int {
+        auto* data = static_cast<ClosureData*>(lua_touserdata(L, lua_upvalueindex(1)));
+        if (!data)
+        {
+            luaL_error(L, "C++ callback data is unavailable");
+            return 0;
+        }
+
+        State vm(L);
+        try
+        {
+            Value res = data->func(vm, L);
+            if (lua_status(L) == LUA_YIELD)
+                return lua_yield(L, 0);
+            res.PushToLuaState(L);
+            return 1;
+        }
+        catch (const std::exception& e)
+        {
+            luaL_error(L, "C++ callback exception: %s", e.what());
+            return 0;
+        }
+        catch (...)
+        {
+            luaL_error(L, "C++ callback threw an unknown exception");
+            return 0;
+        }
+    };
+
+    // The userdata (at -1) is captured as the closure upvalue.
+    lua_pushcclosure(L, cfunc, name, 1);
+    Value val = Value::FromLuaState(L, -1);
+    lua_pop(L, 1);
+    return val;
+}
+}

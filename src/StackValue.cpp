@@ -1,8 +1,7 @@
 #include "Lode/StackValue.hpp"
+#include "Lode/Numeric.hpp"
 #include "lua.h"
 
-#include <cmath>
-#include <limits>
 #include <cstdint>
 
 namespace Lode
@@ -39,11 +38,7 @@ bool StackValue::IsInteger() const
 {
     if (lua_type(L_, index_) == LUA_TINTEGER) return true;
     if (!lua_isnumber(L_, index_)) return false;
-    double d = lua_tonumber(L_, index_);
-    constexpr double int64Min = -9223372036854775808.0;
-    constexpr double int64ExclusiveMax = 9223372036854775808.0;
-    return std::isfinite(d) && d == std::trunc(d) &&
-        d >= int64Min && d < int64ExclusiveMax;
+    return Numeric::ToInt64(lua_tonumber(L_, index_), "value").IsOk();
 }
 bool StackValue::IsString() const { return lua_isstring(L_, index_); }
 bool StackValue::IsBuffer() const { return lua_type(L_, index_) == LUA_TBUFFER; }
@@ -67,13 +62,8 @@ int64_t StackValue::AsInteger() const
     if (lua_type(L_, index_) == LUA_TINTEGER)
         return lua_tointeger64(L_, index_, nullptr);
 
-    double value = lua_tonumber(L_, index_);
-    constexpr double int64Min = -9223372036854775808.0;
-    constexpr double int64ExclusiveMax = 9223372036854775808.0;
-    if (!std::isfinite(value) || value != std::trunc(value) ||
-        value < int64Min || value >= int64ExclusiveMax)
-        return 0;
-    return static_cast<int64_t>(value);
+    auto result = Numeric::ToInt64(lua_tonumber(L_, index_), "value");
+    return result.IsError() ? 0 : result.GetValue();
 }
 
 Vector StackValue::AsVector() const

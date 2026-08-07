@@ -114,15 +114,6 @@ Lode::ModuleReturn LodeModuleRegister(Lode::State& vm);
     } \
     Lode::ModuleReturn LodeModuleRegister(Lode::State& vm_var)
 
-#define LODE_MODULE(vm_var) \
-    LODE_EXPORT int LodeModuleInit(lua_State* L) { \
-        Lode::State vm_var(L); \
-        Lode::ModuleReturn ret = LodeModuleRegister(vm_var); \
-        for (const auto& val : ret.GetValues()) { \
-            val.PushToLuaState(L); \
-        } \
-        return static_cast<int>(ret.GetValues().size()); \
-    } \
-    Lode::ModuleReturn LodeModuleRegister(Lode::State& vm_var)
+#define LODE_MODULE(vm_var) LODE_MODULE_NAMED(default_module, vm_var)
 
 #endif

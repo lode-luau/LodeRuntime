@@ -1,13 +1,12 @@
 // Copyright (c) 2026 yanlvl99, Lode Runtime Contributors
 // SPDX-License-Identifier: MIT
 #include "Lode/Buffer.hpp"
+#include "PinnedRef.hpp"
 #include "lua.h"
 #include <array>
 #include <bit>
 #include <cstring>
 #include <algorithm>
-#include <stdexcept>
-#include "StateLifetime.hpp"
 
 namespace Lode
 {
@@ -43,6 +42,17 @@ namespace
         for (size_t i = 0; i < bytes.size(); ++i)
             span[offset + i] = bytes[i];
     }
+
+    // Clamps a request for `count` bytes at `offset` to the span's bounds.
+    std::span<uint8_t> ClampRange(std::span<uint8_t> span, size_t offset, size_t count)
+    {
+        if (offset >= span.size())
+            return {};
+        size_t available = span.size() - offset;
+        if (count > available)
+            count = available;
+        return span.subspan(offset, count);
+    }
 }
 
 Buffer::Buffer() = default;
@@ -51,116 +61,53 @@ Buffer::Buffer(lua_State* L, int index)
 {
     if (lua_type(L, index) == LUA_TBUFFER)
     {
-        L_ = lua_mainthread(L);
-        lifetime_ = Detail::GetStateLifetime(L);
-        lua_pushvalue(L, index);
-        refId_ = lua_ref(L, -1);
-        lua_pop(L, 1);
+        ref_ = std::make_shared<Detail::PinnedRef>(Detail::CaptureRef(L, index));
     }
 }
 
-Buffer::~Buffer()
-{
-    if (L_ && lifetime_ && lifetime_->alive.load() && refId_ != LUA_NOREF && refId_ != LUA_REFNIL)
-    {
-        lua_unref(L_, refId_);
-    }
-}
-
-Buffer::Buffer(const Buffer& other)
-{
-    if (other.IsValid())
-    {
-        L_ = other.L_;
-        lifetime_ = other.lifetime_;
-        lua_getref(L_, other.refId_);
-        refId_ = lua_ref(L_, -1);
-        lua_pop(L_, 1);
-    }
-}
-
-Buffer::Buffer(Buffer&& other) noexcept : L_(other.L_), refId_(other.refId_)
-{
-    lifetime_ = std::move(other.lifetime_);
-    other.L_ = nullptr;
-    other.refId_ = LUA_NOREF;
-}
-
-Buffer& Buffer::operator=(const Buffer& other)
-{
-    if (this != &other)
-    {
-        if (L_ && lifetime_ && lifetime_->alive.load() && refId_ != LUA_NOREF && refId_ != LUA_REFNIL)
-        {
-            lua_unref(L_, refId_);
-        }
-        if (other.IsValid())
-        {
-            L_ = other.L_;
-            lifetime_ = other.lifetime_;
-            lua_getref(L_, other.refId_);
-            refId_ = lua_ref(L_, -1);
-            lua_pop(L_, 1);
-        }
-        else
-        {
-            L_ = nullptr;
-            refId_ = LUA_NOREF;
-            lifetime_.reset();
-        }
-    }
-    return *this;
-}
-
-Buffer& Buffer::operator=(Buffer&& other) noexcept
-{
-    if (this != &other)
-    {
-        if (L_ && lifetime_ && lifetime_->alive.load() && refId_ != LUA_NOREF && refId_ != LUA_REFNIL)
-        {
-            lua_unref(L_, refId_);
-        }
-        L_ = other.L_;
-        refId_ = other.refId_;
-        lifetime_ = std::move(other.lifetime_);
-        other.L_ = nullptr;
-        other.refId_ = LUA_NOREF;
-    }
-    return *this;
-}
+Buffer::~Buffer() = default;
+Buffer::Buffer(const Buffer& other) = default;
+Buffer::Buffer(Buffer&& other) noexcept = default;
+Buffer& Buffer::operator=(const Buffer& other) = default;
+Buffer& Buffer::operator=(Buffer&& other) noexcept = default;
 
 bool Buffer::IsValid() const
 {
-    return L_ != nullptr && refId_ != LUA_NOREF && refId_ != LUA_REFNIL;
+    return ref_ && ref_->L && ref_->refId != LUA_NOREF && ref_->refId != LUA_REFNIL;
 }
 
 void* Buffer::Data() const
 {
     if (!IsValid()) return nullptr;
-    lua_getref(L_, refId_);
-    void* ptr = lua_tobuffer(L_, -1, nullptr);
-    lua_pop(L_, 1);
+    lua_getref(ref_->L, ref_->refId);
+    void* ptr = lua_tobuffer(ref_->L, -1, nullptr);
+    lua_pop(ref_->L, 1);
     return ptr;
 }
 
 size_t Buffer::Size() const
 {
     if (!IsValid()) return 0;
-    lua_getref(L_, refId_);
+    lua_getref(ref_->L, ref_->refId);
     size_t size = 0;
-    lua_tobuffer(L_, -1, &size);
-    lua_pop(L_, 1);
+    lua_tobuffer(ref_->L, -1, &size);
+    lua_pop(ref_->L, 1);
     return size;
 }
 
 std::span<uint8_t> Buffer::Span() const
 {
     if (!IsValid()) return {};
-    lua_getref(L_, refId_);
+    lua_getref(ref_->L, ref_->refId);
     size_t size = 0;
-    void* ptr = lua_tobuffer(L_, -1, &size);
-    lua_pop(L_, 1);
+    void* ptr = lua_tobuffer(ref_->L, -1, &size);
+    lua_pop(ref_->L, 1);
     return std::span<uint8_t>(static_cast<uint8_t*>(ptr), size);
+}
+
+lua_State* Buffer::GetLuaState() const
+{
+    return ref_ ? ref_->L : nullptr;
 }
 
 void Buffer::PushToLuaState(lua_State* L) const
@@ -168,16 +115,10 @@ void Buffer::PushToLuaState(lua_State* L) const
     if (!L)
         return;
 
-    if (IsValid() && lua_mainthread(L) == L_)
-    {
-        lua_getref(L_, refId_);
-        if (L != L_)
-            lua_xmove(L_, L, 1);
-    }
+    if (ref_)
+        Detail::PushRef(L, *ref_);
     else
-    {
         lua_pushnil(L);
-    }
 }
 
 // --- Reads ---
@@ -317,45 +258,26 @@ void Buffer::WriteFloat64(size_t offset, double value)
 
 void Buffer::WriteString(size_t offset, std::string_view value)
 {
-    auto span = Span();
-    if (offset >= span.size()) return;
-    size_t available = span.size() - offset;
-    size_t writeCount = (value.size() > available) ? available : value.size();
-    if (writeCount > 0)
-    {
-        std::memcpy(span.data() + offset, value.data(), writeCount);
-    }
+    auto range = ClampRange(Span(), offset, value.size());
+    if (!range.empty())
+        std::memcpy(range.data(), value.data(), range.size());
 }
 
 void Buffer::Fill(size_t offset, uint8_t value, size_t count)
 {
-    auto span = Span();
-    if (offset >= span.size()) return;
-    size_t available = span.size() - offset;
-    size_t fillCount = (count > available) ? available : count;
-    if (fillCount > 0)
-    {
-        std::memset(span.data() + offset, value, fillCount);
-    }
+    auto range = ClampRange(Span(), offset, count);
+    if (!range.empty())
+        std::memset(range.data(), value, range.size());
 }
 
 void Buffer::CopyFrom(size_t targetOffset, const Buffer& source, size_t sourceOffset, size_t count)
 {
-    auto targetSpan = Span();
-    auto sourceSpan = source.Span();
-    
-    if (targetOffset >= targetSpan.size() || sourceOffset >= sourceSpan.size()) return;
-    
-    size_t targetAvailable = targetSpan.size() - targetOffset;
-    size_t sourceAvailable = sourceSpan.size() - sourceOffset;
-    
-    size_t copyCount = count;
-    if (copyCount > sourceAvailable) copyCount = sourceAvailable;
-    if (copyCount > targetAvailable) copyCount = targetAvailable;
-    
+    auto target = ClampRange(Span(), targetOffset, count);
+    auto sourceRange = ClampRange(source.Span(), sourceOffset, count);
+    size_t copyCount = std::min(target.size(), sourceRange.size());
     if (copyCount > 0)
     {
-        std::memmove(targetSpan.data() + targetOffset, sourceSpan.data() + sourceOffset, copyCount);
+        std::memmove(target.data(), sourceRange.data(), copyCount);
     }
 }
 

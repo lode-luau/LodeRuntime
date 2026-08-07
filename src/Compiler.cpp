@@ -42,6 +42,22 @@ namespace
         return std::string(reinterpret_cast<const char*>(utf8.data()), utf8.size());
     }
 
+    // Resolves a module path to a regular file: prefers the exact path, then the
+    // .luau variant, then init.luau in the directory. Canonicalizes the result.
+    static fs::path ResolveModuleFile(fs::path resolvedPath)
+    {
+        fs::path finalPath = resolvedPath;
+        fs::path luauPath = finalPath;
+        luauPath += ".luau";
+        if (!fs::is_regular_file(finalPath) && fs::is_regular_file(luauPath))
+            finalPath = luauPath;
+        else if (fs::is_regular_file(resolvedPath / "init.luau"))
+            finalPath = resolvedPath / "init.luau";
+
+        try { finalPath = fs::weakly_canonical(finalPath); } catch (...) {}
+        return finalPath;
+    }
+
     class SimpleFileResolver : public Luau::FileResolver
     {
     public:
@@ -97,16 +113,7 @@ namespace
                         if (!remainder.empty())
                             resolvedPath /= remainder;
 
-                        fs::path finalPath = resolvedPath;
-                        fs::path luauPath = finalPath;
-                        luauPath += ".luau";
-                        if (!fs::is_regular_file(finalPath) && fs::is_regular_file(luauPath))
-                            finalPath = luauPath;
-                        else if (fs::is_regular_file(resolvedPath / "init.luau"))
-                            finalPath = resolvedPath / "init.luau";
-
-                        try { finalPath = fs::weakly_canonical(finalPath); } catch(...) {}
-                        return Luau::ModuleInfo{PathToUtf8(finalPath)};
+                        return Luau::ModuleInfo{PathToUtf8(ResolveModuleFile(resolvedPath))};
                     }
 
                     if (configResolver_)
@@ -118,17 +125,8 @@ namespace
                             fs::path resolvedPath = PathFromUtf8(std::string(it->configLocation)).parent_path() / it->value;
                             if (!remainder.empty())
                                 resolvedPath /= remainder;
-                            
-                            fs::path finalPath = resolvedPath;
-                            fs::path luauPath = finalPath;
-                            luauPath += ".luau";
-                            if (!fs::is_regular_file(finalPath) && fs::is_regular_file(luauPath))
-                                finalPath = luauPath;
-                            else if (fs::is_regular_file(resolvedPath / "init.luau"))
-                                finalPath = resolvedPath / "init.luau";
 
-                            try { finalPath = fs::weakly_canonical(finalPath); } catch(...) {}
-                            return Luau::ModuleInfo{PathToUtf8(finalPath)};
+                            return Luau::ModuleInfo{PathToUtf8(ResolveModuleFile(resolvedPath))};
                         }
                     }
                 }
@@ -142,16 +140,7 @@ namespace
                     fs::path dirPath = ctxPath.has_parent_path() ? ctxPath.parent_path() : ctxPath;
                     fs::path resolvedPath = dirPath / relPath;
                     
-                    fs::path finalPath = resolvedPath;
-                    fs::path luauPath = finalPath;
-                    luauPath += ".luau";
-                    if (!fs::is_regular_file(finalPath) && fs::is_regular_file(luauPath))
-                        finalPath = luauPath;
-                    else if (fs::is_regular_file(resolvedPath / "init.luau"))
-                        finalPath = resolvedPath / "init.luau";
-
-                    try { finalPath = fs::weakly_canonical(finalPath); } catch(...) {}
-                    return Luau::ModuleInfo{PathToUtf8(finalPath)};
+                    return Luau::ModuleInfo{PathToUtf8(ResolveModuleFile(resolvedPath))};
                 }
             }
             return std::nullopt;

@@ -18,7 +18,7 @@ namespace Lode
 
 class State;
 class Value;
-namespace Detail { struct StateLifetime; }
+namespace Detail { struct PinnedRef; }
 
 /**
  * @brief Represents a Luau buffer object.
@@ -81,12 +81,10 @@ public:
 
     // Internal
     void PushToLuaState(lua_State* L) const;
-    [[nodiscard]] lua_State* GetLuaState() const { return L_; }
+    [[nodiscard]] lua_State* GetLuaState() const;
 
 private:
-    lua_State* L_ = nullptr;
-    int refId_ = -1; // -1 represents LUA_NOREF
-    std::shared_ptr<Detail::StateLifetime> lifetime_;
+    std::shared_ptr<Detail::PinnedRef> ref_;
 };
 
 } // namespace Lode

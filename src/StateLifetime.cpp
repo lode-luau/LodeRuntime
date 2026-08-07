@@ -1,4 +1,5 @@
 #include "StateLifetime.hpp"
+#include "PinnedRef.hpp"
 #include "lua.h"
 #include <mutex>
 #include <unordered_map>
@@ -41,5 +42,41 @@ void InvalidateStateLifetime(lua_State* L)
         if (auto lifetime = it->second.lock()) lifetime->alive.store(false);
         lifetimes.erase(it);
     }
+}
+
+PinnedRef::~PinnedRef()
+{
+    if (L && lifetime && lifetime->alive.load() && refId != LUA_NOREF && refId != LUA_REFNIL)
+    {
+        lua_unref(L, refId);
+    }
+}
+
+PinnedRef CaptureRef(lua_State* L, int index)
+{
+    PinnedRef ref;
+    ref.L = lua_mainthread(L);
+    ref.lifetime = GetStateLifetime(L);
+    if (lua_type(L, index) == LUA_TTHREAD)
+        ref.thread = lua_tothread(L, index);
+    lua_pushvalue(L, index);
+    ref.refId = lua_ref(L, -1);
+    lua_pop(L, 1);
+    return ref;
+}
+
+void PushRef(lua_State* target, const PinnedRef& ref)
+{
+    if (!target)
+        return;
+    if (!ref.L || ref.refId == LUA_NOREF || ref.refId == LUA_REFNIL ||
+        lua_mainthread(target) != ref.L)
+    {
+        lua_pushnil(target);
+        return;
+    }
+    lua_getref(ref.L, ref.refId);
+    if (target != ref.L)
+        lua_xmove(ref.L, target, 1);
 }
 }

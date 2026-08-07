@@ -49,6 +49,14 @@ static Coroutine MakeTaskCoroutine(State& vm, const Value& target)
     return target.IsThread() ? target.AsCoroutine() : Coroutine(vm, target);
 }
 
+static void EmitTaskError(const std::string& message)
+{
+    Diagnostic diag;
+    diag.message = message;
+    diag.code = "TaskError";
+    Logger::EmitDiagnostic(diag);
+}
+
 void Task::SetMainThread(State& vm, lua_State* L)
 {
     TaskContext* ctx = GetOrCreateContext(vm.GetMainThread());
@@ -94,6 +102,112 @@ static void SafeDestroyTimer(TimerData* data)
     }
 }
 
+// Shared timer callback: resumes the wait coroutine or the scheduled
+// callback and reports failures through the diagnostic channel.
+static void OnTimerFired(uv_timer_t* handle)
+{
+    auto* data = static_cast<TimerData*>(handle->data);
+    if (!data) return;
+
+    if (data->coroutine.IsValid())
+    {
+        try
+        {
+            auto res = data->coroutine.Resume();
+            if (res.IsError())
+            {
+                if (data->ctx && data->ctx->mainThread &&
+                    data->coroutine.GetThreadState() == data->ctx->mainThread)
+                {
+                    data->ctx->mainThreadError = res.GetError().ErrorMessage();
+                }
+                else
+                {
+                    EmitTaskError("Unhandled exception in Wait timer: " + res.GetError().ErrorMessage());
+                }
+            }
+        }
+        catch (const std::exception& e)
+        {
+            EmitTaskError(std::string("Unhandled C++ exception in Wait timer: ") + e.what());
+        }
+        catch (...)
+        {
+            EmitTaskError("Unhandled unknown C++ exception in Wait timer");
+        }
+    }
+    else if (data->L)
+    {
+        const char* kind = data->recurring ? "SetInterval" : "SetTimeout";
+        try
+        {
+            State localVm(data->L);
+            Coroutine co = MakeTaskCoroutine(localVm, data->callback);
+            auto res = co.Resume(data->args);
+            if (res.IsError())
+            {
+                EmitTaskError(std::string("Unhandled exception in ") + kind + ": " + res.GetError().ErrorMessage());
+            }
+        }
+        catch (const std::exception& e)
+        {
+            EmitTaskError(std::string("Unhandled C++ exception in ") + kind + ": " + e.what());
+        }
+        catch (...)
+        {
+            EmitTaskError(std::string("Unhandled unknown C++ exception in ") + kind);
+        }
+    }
+
+    if (!data->recurring)
+    {
+        uv_timer_stop(handle);
+        if (data->ctx)
+            data->ctx->timers.erase(data->timerId);
+        SafeDestroyTimer(data);
+    }
+}
+
+// Shared timer setup: initializes and registers the uv handle, validates the
+// duration, and starts the timer. Raises a Lua error and frees the timer on
+// any failure. Returns true when the timer is running.
+static bool StartTimer(State& vm, TaskContext* ctx, const char* label, TimerData* data,
+                       double duration, double scale, const char* durationLabel, bool recurring)
+{
+    uv_loop_t* loop = vm.GetEventLoop().GetUVLoop();
+    int initStatus = loop ? uv_timer_init(loop, &data->handle) : UV_EINVAL;
+    if (initStatus != 0)
+    {
+        delete data;
+        vm.RaiseError(std::string("Failed to initialize ") + label + " timer: " + uv_strerror(initStatus));
+        return false;
+    }
+
+    ctx->timers[data->timerId] = data;
+    data->handle.data = data;
+
+    uv_update_time(loop);
+    auto durationResult = Numeric::ToMilliseconds(duration, scale, durationLabel);
+    if (durationResult.IsError())
+    {
+        ctx->timers.erase(data->timerId);
+        SafeDestroyTimer(data);
+        vm.RaiseError(durationResult.GetError().ErrorMessage());
+        return false;
+    }
+    uint64_t timeout = durationResult.GetValue();
+    if (timeout == 0) timeout = 1;
+    int startStatus = uv_timer_start(&data->handle, OnTimerFired, timeout, recurring ? timeout : 0);
+    if (startStatus != 0)
+    {
+        ctx->timers.erase(data->timerId);
+        SafeDestroyTimer(data);
+        vm.RaiseError(std::string("Failed to start ") + label + " timer: " + uv_strerror(startStatus));
+        return false;
+    }
+    return true;
+}
+
 TaskContext::~TaskContext()
 {
     // Normally empty: Task::Shutdown closes and flushes every timer before
@@ -109,15 +223,8 @@ TaskContext::~TaskContext()
 void Task::Shutdown(State& vm)
 {
     lua_State* L = vm.GetMainThread();
-    if (!L) return;
-
-    lua_getfield(L, LUA_REGISTRYINDEX, kTaskCtxKey);
-    TaskContext* ctx = static_cast<TaskContext*>(lua_touserdata(L, -1));
-    if (!ctx)
-    {
-        lua_pop(L, 1);
-        return;
-    }
+    TaskContext* ctx = GetContext(L);
+    if (!ctx) return;
 
     uv_loop_t* loop = vm.GetEventLoop().GetUVLoop();
     for (auto& [id, data] : ctx->timers)
@@ -140,7 +247,6 @@ void Task::Shutdown(State& vm)
     // containers are cleared here while the Lua state is still usable.
     lua_pushnil(L);
     lua_setfield(L, LUA_REGISTRYINDEX, kTaskCtxKey);
-    lua_pop(L, 1);
 
     // Flush pending uv_close callbacks so the TimerData heap objects are freed now.
     if (loop)
@@ -166,82 +272,9 @@ int Task::Wait(State& vm, double seconds)
     timerData->ctx = ctx;
     timerData->coroutine = Coroutine(vm.GetLuaState());
     timerData->recurring = false;
-    uv_loop_t* loop = vm.GetEventLoop().GetUVLoop();
-    int initStatus = loop ? uv_timer_init(loop, &timerData->handle) : UV_EINVAL;
-    if (initStatus != 0)
-    {
-        delete timerData;
-        vm.RaiseError(std::string("Failed to initialize wait timer: ") + uv_strerror(initStatus));
-        return 0;
-    }
 
-    ctx->timers[timerData->timerId] = timerData;
-    timerData->handle.data = timerData;
-
-    auto onTimer = [](uv_timer_t* handle) {
-        auto* data = static_cast<TimerData*>(handle->data);
-        if (data && data->coroutine.IsValid())
-        {
-            try
-            {
-                auto res = data->coroutine.Resume();
-                if (res.IsError())
-                {
-                    if (data->ctx && data->ctx->mainThread &&
-                        data->coroutine.GetThreadState() == data->ctx->mainThread)
-                    {
-                        data->ctx->mainThreadError = res.GetError().ErrorMessage();
-                    }
-                    else
-                    {
-                        Diagnostic diag;
-                        diag.message = "Unhandled exception in Wait timer: " + res.GetError().ErrorMessage();
-                        diag.code = "TaskError";
-                        Logger::EmitDiagnostic(diag);
-                    }
-                }
-            }
-            catch (const std::exception& e)
-            {
-                Diagnostic diag;
-                diag.message = std::string("Unhandled C++ exception in Wait timer: ") + e.what();
-                diag.code = "TaskError";
-                Logger::EmitDiagnostic(diag);
-            }
-            catch (...)
-            {
-                Diagnostic diag;
-                diag.message = "Unhandled unknown C++ exception in Wait timer";
-                diag.code = "TaskError";
-                Logger::EmitDiagnostic(diag);
-            }
-        }
-        uv_timer_stop(handle);
-        if (data && data->ctx)
-            data->ctx->timers.erase(data->timerId);
-        SafeDestroyTimer(data);
-    };
-
-    uv_update_time(loop);
-    auto timeoutResult = Numeric::ToMilliseconds(seconds, 1000.0, "wait duration");
-    if (timeoutResult.IsError())
-    {
-        int timerId = timerData->timerId;
-        ctx->timers.erase(timerId);
-        SafeDestroyTimer(timerData);
-        vm.RaiseError(timeoutResult.GetError().ErrorMessage());
+    if (!StartTimer(vm, ctx, "wait", timerData, seconds, 1000.0, "wait duration", false))
         return 0;
-    }
-    uint64_t timeout = timeoutResult.GetValue();
-    if (timeout == 0) timeout = 1;
-    int startStatus = uv_timer_start(&timerData->handle, onTimer, timeout, 0);
-    if (startStatus != 0)
-    {
-        ctx->timers.erase(timerData->timerId);
-        SafeDestroyTimer(timerData);
-        vm.RaiseError(std::string("Failed to start wait timer: ") + uv_strerror(startStatus));
-        return 0;
-    }
 
     return vm.YieldThread();
 }
@@ -260,77 +293,7 @@ int Task::SetTimeout(State& vm, const Value& callback, double delayMs, const std
     timerData->recurring = false;
     timerData->args = args;
 
-    uv_loop_t* loop = vm.GetEventLoop().GetUVLoop();
-    int initStatus = loop ? uv_timer_init(loop, &timerData->handle) : UV_EINVAL;
-    if (initStatus != 0)
-    {
-        delete timerData;
-        vm.RaiseError(std::string("Failed to initialize timeout timer: ") + uv_strerror(initStatus));
-        return -1;
-    }
-
-    ctx->timers[id] = timerData;
-    timerData->handle.data = timerData;
-
-    auto onTimer = [](uv_timer_t* handle) {
-        auto* data = static_cast<TimerData*>(handle->data);
-        if (data && data->L)
-        {
-            try
-            {
-                State localVm(data->L);
-                Coroutine co = MakeTaskCoroutine(localVm, data->callback);
-                auto res = co.Resume(data->args);
-                if (res.IsError())
-                {
-                    Diagnostic diag;
-                    diag.message = "Unhandled exception in SetTimeout: " + res.GetError().ErrorMessage();
-                    diag.code = "TaskError";
-                    Logger::EmitDiagnostic(diag);
-                }
-            }
-            catch (const std::exception& e)
-            {
-                Diagnostic diag;
-                diag.message = std::string("Unhandled C++ exception in SetTimeout: ") + e.what();
-                diag.code = "TaskError";
-                Logger::EmitDiagnostic(diag);
-            }
-            catch (...)
-            {
-                Diagnostic diag;
-                diag.message = "Unhandled unknown C++ exception in SetTimeout";
-                diag.code = "TaskError";
-                Logger::EmitDiagnostic(diag);
-            }
-        }
-        uv_timer_stop(handle);
-        if (data && data->ctx)
-            data->ctx->timers.erase(data->timerId);
-        SafeDestroyTimer(data);
-    };
-
-    uv_update_time(loop);
-    auto timeoutResult = Numeric::ToMilliseconds(delayMs, 1.0, "timeout delay");
-    if (timeoutResult.IsError())
-    {
-        ctx->timers.erase(id);
-        SafeDestroyTimer(timerData);
-        vm.RaiseError(timeoutResult.GetError().ErrorMessage());
-        return -1;
-    }
-    uint64_t timeout = timeoutResult.GetValue();
-    if (timeout == 0) timeout = 1;
-    int startStatus = uv_timer_start(&timerData->handle, onTimer, timeout, 0);
-    if (startStatus != 0)
-    {
-        ctx->timers.erase(id);
-        SafeDestroyTimer(timerData);
-        vm.RaiseError(std::string("Failed to start timeout timer: ") + uv_strerror(startStatus));
-        return -1;
-    }
-
-    return id;
+    return StartTimer(vm, ctx, "timeout", timerData, delayMs, 1.0, "timeout delay", false) ? id : -1;
 }
 
 void Task::ClearTimeout(State& vm, int timerId)
@@ -361,71 +324,8 @@ int Task::SetInterval(State& vm, const Value& callback, double intervalMs, const
     timerData->recurring = true;
     timerData->args = args;
 
-    uv_loop_t* loop = vm.GetEventLoop().GetUVLoop();
-    int initStatus = loop ? uv_timer_init(loop, &timerData->handle) : UV_EINVAL;
-    if (initStatus != 0)
-    {
-        delete timerData;
-        vm.RaiseError(std::string("Failed to initialize interval timer: ") + uv_strerror(initStatus));
+    if (!StartTimer(vm, ctx, "interval", timerData, intervalMs, 1.0, "interval duration", true))
         return -1;
-    }
-
-    ctx->timers[id] = timerData;
-    timerData->handle.data = timerData;
-
-    auto onTimer = [](uv_timer_t* handle) {
-        auto* data = static_cast<TimerData*>(handle->data);
-        if (data && data->L)
-        {
-            try
-            {
-                State localVm(data->L);
-                Coroutine co = MakeTaskCoroutine(localVm, data->callback);
-                auto res = co.Resume(data->args);
-                if (res.IsError())
-                {
-                    Diagnostic diag;
-                    diag.message = "Unhandled exception in SetInterval: " + res.GetError().ErrorMessage();
-                    diag.code = "TaskError";
-                    Logger::EmitDiagnostic(diag);
-                }
-            }
-            catch (const std::exception& e)
-            {
-                Diagnostic diag;
-                diag.message = std::string("Unhandled C++ exception in SetInterval: ") + e.what();
-                diag.code = "TaskError";
-                Logger::EmitDiagnostic(diag);
-            }
-            catch (...)
-            {
-                Diagnostic diag;
-                diag.message = "Unhandled unknown C++ exception in SetInterval";
-                diag.code = "TaskError";
-                Logger::EmitDiagnostic(diag);
-            }
-        }
-    };
-
-    uv_update_time(loop);
-    auto repeatResult = Numeric::ToMilliseconds(intervalMs, 1.0, "interval duration");
-    if (repeatResult.IsError())
-    {
-        ctx->timers.erase(id);
-        SafeDestroyTimer(timerData);
-        vm.RaiseError(repeatResult.GetError().ErrorMessage());
-        return -1;
-    }
-    uint64_t repeat = repeatResult.GetValue();
-    if (repeat == 0) repeat = 1;
-    int startStatus = uv_timer_start(&timerData->handle, onTimer, repeat, repeat);
-    if (startStatus != 0)
-    {
-        ctx->timers.erase(id);
-        SafeDestroyTimer(timerData);
-        vm.RaiseError(std::string("Failed to start interval timer: ") + uv_strerror(startStatus));
-        return -1;
-    }
 
     return id;
 }

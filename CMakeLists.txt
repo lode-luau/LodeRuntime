@@ -43,6 +43,21 @@ if(NOT CMAKE_CONFIGURATION_TYPES AND CMAKE_BUILD_TYPE)
     set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/${CMAKE_BUILD_TYPE}")
 endif()
 
+if(MSVC)
+    add_compile_options(
+        $<$<CONFIG:Release>:/O1>
+        $<$<CONFIG:Release>:/GL>
+    )
+    add_link_options(
+        $<$<CONFIG:Release>:/LTCG>
+        $<$<CONFIG:Release>:/OPT:REF>
+        $<$<CONFIG:Release>:/OPT:ICF>
+    )
+else()
+    add_compile_options($<$<CONFIG:Release>:-Os> $<$<CONFIG:Release>:-ffunction-sections> $<$<CONFIG:Release>:-fdata-sections>)
+    add_link_options($<$<CONFIG:Release>:-Wl,--gc-sections> $<$<CONFIG:Release>:-s>)
+endif()
+
 include(FetchContent)
 
 set(LUAU_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
@@ -93,7 +108,6 @@ include_directories(
 )
 
 set(LODE_CORE_SOURCES
-    src/Error.cpp
     src/Value.cpp
     src/StackValue.cpp
     src/Vector.cpp

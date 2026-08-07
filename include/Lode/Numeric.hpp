@@ -41,4 +41,15 @@ inline Result<uint64_t> ToMilliseconds(double value, double multiplier, const ch
     return static_cast<uint64_t>(milliseconds);
 }
 
+inline Result<int64_t> ToInt64(double value, const char* name)
+{
+    if (!std::isfinite(value) || std::trunc(value) != value ||
+        value < -9223372036854775808.0 || value >= 9223372036854775808.0)
+    {
+        return Error::Type(std::string(name) + " must be a finite integer in the 64-bit signed range");
+    }
+
+    return static_cast<int64_t>(value);
+}
+
 } // namespace Lode::Numeric

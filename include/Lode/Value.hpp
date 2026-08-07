@@ -48,7 +48,7 @@ class Buffer;
 namespace Detail
 {
     class SmallValueList;
-    struct StateLifetime;
+    struct PinnedRef;
 }
 
 /**
@@ -212,17 +212,8 @@ private:
     // Returns the lua_State* pinned by this value's reference, or nullptr.
     lua_State* GetCapturedState() const;
 
-    struct RefData
-    {
-        lua_State* L = nullptr;
-        lua_State* thread = nullptr;
-        int refId = -1;
-        std::shared_ptr<Detail::StateLifetime> lifetime;
-        ~RefData();
-    };
-
     ValueType type_ = ValueType::Nil;
-    std::variant<std::monostate, bool, double, int64_t, Vector, std::string, void*, std::shared_ptr<RefData>> data_;
+    std::variant<std::monostate, bool, double, int64_t, Vector, std::string, void*, std::shared_ptr<Detail::PinnedRef>> data_;
 };
 
 namespace Detail

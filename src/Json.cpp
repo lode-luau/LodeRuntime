@@ -211,6 +211,32 @@ struct LimitedSax : nlohmann::json::json_sax_t
 };
 
 void ToJson(const Value& value, nlohmann::json& out, std::string& error, size_t& nodes,
+            size_t& depth, size_t maxNodes, size_t maxDepth);
+
+// Converts the 1..size indexed range of a table, failing when a slot is
+// missing so the result is a dense array/object without holes.
+template <typename Sink>
+bool ConvertIndexed(const Table& table, size_t size, const char* holeError, std::string& error,
+                    size_t& nodes, size_t& depth, size_t maxNodes, size_t maxDepth, Sink&& sink)
+{
+    for (size_t i = 1; i <= size; ++i)
+    {
+        Result<Value> item = table.Get(static_cast<int>(i));
+        if (item.IsError() || item.GetValue().IsNil())
+        {
+            error = holeError;
+            return false;
+        }
+        nlohmann::json converted;
+        ToJson(item.GetValue(), converted, error, nodes, depth, maxNodes, maxDepth);
+        if (!error.empty())
+            return false;
+        sink(i, std::move(converted));
+    }
+    return true;
+}
+
+void ToJson(const Value& value, nlohmann::json& out, std::string& error, size_t& nodes,
             size_t& depth, size_t maxNodes, size_t maxDepth)
 {
     if (++nodes > maxNodes)
@@ -266,39 +292,19 @@ void ToJson(const Value& value, nlohmann::json& out, std::string& error, size_t&
             if (keys.empty() && size > 0)
             {
                 nlohmann::json array = nlohmann::json::array();
-                for (size_t i = 1; i <= size; ++i)
-                {
-                    Result<Value> item = table.Get(static_cast<int>(i));
-                    if (item.IsError() || item.GetValue().IsNil())
-                    {
-                        error = "table with holes cannot be encoded as a json array";
-                        return;
-                    }
-                    nlohmann::json converted;
-                    ToJson(item.GetValue(), converted, error, nodes, depth, maxNodes, maxDepth);
-                    if (!error.empty())
-                        return;
-                    array.push_back(std::move(converted));
-                }
+                bool ok = ConvertIndexed(table, size, "table with holes cannot be encoded as a json array",
+                                         error, nodes, depth, maxNodes, maxDepth,
+                                         [&](size_t, nlohmann::json&& converted) { array.push_back(std::move(converted)); });
+                if (!ok) return;
                 out = std::move(array);
             }
             else
             {
                 nlohmann::json object = nlohmann::json::object();
-                for (size_t i = 1; i <= size; ++i)
-                {
-                    Result<Value> item = table.Get(static_cast<int>(i));
-                    if (item.IsError() || item.GetValue().IsNil())
-                    {
-                        error = "table with holes cannot be encoded as a json object";
-                        return;
-                    }
-                    nlohmann::json converted;
-                    ToJson(item.GetValue(), converted, error, nodes, depth, maxNodes, maxDepth);
-                    if (!error.empty())
-                        return;
-                    object[std::to_string(i)] = std::move(converted);
-                }
+                bool ok = ConvertIndexed(table, size, "table with holes cannot be encoded as a json object",
+                                         error, nodes, depth, maxNodes, maxDepth,
+                                         [&](size_t i, nlohmann::json&& converted) { object[std::to_string(i)] = std::move(converted); });
+                if (!ok) return;
                 for (const auto& key : keys)
                 {
                     Result<Value> item = table.Get(key);

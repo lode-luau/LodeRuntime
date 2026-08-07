@@ -14,6 +14,8 @@ struct lua_State;
 namespace Lode
 {
 
+namespace Detail { struct PinnedRef; }
+
 /**
  * @brief Represents the execution status of a Coroutine (Thread).
  */
@@ -72,8 +74,7 @@ public:
     [[nodiscard]] lua_State* GetThreadState() const;
 
 private:
-    struct RefData;
-    std::shared_ptr<RefData> refData_;
+    std::shared_ptr<Detail::PinnedRef> refData_;
 };
 
 } // namespace Lode

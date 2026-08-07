@@ -330,17 +330,22 @@ Diagnostic Logger::ParseLuauError(std::string_view rawError, std::string_view de
     return diag;
 }
 
+// Maps a Luau source location to 1-based line/column and a caret length.
+static void ApplyLocation(Diagnostic& diag, const Luau::Location& loc)
+{
+    diag.line = loc.begin.line + 1;
+    diag.column = loc.begin.column + 1;
+
+    int beginCol = loc.begin.column;
+    int endCol = loc.end.column;
+    diag.length = (endCol > beginCol) ? (endCol - beginCol) : 1;
+}
+
 Diagnostic Logger::FromParseError(const Luau::ParseError& parseError, std::string_view filePath)
 {
     Diagnostic diag;
     diag.filePath = std::string(filePath);
-    diag.line = parseError.getLocation().begin.line + 1;
-    diag.column = parseError.getLocation().begin.column + 1;
-
-    int beginCol = parseError.getLocation().begin.column;
-    int endCol = parseError.getLocation().end.column;
-    diag.length = (endCol > beginCol) ? (endCol - beginCol) : 1;
-
+    ApplyLocation(diag, parseError.getLocation());
     diag.message = parseError.what();
     diag.code = "SyntaxError";
 
@@ -351,13 +356,7 @@ Diagnostic Logger::FromLintWarning(const Luau::LintWarning& lintWarning, std::st
 {
     Diagnostic diag;
     diag.filePath = std::string(filePath);
-    diag.line = lintWarning.location.begin.line + 1;
-    diag.column = lintWarning.location.begin.column + 1;
-
-    int beginCol = lintWarning.location.begin.column;
-    int endCol = lintWarning.location.end.column;
-    diag.length = (endCol > beginCol) ? (endCol - beginCol) : 1;
-
+    ApplyLocation(diag, lintWarning.location);
     diag.message = lintWarning.text;
     diag.code = std::string("Lint_") + Luau::LintWarning::getName(lintWarning.code);
 
@@ -385,12 +384,7 @@ Diagnostic Logger::FromTypeError(const Luau::TypeError& typeError, std::string_v
         }
     }
 
-    diag.line = loc.begin.line + 1;
-    diag.column = loc.begin.column + 1;
-
-    int beginCol = loc.begin.column;
-    int endCol = loc.end.column;
-    diag.length = (endCol > beginCol) ? (endCol - beginCol) : 1;
+    ApplyLocation(diag, loc);
 
     Luau::TypeErrorToStringOptions options;
     options.fileResolver = fileResolver;

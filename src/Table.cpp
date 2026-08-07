@@ -3,28 +3,12 @@
 #include "Lode/Table.hpp"
 #include "Lode/Metatable.hpp"
 #include "Lode/State.hpp"
+#include "PinnedRef.hpp"
 #include "lua.h"
 #include "lualib.h"
-#include "StateLifetime.hpp"
-#include <stdexcept>
 
 namespace Lode
 {
-
-struct Table::RefData
-{
-    lua_State* L = nullptr;
-    int refId = -1;
-    std::shared_ptr<Detail::StateLifetime> lifetime;
-
-    ~RefData()
-    {
-        if (L && lifetime && lifetime->alive.load() && refId != LUA_NOREF && refId != LUA_REFNIL)
-        {
-            lua_unref(L, refId);
-        }
-    }
-};
 
 Table::Table() = default;
 
@@ -32,10 +16,7 @@ Table::Table(lua_State* L, int index)
 {
     if (L && lua_istable(L, index))
     {
-        refData_ = std::make_shared<RefData>();
-        refData_->L = lua_mainthread(L);
-        refData_->lifetime = Detail::GetStateLifetime(L);
-        refData_->refId = lua_ref(L, index);
+        refData_ = std::make_shared<Detail::PinnedRef>(Detail::CaptureRef(L, index));
     }
 }
 
@@ -89,13 +70,8 @@ Result<Value> Table::Get(int key) const
 
 bool Table::Has(const std::string& key) const
 {
-    if (!refData_ || !refData_->L) return false;
-    lua_State* L = refData_->L;
-    lua_getref(L, refData_->refId);
-    lua_getfield(L, -1, key.c_str());
-    bool exists = !lua_isnil(L, -1);
-    lua_pop(L, 2);
-    return exists;
+    Result<Value> res = Get(key);
+    return res.IsOk() && !res.GetValue().IsNil();
 }
 
 size_t Table::Size() const
@@ -165,22 +141,10 @@ void Table::PushToLuaState(lua_State* L) const
     if (!L)
         return;
 
-    if (refData_ && refData_->L && refData_->refId != LUA_NOREF && refData_->refId != LUA_REFNIL)
-    {
-        if (lua_mainthread(L) != refData_->L)
-        {
-            lua_pushnil(L);
-            return;
-        }
-
-        lua_getref(refData_->L, refData_->refId);
-        if (L != refData_->L)
-            lua_xmove(refData_->L, L, 1);
-    }
+    if (refData_)
+        Detail::PushRef(L, *refData_);
     else
-    {
         lua_pushnil(L);
-    }
 }
 
 lua_State* Table::GetLuaState() const
