@@ -58,10 +58,13 @@ public:
      * @brief Attempts to extract a shared_ptr from a Value representing Userdata.
      * @param val The Value to unwrap.
      * @return The unwrapped shared_ptr, or nullptr.
+     * 
+     * A Value does not expose its captured state, so userdata can only be
+     * unwrapped through a live State (see the stack-index overload).
      */
     static std::shared_ptr<T> Unwrap(const Value& val)
     {
-        if (val.GetType() != ValueType::Userdata) return nullptr;
+        (void)val;
         return nullptr;
     }
 };

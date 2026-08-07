@@ -234,14 +234,7 @@ public:
 
         methodsTable_.Set("new", vm_.CreateFunction([meta, className](State& vm, const std::vector<Value>& args) -> Value {
             return GuardCall(vm, "constructor of " + className, [&]() -> Value {
-                auto instance = std::make_shared<T>();
-                using Holder = std::shared_ptr<T>;
-                void* userMemory = vm.CreateUserdata(sizeof(Holder), [](void* ptr) {
-                    static_cast<Holder*>(ptr)->~Holder();
-                });
-                new (userMemory) Holder(instance);
-
-                vm.SetUserdataMetatable(-1, meta);
+                ObjectWrap<T>::Wrap(vm, std::make_shared<T>(), meta);
                 return vm.GetValue(-1);
             });
         }));
@@ -262,13 +255,7 @@ public:
             return GuardCall(vm, "custom constructor of " + className, [&]() -> Value {
                 auto instance = factory(vm, args);
                 if (!instance) instance = std::make_shared<T>();
-                using Holder = std::shared_ptr<T>;
-                void* userMemory = vm.CreateUserdata(sizeof(Holder), [](void* ptr) {
-                    static_cast<Holder*>(ptr)->~Holder();
-                });
-                new (userMemory) Holder(instance);
-
-                vm.SetUserdataMetatable(-1, meta);
+                ObjectWrap<T>::Wrap(vm, instance, meta);
                 return vm.GetValue(-1);
             });
         }));
