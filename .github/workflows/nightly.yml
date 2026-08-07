@@ -18,11 +18,21 @@ jobs:
         id: version
         shell: bash
         run: |
+          # Nightly versioning is 0.1.0-nightly.YYYYMMDD.N (dot suffix).
+          # The counter also accounts for legacy 0.1.0-nightly.YYYYMMDD-N
+          # (dash suffix) tags so a same-day manual run continues from the
+          # last published number instead of restarting at .1.
           DATE_UTC=$(date -u +%Y%m%d)
-          COUNT=$(git ls-remote --tags origin "refs/tags/0.1.0-nightly.${DATE_UTC}-*" | wc -l)
-          N=$((COUNT + 1))
-          echo "version=0.1.0-nightly.${DATE_UTC}-${N}" >> "$GITHUB_OUTPUT"
-          echo "date=${DATE_UTC}" >> "$GITHUB_OUTPUT"
+          SUFFIXES=$(git ls-remote --tags origin \
+            "refs/tags/0.1.0-nightly.${DATE_UTC}-*" \
+            "refs/tags/0.1.0-nightly.${DATE_UTC}.*" \
+            | awk '{ ref = $2; sub(/refs\/tags\/0\.1\.0-nightly\.[0-9]+[-.]/, "", ref); if (ref ~ /^[0-9]+$/) print ref }')
+          MAX=0
+          for S in $SUFFIXES; do
+            [ "$S" -gt "$MAX" ] && MAX=$S
+          done
+          N=$((MAX + 1))
+          echo "version=0.1.0-nightly.${DATE_UTC}.${N}" >> "$GITHUB_OUTPUT"
 
       - name: Configure
         run: cmake -B build
