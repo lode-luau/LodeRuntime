@@ -1,10 +1,7 @@
 // Copyright (c) 2026 yanlvl99, Lode Runtime Contributors
 // SPDX-License-Identifier: MIT
 #include "Lode/Module.hpp"
-#include "NativeCallback.hpp"
-#include "LuaError.hpp"
 #include "lua.h"
-#include "lualib.h"
 #include <vector>
 
 namespace Lode
@@ -23,46 +20,8 @@ Exports::Exports(lua_State* L) : L_(L), exportsTable_()
 
 void Exports::Function(const std::string& name, const std::function<Value(State& vm, const std::vector<Value>& args)>& fn)
 {
-    struct ClosureData
-    {
-        std::function<Value(State& vm, const std::vector<Value>& args)> func;
-    };
-
-    auto cfunc = [](lua_State* L) -> int {
-        auto* data = static_cast<ClosureData*>(lua_touserdata(L, lua_upvalueindex(1)));
-        int top = lua_gettop(L);
-        std::vector<Value> args;
-        args.reserve(top);
-        for (int i = 1; i <= top; ++i)
-        {
-            args.push_back(Value::FromLuaState(L, i));
-        }
-
-        try
-        {
-            State vm(L);
-            Value result = data->func(vm, args);
-            if (lua_status(L) == LUA_YIELD)
-                return lua_yield(L, 0);
-            result.PushToLuaState(L);
-            return 1;
-        }
-        catch (const std::exception& error)
-        {
-            return RaiseCppException(L, "C++ native callback exception", error);
-        }
-        catch (...)
-        {
-            return RaiseCppException(L, "C++ native callback threw an unknown exception");
-        }
-    };
-
-    exportsTable_.PushToLuaState(L_);
-    auto* data = Detail::NewLuaOwnedCallbackData(L_, ClosureData{ fn });
-    (void)data;
-    lua_pushcclosure(L_, cfunc, name.c_str(), 1);
-    lua_setfield(L_, -2, name.c_str());
-    lua_pop(L_, 1);
+    State vm(L_);
+    exportsTable_.Set(name, vm.CreateFunction(fn));
 }
 
 void Exports::Function(const std::string& name, const std::function<Value()>& fn)
@@ -90,11 +49,7 @@ void Exports::Function(const std::string& name, const std::function<double(doubl
 
 void Exports::SetTable(const std::string& name, const Lode::Table& table)
 {
-    exportsTable_.Set(name, Value());
-    exportsTable_.PushToLuaState(L_);
-    table.PushToLuaState(L_);
-    lua_setfield(L_, -2, name.c_str());
-    lua_pop(L_, 1);
+    exportsTable_.Set(name, table);
 }
 
 void Exports::SetValue(const std::string& name, const Lode::Value& value)
