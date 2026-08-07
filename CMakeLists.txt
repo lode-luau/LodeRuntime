@@ -108,7 +108,6 @@ include_directories(
 )
 
 set(LODE_CORE_SOURCES
-    src/Error.cpp
     src/Value.cpp
     src/StackValue.cpp
     src/Vector.cpp
