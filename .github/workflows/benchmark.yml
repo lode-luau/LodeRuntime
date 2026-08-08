@@ -1,0 +1,85 @@
+name: benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      record-baseline:
+        description: >-
+          Record this run as the new CI baseline and commit
+          bench/results/ci-baseline.json (refresh after intentional changes).
+        type: boolean
+        default: false
+  pull_request:
+    paths:
+      - "bench/**"
+      - "src/**"
+      - "include/**"
+      - "CMakeLists.txt"
+      - ".github/workflows/benchmark.yml"
+  push:
+    branches: [main]
+    paths:
+      - "bench/**"
+      - "src/**"
+      - "include/**"
+      - "CMakeLists.txt"
+      - ".github/workflows/benchmark.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  benchmark:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Configure
+        run: cmake -B build -DLODE_BUILD_BENCH=ON
+
+      - name: Build Release
+        run: cmake --build build --config Release
+
+      # CI compares against its own committed baseline (bench/results/
+      # ci-baseline.json), never against local-machine numbers: the runner
+      # hardware is the public reference. The first run (or an explicit
+      # record-baseline dispatch) records the baseline instead of gating.
+      - name: Run benchmarks (self-test + measure + compare + save)
+        shell: pwsh
+        run: |
+          if ("${{ inputs.record-baseline }}" -eq "true") {
+            ./bench/run_bench.ps1 -Baseline bench/results/ci-baseline.json -RecordBaseline
+          } elseif (-not (Test-Path bench/results/ci-baseline.json)) {
+            ./bench/run_bench.ps1 -Baseline bench/results/ci-baseline.json -RecordBaseline
+          } else {
+            ./bench/run_bench.ps1 -Baseline bench/results/ci-baseline.json -FailOnRegression
+          }
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-results-${{ github.sha }}
+          path: bench/results/
+          if-no-files-found: error
+
+      - name: Commit refreshed CI baseline
+        if: github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        run: |
+          $modified = git status --porcelain -- bench/results/ci-baseline.json
+          if ($modified) {
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            # Re-attach to main: checkout with ref: main leaves a detached HEAD
+            # when the dispatch ran on the default branch SHA.
+            git checkout -B main
+            git add bench/results/ci-baseline.json
+            git commit -m "bench(ci): refresh CI baseline"
+            git push origin main
+            Write-Host "ci baseline committed"
+          } else {
+            Write-Host "ci baseline unchanged, nothing to commit"
+          }
