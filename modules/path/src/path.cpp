@@ -103,8 +103,11 @@ LODE_MODULE(vm)
         {
             p /= args[i].AsString();
         }
-        // Normalize
-        return Lode::Value(fs::weakly_canonical(p).string());
+        // Pure lexical normalization: collapses "." and ".." without touching
+        // the filesystem. weakly_canonical used to be applied here, which made
+        // every join perform per-component disk I/O (CreateFile +
+        // GetFinalPathNameByHandle per component on Windows).
+        return Lode::Value(p.lexically_normal().string());
     }));
 
     exports.Set("basename", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
