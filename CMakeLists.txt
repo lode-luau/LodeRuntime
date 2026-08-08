@@ -64,6 +64,8 @@ set(LUAU_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
 set(LUAU_BUILD_CLI      OFF CACHE BOOL "" FORCE)
 set(LUAU_BUILD_ANALYSIS OFF CACHE BOOL "" FORCE)
 
+option(LODE_BUILD_BENCH "Build the lode_bench benchmark harness (bench/)" OFF)
+
 FetchContent_Declare(
     luau
     GIT_REPOSITORY https://github.com/luau-lang/luau.git
@@ -189,6 +191,11 @@ add_executable(lode_runtime
 )
 
 target_link_libraries(lode_runtime PRIVATE LodeCore Luau.Compiler Luau.Ast Luau.Analysis)
+
+# Benchmark harness (opt-in: -DLODE_BUILD_BENCH=ON keeps the nightly build unchanged)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/bench/CMakeLists.txt")
+    add_subdirectory(bench)
+endif()
 
 # Add subdirectories for optional/test modules
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/temp/native_module/CMakeLists.txt")
