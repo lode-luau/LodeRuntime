@@ -27,24 +27,27 @@ static fs::path ResolveImpl(Lode::State& vm, const std::string& rawPathStr)
 
     if (!callerPath.empty())
     {
-        fs::path canonicalCaller = fs::weakly_canonical(callerPath);
-        if (fs::is_regular_file(canonicalCaller))
+        if (callerPath.is_absolute())
         {
-            if (canonicalCaller.filename() == "init.luau" || canonicalCaller.filename() == "init.lua")
-            {
-                currentPath = canonicalCaller.parent_path().parent_path();
-                packagePath = canonicalCaller.parent_path();
-            }
+            // Purely lexical caller detection: the runtime always loads
+            // modules with an "@<absolute path>" chunkname, so the caller's
+            // directory is known without touching the filesystem. The
+            // previous implementation canonicalized the caller path and
+            // stat()ed it on every call (per-component disk I/O on Windows).
+            packagePath = callerPath.parent_path();
+            if (callerPath.filename() == "init.luau" || callerPath.filename() == "init.lua")
+                currentPath = packagePath.parent_path();
             else
-            {
-                currentPath = canonicalCaller.parent_path();
-                packagePath = canonicalCaller.parent_path();
-            }
+                currentPath = packagePath;
         }
         else
         {
+            // Non-file caller (e.g. "=stdin"): fall back to the package root
+            // search. This path is cold; only the absolute case is hot.
             packagePath = Lode::FindLodeJson(callerPath);
             currentPath = callerPath.parent_path();
+            if (currentPath.empty())
+                currentPath = fs::current_path();
         }
     }
 
@@ -76,7 +79,7 @@ static fs::path ResolveImpl(Lode::State& vm, const std::string& rawPathStr)
         currentPath /= relPath;
     }
 
-    return fs::weakly_canonical(currentPath);
+    return currentPath.lexically_normal();
 }
 
 LODE_MODULE(vm)
@@ -93,7 +96,7 @@ LODE_MODULE(vm)
                 resolved /= args[i].AsString();
             }
         }
-        return Lode::Value(fs::weakly_canonical(resolved).string());
+        return Lode::Value(resolved.lexically_normal().string());
     }));
 
     exports.Set("join", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {

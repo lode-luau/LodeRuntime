@@ -48,8 +48,9 @@ return function(bench: any)
         json.stringify(parsed)
     end)
 
-    -- path.join is pure lexical since the weakly_canonical removal
-    -- (modules/path/src/path.cpp); path.resolve still canonicalizes.
+    -- path.join and path.resolve are pure lexical since the weakly_canonical
+    -- removals (modules/path/src/path.cpp): neither touches the filesystem,
+    -- so resolve costs one current_path syscall plus string normalization.
     bench("path_resolve", function()
         path.resolve("@self", "a", "b", "c.luau")
     end)

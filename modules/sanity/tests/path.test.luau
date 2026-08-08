@@ -1,9 +1,9 @@
 --!strict
 --!native
 
--- Regression tests for the native path module. In particular path.join must
--- stay lexical (no filesystem access): it used to call weakly_canonical,
--- which performed per-component disk I/O on every call.
+-- Regression tests for the native path module. Both path.join and
+-- path.resolve must stay lexical (no filesystem access): they used to call
+-- weakly_canonical, which performed per-component disk I/O on every call.
 
 local sanity = require("../init")
 local describe = sanity.describe
@@ -46,5 +46,39 @@ describe("path.join", function()
 
     it("returns an empty string when called with no arguments", function()
         expect(path.join()).toBe("")
+    end)
+end)
+
+describe("path.resolve", function()
+    it("returns an absolute path", function()
+        local n = norm(path.resolve("a", "b"))
+        expect(n:sub(1, 1) == "/" or n:sub(2, 2) == ":").toBe(true)
+    end)
+
+    it("resolves relative paths against the caller module directory", function()
+        -- path.test.luau lives in modules/sanity/tests
+        local n = norm(path.resolve("init"))
+        expect(n:find("modules/sanity/tests/init", 1, true) ~= nil).toBe(true)
+    end)
+
+    it("resolves @self to the caller module directory", function()
+        local n = norm(path.resolve("@self"))
+        expect(n:find("modules/sanity/tests", 1, true) ~= nil).toBe(true)
+    end)
+
+    it("collapses . and .. components lexically", function()
+        local base = norm(path.resolve("@self"))
+        expect(norm(path.resolve("@self", "a", "..", "b"))).toBe(base .. "/b")
+    end)
+
+    it("does not touch the filesystem for nonexistent paths", function()
+        local n = norm(path.resolve("@self", "__lode_nonexistent_dir__", "file.txt"))
+        expect(n:find("__lode_nonexistent_dir__", 1, true) ~= nil).toBe(true)
+    end)
+
+    it("replaces the base when a later argument is absolute", function()
+        local absBase = path.resolve("@self")
+        local n = norm(path.resolve("other", absBase, "w.txt"))
+        expect(n).toBe(norm(path.join(absBase, "w.txt")))
     end)
 end)
