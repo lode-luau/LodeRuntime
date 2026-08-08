@@ -10,6 +10,7 @@ obj/
 *.dylib
 *.lib
 *.a
+*.bin
 
 # Helper Scripts
 *.ps1
@@ -28,3 +29,16 @@ Thumbs.db
 # Dependencies
 deps/
 third_party/
+
+# Bench per-run outputs (history lives in CI artifacts; baseline.json is tracked)
+bench/results/bench-results-*.json
+
+# Bench scripts are tracked on purpose despite the global *.ps1 rule
+!bench/run_bench.ps1
+!bench/luau/cli_warm.ps1
+
+# Local (machine-specific) benchmark baseline — each machine records its own
+bench/results/local-baseline.json
+
+# Scratch file written by the fs_write_file benchmark scenario
+bench/results/fs_bench_tmp.bin

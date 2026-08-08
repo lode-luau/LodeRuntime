@@ -11,7 +11,7 @@ local describe = sanity.describe
 local it = sanity.it
 local expect = sanity.expect
 
-local task = require("../../../temp/task_module")
+local task = require("../../../modules/task")
 local http = require("../../http")
 
 describe("http", function()

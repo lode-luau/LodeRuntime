@@ -14,8 +14,8 @@
     prepend your runtime's own module names (e.g. "@lune/fs") to load from the
     runtime you are using instead of the bundled Lode modules.
 
-    NOTE: the `task` module currently lives in `temp/task_module` (not under
-    `modules/`). If it is moved to `modules/`, update the path below.
+    NOTE: the `task` module lives in `modules/task` (bundled with the other
+    Lode modules).
 ]]
 
 local function tryRequire(...: string): any
@@ -31,7 +31,7 @@ end
 
 local stdio = tryRequire("@stdio", "../../stdio")
 local fs = tryRequire("@filesystem", "../../filesystem")
-local task = tryRequire("@task", "../../../temp/task_module")
+local task = tryRequire("@task", "../../task")
 
 return {
     stdio = stdio,

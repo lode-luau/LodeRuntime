@@ -2,7 +2,7 @@
 --!native
 --!optimize 2
 
-local task = require("./task_module")
+local task = require("../task")
 
 -- Public interface types
 export type Connection = {
@@ -210,22 +210,22 @@ end
 function SignalMT:Public<T...>(): Signal<T...>
     local internal = self :: SignalInternal<T...>
     local proxy = {} :: Signal<T...>
-    
+
     --[[ Connects a callback to the signal. ]]
     function proxy:Connect(callback: (T...) -> ()): Connection
         return internal:Connect(callback) :: any
     end
-    
+
     --[[ Creates a connection that will only fire once. ]]
     function proxy:Once(callback: (T...) -> ()): Connection
         return internal:Once(callback) :: any
     end
-    
+
     --[[ Waits for the signal to fire and returns the arguments. ]]
     function proxy:Wait(timeout: number?): T...
         return internal:Wait(timeout)
     end
-    
+
     table.freeze(proxy)
     return proxy :: any
 end

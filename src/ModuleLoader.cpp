@@ -607,6 +607,34 @@ static ModuleLoadResult LoadModuleNoJump(lua_State* L, void* ctx, const char* pa
     }
 
     std::string modChunkName = "@" + scriptPath;
+    // A module loaded while a native module is initializing must resolve its
+    // own requires relative to itself, not to the native module that loaded
+    // it: _LODE_NATIVE_MODULE_PATH only applies to requires made directly by
+    // LodeModuleInit, so clear it while executing the loaded Luau module.
+    struct NativeModulePathScopedClear
+    {
+        lua_State* state;
+        std::string saved;
+        explicit NativeModulePathScopedClear(lua_State* L) : state(L)
+        {
+            lua_getfield(L, LUA_REGISTRYINDEX, "_LODE_NATIVE_MODULE_PATH");
+            if (lua_isstring(L, -1)) saved = lua_tostring(L, -1);
+            lua_pop(L, 1);
+            if (!saved.empty())
+            {
+                lua_pushnil(state);
+                lua_setfield(state, LUA_REGISTRYINDEX, "_LODE_NATIVE_MODULE_PATH");
+            }
+        }
+        ~NativeModulePathScopedClear()
+        {
+            if (!saved.empty())
+            {
+                lua_pushstring(state, saved.c_str());
+                lua_setfield(state, LUA_REGISTRYINDEX, "_LODE_NATIVE_MODULE_PATH");
+            }
+        }
+    } nativePathClear{L};
     auto execResult = vm.ExecuteBytecodeWithResults(bytecode, modChunkName);
 
     if (execResult.IsError())

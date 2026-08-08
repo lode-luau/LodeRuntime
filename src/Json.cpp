@@ -2,12 +2,18 @@
 // SPDX-License-Identifier: MIT
 #include "Lode/Json.hpp"
 
-#include "nlohmann/json.hpp"
+#include "rapidjson/error/en.h"
+#include "rapidjson/memorystream.h"
+#include "rapidjson/prettywriter.h"
+#include "rapidjson/reader.h"
+#include "rapidjson/stringbuffer.h"
+#include "rapidjson/writer.h"
 
-#include <cstdint>
 #include <cmath>
+#include <cstdint>
 #include <limits>
-#include <stdexcept>
+#include <string>
+#include <vector>
 
 namespace Lode
 {
@@ -15,54 +21,7 @@ namespace Lode
 namespace
 {
 
-std::string CleanMessage(const std::exception& e)
-{
-    std::string message = e.what();
-    const std::string prefix = "[json.exception.";
-    size_t start = message.find(prefix);
-    size_t end = start == std::string::npos ? std::string::npos : message.find("] ", start);
-    if (start != std::string::npos && end != std::string::npos && end + 2 <= message.size())
-        return message.substr(end + 2);
-    return message;
-}
-
-Value FromJson(State& vm, const nlohmann::json& json, size_t& nodes, size_t maxNodes)
-{
-    if (++nodes > maxNodes)
-        throw std::runtime_error("json exceeds the maximum number of elements");
-    switch (json.type())
-    {
-        case nlohmann::json::value_t::null:
-            return Value();
-        case nlohmann::json::value_t::boolean:
-            return Value(json.get<bool>());
-        case nlohmann::json::value_t::number_integer:
-            return Value(static_cast<double>(json.get<int64_t>()));
-        case nlohmann::json::value_t::number_unsigned:
-            return Value(static_cast<double>(json.get<uint64_t>()));
-        case nlohmann::json::value_t::number_float:
-            return Value(json.get<double>());
-        case nlohmann::json::value_t::string:
-            return Value(json.get<std::string>());
-        case nlohmann::json::value_t::array:
-        {
-            Table table = vm.CreateTable();
-            int index = 1;
-            for (const auto& item : json)
-                table.Set(index++, FromJson(vm, item, nodes, maxNodes));
-            return Value(table);
-        }
-        case nlohmann::json::value_t::object:
-        {
-            Table table = vm.CreateTable();
-            for (auto it = json.begin(); it != json.end(); ++it)
-                table.Set(it.key(), FromJson(vm, it.value(), nodes, maxNodes));
-            return Value(table);
-        }
-        default:
-            return Value();
-    }
-}
+using rapidjson::SizeType;
 
 std::string TypeName(ValueType type)
 {
@@ -84,22 +43,26 @@ std::string TypeName(ValueType type)
     return "unknown";
 }
 
-struct LimitedSax : nlohmann::json::json_sax_t
+// Handles rapidjson parse events and builds Lode values directly, skipping
+// the intermediate DOM (and the second conversion pass) that the previous
+// nlohmann SAX implementation produced.
+struct ValueHandler : rapidjson::BaseReaderHandler<rapidjson::UTF8<>, ValueHandler>
 {
-    using json = nlohmann::json;
-
+    State& vm;
     size_t maxDepth = 0;
     size_t maxNodes = 0;
     size_t depth = 0;
     size_t nodes = 0;
     bool failed = false;
     std::string error;
-    json root;
-    std::vector<json> stack;
+    Value root;
+    std::vector<Table> stack;
+    std::vector<bool> isArray;
+    std::vector<size_t> indexStack;
     std::vector<std::string> keyStack;
     std::string pendingKey;
 
-    LimitedSax(size_t maxDepth_, size_t maxNodes_) : maxDepth(maxDepth_), maxNodes(maxNodes_) {}
+    ValueHandler(State& vm_, size_t maxDepth_, size_t maxNodes_) : vm(vm_), maxDepth(maxDepth_), maxNodes(maxNodes_) {}
 
     bool CountNode()
     {
@@ -112,7 +75,25 @@ struct LimitedSax : nlohmann::json::json_sax_t
         return true;
     }
 
-    bool StartContainer(json&& container)
+    void Attach(const Value& value)
+    {
+        if (stack.empty())
+        {
+            root = value;
+            return;
+        }
+        if (isArray.back())
+        {
+            stack.back().Set(static_cast<int>(indexStack.back() + 1), value);
+            ++indexStack.back();
+        }
+        else
+        {
+            stack.back().Set(pendingKey, value);
+        }
+    }
+
+    bool StartContainer(bool array)
     {
         if (failed)
             return false;
@@ -125,7 +106,9 @@ struct LimitedSax : nlohmann::json::json_sax_t
         if (!CountNode())
             return false;
         ++depth;
-        stack.push_back(std::move(container));
+        stack.push_back(vm.CreateTable());
+        isArray.push_back(array);
+        indexStack.push_back(0);
         keyStack.push_back(pendingKey);
         return true;
     }
@@ -135,154 +118,115 @@ struct LimitedSax : nlohmann::json::json_sax_t
         if (failed)
             return false;
         --depth;
-        json child = std::move(stack.back());
+        Table child = stack.back();
         stack.pop_back();
+        isArray.pop_back();
+        indexStack.pop_back();
         std::string childKey = std::move(keyStack.back());
         keyStack.pop_back();
         if (stack.empty())
         {
-            root = std::move(child);
+            root = Value(child);
         }
-        else if (stack.back().is_array())
+        else if (isArray.back())
         {
-            stack.back().push_back(std::move(child));
+            stack.back().Set(static_cast<int>(indexStack.back() + 1), Value(child));
+            ++indexStack.back();
         }
         else
         {
-            stack.back()[childKey] = std::move(child);
+            stack.back().Set(childKey, Value(child));
         }
         return true;
     }
 
-    bool HandleValue(json&& value)
+    bool Scalar(const Value& value)
     {
         if (failed)
             return false;
         if (!CountNode())
             return false;
-        if (stack.empty())
-        {
-            root = std::move(value);
-        }
-        else if (stack.back().is_array())
-        {
-            stack.back().push_back(std::move(value));
-        }
-        else
-        {
-            stack.back()[pendingKey] = std::move(value);
-        }
+        Attach(value);
         return true;
     }
 
-    bool start_object(std::size_t) override { return StartContainer(json(json::value_t::object)); }
-    bool start_array(std::size_t) override { return StartContainer(json(json::value_t::array)); }
-    bool end_object() override { return EndContainer(); }
-    bool end_array() override { return EndContainer(); }
-    bool key(string_t& val) override
+    bool Null() { return Scalar(Value()); }
+    bool Bool(bool b) { return Scalar(Value(b)); }
+    bool Int(int i) { return Scalar(Value(static_cast<double>(i))); }
+    bool Uint(unsigned u) { return Scalar(Value(static_cast<double>(u))); }
+    bool Int64(int64_t i) { return Scalar(Value(static_cast<double>(i))); }
+    bool Uint64(uint64_t u) { return Scalar(Value(static_cast<double>(u))); }
+    bool Double(double d) { return Scalar(Value(d)); }
+    bool String(const Ch* str, SizeType length, bool /*copy*/) { return Scalar(Value(std::string(str, length))); }
+    bool Key(const Ch* str, SizeType length, bool /*copy*/)
     {
         if (failed)
             return false;
         if (!CountNode())
             return false;
-        pendingKey = val;
+        pendingKey.assign(str, length);
         return true;
     }
-    bool null() override { return HandleValue(json(nullptr)); }
-    bool boolean(bool val) override { return HandleValue(json(val)); }
-    bool number_integer(number_integer_t val) override { return HandleValue(json(val)); }
-    bool number_unsigned(number_unsigned_t val) override { return HandleValue(json(val)); }
-    bool number_float(number_float_t val, const string_t&) override { return HandleValue(json(val)); }
-    bool string(string_t& val) override { return HandleValue(json(val)); }
-    bool binary(binary_t&) override
-    {
-        failed = true;
-        error = "json binary values are not supported";
-        return false;
-    }
-    bool parse_error(std::size_t position, const std::string& token, const json::exception& ex) override
-    {
-        failed = true;
-        error = CleanMessage(ex);
-        (void)position;
-        (void)token;
-        return false;
-    }
+    bool StartObject() { return StartContainer(false); }
+    bool StartArray() { return StartContainer(true); }
+    bool EndObject(SizeType) { return EndContainer(); }
+    bool EndArray(SizeType) { return EndContainer(); }
 };
 
-void ToJson(const Value& value, nlohmann::json& out, std::string& error, size_t& nodes,
-            size_t& depth, size_t maxNodes, size_t maxDepth);
-
-// Converts the 1..size indexed range of a table, failing when a slot is
-// missing so the result is a dense array/object without holes.
-template <typename Sink>
-bool ConvertIndexed(const Table& table, size_t size, const char* holeError, std::string& error,
-                    size_t& nodes, size_t& depth, size_t maxNodes, size_t maxDepth, Sink&& sink)
-{
-    for (size_t i = 1; i <= size; ++i)
-    {
-        Result<Value> item = table.Get(static_cast<int>(i));
-        if (item.IsError() || item.GetValue().IsNil())
-        {
-            error = holeError;
-            return false;
-        }
-        nlohmann::json converted;
-        ToJson(item.GetValue(), converted, error, nodes, depth, maxNodes, maxDepth);
-        if (!error.empty())
-            return false;
-        sink(i, std::move(converted));
-    }
-    return true;
-}
-
-void ToJson(const Value& value, nlohmann::json& out, std::string& error, size_t& nodes,
-            size_t& depth, size_t maxNodes, size_t maxDepth)
+// Serializes a Lode value straight into a rapidjson Writer. No intermediate
+// DOM: the previous implementation converted the whole tree into nlohmann
+// objects first and only then dumped it.
+template <typename Writer>
+bool WriteValue(Writer& writer, const Value& value, std::string& error, size_t& nodes,
+                size_t& depth, size_t maxNodes, size_t maxDepth)
 {
     if (++nodes > maxNodes)
     {
         error = "json exceeds the maximum number of elements";
-        return;
+        return false;
     }
     if (depth >= maxDepth)
     {
         error = "json nesting exceeds the maximum allowed depth";
-        return;
+        return false;
     }
     switch (value.GetType())
     {
         case ValueType::Nil:
-            out = nullptr;
-            break;
+            writer.Null();
+            return true;
         case ValueType::Boolean:
-            out = value.AsBoolean();
-            break;
+            writer.Bool(value.AsBoolean());
+            return true;
         case ValueType::Integer:
-            out = value.AsInteger();
-            break;
+            writer.Int64(value.AsInteger());
+            return true;
         case ValueType::Number:
         {
             double number = value.AsNumber();
             if (!std::isfinite(number))
             {
                 error = "cannot encode non-finite number";
-                return;
+                return false;
             }
             if (number == std::floor(number) &&
                 number >= static_cast<double>(std::numeric_limits<int64_t>::min()) &&
                 number <= static_cast<double>(std::numeric_limits<int64_t>::max()))
             {
-                out = static_cast<int64_t>(number);
+                writer.Int64(static_cast<int64_t>(number));
             }
             else
             {
-                out = number;
+                writer.Double(number);
             }
-            break;
+            return true;
         }
         case ValueType::String:
-            out = value.AsString();
-            break;
+        {
+            std::string str = value.AsString();
+            writer.String(str.data(), static_cast<SizeType>(str.size()));
+            return true;
+        }
         case ValueType::Table:
         {
             Table table = value.AsTable();
@@ -291,39 +235,53 @@ void ToJson(const Value& value, nlohmann::json& out, std::string& error, size_t&
             ++depth;
             if (keys.empty() && size > 0)
             {
-                nlohmann::json array = nlohmann::json::array();
-                bool ok = ConvertIndexed(table, size, "table with holes cannot be encoded as a json array",
-                                         error, nodes, depth, maxNodes, maxDepth,
-                                         [&](size_t, nlohmann::json&& converted) { array.push_back(std::move(converted)); });
-                if (!ok) return;
-                out = std::move(array);
+                writer.StartArray();
+                for (size_t i = 1; i <= size; ++i)
+                {
+                    Result<Value> item = table.Get(static_cast<int>(i));
+                    if (item.IsError() || item.GetValue().IsNil())
+                    {
+                        error = "table with holes cannot be encoded as a json array";
+                        return false;
+                    }
+                    if (!WriteValue(writer, item.GetValue(), error, nodes, depth, maxNodes, maxDepth))
+                        return false;
+                }
+                writer.EndArray();
             }
             else
             {
-                nlohmann::json object = nlohmann::json::object();
-                bool ok = ConvertIndexed(table, size, "table with holes cannot be encoded as a json object",
-                                         error, nodes, depth, maxNodes, maxDepth,
-                                         [&](size_t i, nlohmann::json&& converted) { object[std::to_string(i)] = std::move(converted); });
-                if (!ok) return;
+                writer.StartObject();
+                for (size_t i = 1; i <= size; ++i)
+                {
+                    Result<Value> item = table.Get(static_cast<int>(i));
+                    if (item.IsError() || item.GetValue().IsNil())
+                    {
+                        error = "table with holes cannot be encoded as a json object";
+                        return false;
+                    }
+                    std::string key = std::to_string(i);
+                    writer.Key(key.data(), static_cast<SizeType>(key.size()));
+                    if (!WriteValue(writer, item.GetValue(), error, nodes, depth, maxNodes, maxDepth))
+                        return false;
+                }
                 for (const auto& key : keys)
                 {
                     Result<Value> item = table.Get(key);
                     if (item.IsError() || item.GetValue().IsNil())
                         continue;
-                    nlohmann::json converted;
-                    ToJson(item.GetValue(), converted, error, nodes, depth, maxNodes, maxDepth);
-                    if (!error.empty())
-                        return;
-                    object[key] = std::move(converted);
+                    writer.Key(key.data(), static_cast<SizeType>(key.size()));
+                    if (!WriteValue(writer, item.GetValue(), error, nodes, depth, maxNodes, maxDepth))
+                        return false;
                 }
-                out = std::move(object);
+                writer.EndObject();
             }
             --depth;
-            break;
+            return true;
         }
         default:
             error = "cannot encode value of type " + TypeName(value.GetType());
-            break;
+            return false;
     }
 }
 
@@ -331,36 +289,38 @@ void ToJson(const Value& value, nlohmann::json& out, std::string& error, size_t&
 
 Result<Value> Json::Parse(State& vm, const std::string& text, size_t maxDepth, size_t maxNodes)
 {
-    try
-    {
-        LimitedSax sax(maxDepth, maxNodes);
-        if (!nlohmann::json::sax_parse(text, &sax))
-        {
-            if (sax.failed)
-                return Error::Runtime(sax.error);
-            return Error::Runtime("json parse error");
-        }
-        if (sax.failed)
-            return Error::Runtime(sax.error);
-        size_t nodes = 0;
-        return Result<Value>(FromJson(vm, sax.root, nodes, maxNodes));
-    }
-    catch (const std::exception& e)
-    {
-        return Error::Runtime(CleanMessage(e));
-    }
+    ValueHandler handler(vm, maxDepth, maxNodes);
+    rapidjson::MemoryStream stream(text.data(), text.size());
+    rapidjson::Reader reader;
+    rapidjson::ParseResult result =
+        reader.Parse<rapidjson::kParseDefaultFlags | rapidjson::kParseValidateEncodingFlag>(stream, handler);
+    if (handler.failed)
+        return Error::Runtime(handler.error);
+    if (result.IsError())
+        return Error::Runtime(rapidjson::GetParseError_En(result.Code()));
+    return Result<Value>(std::move(handler.root));
 }
 
 Result<std::string> Json::Stringify(const Value& value, bool pretty, size_t maxDepth, size_t maxNodes)
 {
-    nlohmann::json document;
+    rapidjson::StringBuffer buffer;
     std::string error;
     size_t nodes = 0;
     size_t depth = 0;
-    ToJson(value, document, error, nodes, depth, maxNodes, maxDepth);
-    if (!error.empty())
-        return Error::Runtime(error);
-    return Result<std::string>(document.dump(pretty ? 4 : -1));
+    if (pretty)
+    {
+        rapidjson::PrettyWriter<rapidjson::StringBuffer> writer(buffer);
+        writer.SetIndent(' ', 4);
+        if (!WriteValue(writer, value, error, nodes, depth, maxNodes, maxDepth))
+            return Error::Runtime(error);
+    }
+    else
+    {
+        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+        if (!WriteValue(writer, value, error, nodes, depth, maxNodes, maxDepth))
+            return Error::Runtime(error);
+    }
+    return Result<std::string>(std::string(buffer.GetString(), buffer.GetSize()));
 }
 
 } // namespace Lode

@@ -60,12 +60,56 @@ jobs:
           New-Item -ItemType Directory -Force -Path $dist | Out-Null
           Copy-Item build/bin/Release/lode_runtime.exe $dist
           Copy-Item build/bin/Release/LodeCore.dll $dist
-          Copy-Item build/bin/Release/stdio.dll $dist
-          Copy-Item build/bin/Release/path.dll $dist
-          Copy-Item build/bin/Release/filesystem.dll $dist
-          Copy-Item build/bin/Release/http.dll $dist
-          Copy-Item build/bin/Release/json.dll $dist
           Copy-Item build/bin/Release/uv.dll $dist
+
+          # Modules are discovered automatically: any modules/<name> folder with
+          # a lode.json manifest is a package (native or pure-Luau). New modules
+          # get packaged without touching this workflow.
+          $shipped = @()
+          foreach ($m in (Get-ChildItem modules -Directory | Where-Object { Test-Path (Join-Path $_.FullName "lode.json") } | Select-Object -ExpandProperty Name)) {
+              $src = "modules/$m"
+              $dst = Join-Path $dist "modules/$m"
+              New-Item -ItemType Directory -Force -Path $dst | Out-Null
+              # Everything except build-time files and the libs/ tree (rebuilt
+              # below with only the shipped platform, windows/x64). src/ is
+              # excluded only for native modules (those with a CMakeLists.txt);
+              # pure-Luau modules keep their src/ (e.g. sanity's Reporter).
+              $excludes = @("CMakeLists.txt", "libs")
+              if (Test-Path "$src/CMakeLists.txt") { $excludes += "src" }
+              Copy-Item "$src/*" $dst -Recurse -Exclude $excludes
+              # Native modules: config-matched DLL next to the executable (the
+              # loader prefers the exe-dir copy, see ModuleLoader.cpp) plus the
+              # module's own libs/ entry from lode.json.
+              $nativeLib = "build/bin/Release/$m.dll"
+              if (Test-Path $nativeLib) {
+                  Copy-Item $nativeLib $dist
+                  $libDir = "$dst/libs/windows/x64"
+                  New-Item -ItemType Directory -Force -Path $libDir | Out-Null
+                  Copy-Item "$src/libs/windows/x64/$m.dll" $libDir
+              }
+              $shipped += $m
+          }
+
+          # Alias config so require("@name") resolves for every shipped module.
+          $aliasLines = foreach ($m in $shipped) { "            $m = `"modules/$m`"," }
+          $config = @"
+          return {
+              luau = {
+                  languagemode = "nonstrict",
+                  lint = {
+                      ["*"] = true,
+                      LocalUnused = false
+                  },
+                  linterrors = true,
+                  typeerrors = true,
+                  aliases = {
+          $($aliasLines -join "`n")
+                  }
+              }
+          }
+          "@
+          Set-Content -Path "$dist/.config.luau" -Value $config
+
           Copy-Item include/Lode $dist/Lode -Recurse
           Copy-Item LICENSE, README.md $dist
           Set-Content -Path "$dist/VERSION" -Value $ver

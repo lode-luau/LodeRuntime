@@ -1,5 +1,5 @@
-local task = require("./task_module")
-local signal = require("./signal_module")
+local task = require("../modules/task")
+local signal = require("../modules/signal")
 
 -- Helper para formatar e rodar testes de forma organizada
 local function runTest(name: string, testFn: () -> ())

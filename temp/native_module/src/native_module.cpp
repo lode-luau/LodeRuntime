@@ -244,8 +244,8 @@ LODE_MODULE(vm)
     exports.Set("sibling", Lode::Value(sibling));
 
     // --- Test 3: Native Signal Integration ---
-    // Loads temp/signal_module.luau, instantiates a Signal, and schedules a C++ task to fire it.
-    auto signalMod = vm.Require("./signal_module").AsTable();
+    // Loads modules/signal, instantiates a Signal, and schedules a C++ task to fire it.
+    auto signalMod = vm.Require("../../modules/signal").AsTable();
     auto mySignal = signalMod.CallFunctionSingle("new").GetValue().AsTable();
     
     // Expose the public interface of the signal so Luau can connect to it (but not Fire it directly)

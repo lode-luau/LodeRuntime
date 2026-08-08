@@ -12,8 +12,8 @@ return {
         aliases = {
             stdio = "modules/stdio",
             filesystem = "modules/filesystem",
-            task = "temp/task_module",
-            signal = "temp/signal_module",
+            task = "modules/task",
+            signal = "modules/signal",
             path = "modules/path",
             sanity = "modules/sanity",
             toml = "modules/toml",
