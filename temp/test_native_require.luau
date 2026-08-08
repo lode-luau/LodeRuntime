@@ -67,7 +67,7 @@ if type(onTick) == "table" and onTick.Connect then
     end)
     
     print("  Waiting 1 second for signal...")
-    local task = require("./task_module")
+    local task = require("../modules/task")
     task.wait(1.0)
     
     if fired then

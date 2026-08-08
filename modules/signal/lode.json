@@ -1,0 +1,10 @@
+{
+  "name": "signal",
+  "version": "1.0.0",
+  "description": "Lode signal module (observer pattern with Connect, Once, Wait)",
+  "author": "Lode Team",
+  "license": "MIT",
+  "dependencies": {
+    "task": "modules/task"
+  }
+}

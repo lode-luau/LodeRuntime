@@ -4,7 +4,7 @@ local sanity = require("../init")
 local describe = sanity.describe
 local it = sanity.it
 local expect = sanity.expect
-local task = require("../../../temp/task_module")
+local task = require("../../../modules/task")
 local fs = require("../../filesystem")
 local native = require("../../../temp/native_module")
 

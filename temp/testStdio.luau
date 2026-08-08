@@ -1,5 +1,5 @@
 local stdio = require("../modules/stdio")
-local task = require("./task_module")
+local task = require("../modules/task")
 
 local function sleep(s: number)
     task.wait(s)

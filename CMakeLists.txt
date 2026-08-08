@@ -195,8 +195,8 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/temp/native_module/CMakeLists.txt")
     add_subdirectory(temp/native_module)
 endif()
 
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/temp/task_module/CMakeLists.txt")
-    add_subdirectory(temp/task_module)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/modules/task/CMakeLists.txt")
+    add_subdirectory(modules/task)
 endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/temp/simd_module/CMakeLists.txt")
