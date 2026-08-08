@@ -9,13 +9,6 @@ on:
           bench/results/ci-baseline.json (refresh after intentional changes).
         type: boolean
         default: false
-  pull_request:
-    paths:
-      - "bench/**"
-      - "src/**"
-      - "include/**"
-      - "CMakeLists.txt"
-      - ".github/workflows/benchmark.yml"
   push:
     branches: [main]
     paths:

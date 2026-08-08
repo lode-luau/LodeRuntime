@@ -40,17 +40,17 @@ jobs:
       - name: Build Debug
         run: cmake --build build --config Debug
 
-      - name: Build Release
-        run: cmake --build build --config Release
-
       - name: Validate Debug (sanity suite)
         run: ./build/bin/Debug/lode_runtime.exe modules/sanity/run.luau
 
-      - name: Validate Release (sanity suite)
-        run: ./build/bin/Release/lode_runtime.exe modules/sanity/run.luau
-
       - name: Validate Debug (integration test)
         run: ./build/bin/Debug/lode_runtime.exe temp/test.luau
+
+      - name: Build Release
+        run: cmake --build build --config Release
+
+      - name: Validate Release (sanity suite)
+        run: ./build/bin/Release/lode_runtime.exe modules/sanity/run.luau
 
       - name: Package
         shell: pwsh
@@ -77,12 +77,10 @@ jobs:
               $excludes = @("CMakeLists.txt", "libs")
               if (Test-Path "$src/CMakeLists.txt") { $excludes += "src" }
               Copy-Item "$src/*" $dst -Recurse -Exclude $excludes
-              # Native modules: config-matched DLL next to the executable (the
-              # loader prefers the exe-dir copy, see ModuleLoader.cpp) plus the
+              # Native modules keep their config-matched DLL only in the
               # module's own libs/ entry from lode.json.
               $nativeLib = "build/bin/Release/$m.dll"
               if (Test-Path $nativeLib) {
-                  Copy-Item $nativeLib $dist
                   $libDir = "$dst/libs/windows/x64"
                   New-Item -ItemType Directory -Force -Path $libDir | Out-Null
                   Copy-Item "$src/libs/windows/x64/$m.dll" $libDir
