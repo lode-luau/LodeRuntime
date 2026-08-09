@@ -336,7 +336,7 @@ Diagnostic Logger::ParseLuauError(std::string_view rawError, std::string_view de
             {
                 secondLine = secondLine.substr(0, secondNewline);
             }
-            
+
             size_t tbColon = std::string::npos;
             for (size_t i = 0; i < secondLine.length(); ++i)
             {
@@ -346,7 +346,7 @@ Diagnostic Logger::ParseLuauError(std::string_view rawError, std::string_view de
                     break;
                 }
             }
-            
+
             if (tbColon != std::string::npos)
             {
                 diag.filePath = secondLine.substr(0, tbColon);
