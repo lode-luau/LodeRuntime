@@ -21,6 +21,8 @@ return {
             json = "modules/json",
             socket = "modules/socket",
             websocket = "modules/websocket",
+            tcp = "modules/tcp",
+            udp = "modules/udp",
         }
     }
 }
