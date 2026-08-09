@@ -8,7 +8,9 @@ add_library(socket SHARED
     src/socket.cpp
 )
 
-target_link_libraries(socket PRIVATE LodeCore)
+target_link_libraries(socket PRIVATE LodeCore tcp)
+target_include_directories(socket PRIVATE ../tcp/include)
+target_compile_definitions(socket PRIVATE NOMINMAX)
 
 if(MSVC)
     target_compile_options(socket PRIVATE $<$<NOT:$<CONFIG:Debug>>:/O1> /GR- /GL)
