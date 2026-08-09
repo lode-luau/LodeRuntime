@@ -59,22 +59,98 @@ print("")
 print("--- Test 4: Signal & Task Integration ---")
 local onTick = NativeMod.onTick
 if type(onTick) == "table" and onTick.Connect then
-    print("  PASS: onTick signal exposed")
-    local fired = false
-    onTick:Connect(function(message)
-        print("  SIGNAL FIRED! Message:", message)
-        fired = true
-    end)
-    
-    print("  Waiting 1 second for signal...")
-    local task = require("../modules/task")
-    task.wait(1.0)
-    
-    if fired then
-        print("  PASS: Signal was successfully fired by native module delayed task")
-    else
-        print("  FAIL: Signal was not fired in time")
-    end
+    print("  PASS: onTick signal exposed as table")
+else
+    print("  FAIL: onTick signal was nil or wrong type (got", type(onTick), ")")
+end
+
+-- 4a: the proxy must be read-only (equivalent to table.freeze from Public())
+local writeOk = pcall(function()
+    onTick.Fire = function() end
+end)
+print("  write onTick.Fire blocked:", not writeOk)
+local rawOk = pcall(function()
+    rawset(onTick, "Fire", function() end)
+end)
+print("  rawset onTick.Fire blocked:", not rawOk)
+print("  onTick.Fire is nil (no Fire on proxy):", onTick.Fire == nil)
+
+-- 4b: Connect + Connected + connection read-only protection
+local connectFired = false
+local conn = onTick:Connect(function(message)
+    print("  SIGNAL FIRED! Message:", message)
+    connectFired = true
+end)
+print("  type(conn) =", type(conn))
+print("  conn.Connected initially:", conn.Connected)
+local connWriteOk = pcall(function()
+    conn.Connected = false
+end)
+print("  write conn.Connected blocked:", not connWriteOk)
+local connNewOk = pcall(function()
+    conn.Foo = 1
+end)
+print("  write conn.Foo blocked:", not connNewOk)
+print("  getmetatable(conn) protected:", getmetatable(conn) == "connection")
+local setMetaOk = pcall(function()
+    setmetatable(conn, {})
+end)
+print("  setmetatable(conn) blocked:", not setMetaOk)
+
+NativeMod.fireOnTick("connect check")
+print("  connect callback fired:", connectFired)
+print("  conn.Connected after Fire (regular Connect):", conn.Connected)
+
+-- 4c: Once fires only once
+local onceCount = 0
+local onceConn = onTick:Once(function()
+    onceCount = onceCount + 1
+end)
+NativeMod.fireOnTick("once 1")
+NativeMod.fireOnTick("once 2")
+print("  Once fired exactly once:", onceCount == 1)
+print("  onceConn.Connected after fire:", onceConn.Connected)
+
+-- 4d: Disconnect stops the callback and flips Connected
+local disconnectFired = false
+local dConn = onTick:Connect(function()
+    disconnectFired = true
+end)
+dConn:Disconnect()
+NativeMod.fireOnTick("after disconnect")
+print("  Disconnect stopped callback:", not disconnectFired)
+print("  dConn.Connected after Disconnect:", dConn.Connected)
+
+-- 4e: Wait resumes with the fire arguments
+local task = require("../modules/task")
+local waitedArgs = nil
+task.spawn(function()
+    waitedArgs = { onTick:Wait(2) }
+end)
+NativeMod.fireOnTick("wait payload")
+task.wait(0.05)
+print("  Wait returned fire args:", waitedArgs ~= nil and waitedArgs[1] == "wait payload" and #waitedArgs == 1)
+
+-- 4f: Wait times out and returns nil
+local timedOut = false
+task.spawn(function()
+    timedOut = (onTick:Wait(0.05) == nil)
+end)
+task.wait(0.2)
+print("  Wait timed out with nil:", timedOut)
+
+-- 4g: the native delayed task fires the signal after 0.5s
+local autoFired = false
+onTick:Connect(function(message)
+    print("  AUTO SIGNAL FIRED! Message:", message)
+    autoFired = true
+end)
+print("  Waiting 1 second for native delayed signal...")
+task.wait(1.0)
+if autoFired then
+    print("  PASS: Signal was successfully fired by native module delayed task")
+else
+    print("  FAIL: Signal was not fired in time")
 end
 
 -- Test 5: Overhead Benchmarks
