@@ -244,6 +244,10 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/modules/http/CMakeLists.txt")
     add_subdirectory(modules/http)
 endif()
 
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/modules/tcp/CMakeLists.txt")
+    add_subdirectory(modules/tcp)
+endif()
+
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/modules/socket/CMakeLists.txt")
     add_subdirectory(modules/socket)
 endif()
@@ -254,4 +258,8 @@ endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/modules/json/CMakeLists.txt")
     add_subdirectory(modules/json)
+endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/modules/udp/CMakeLists.txt")
+    add_subdirectory(modules/udp)
 endif()
