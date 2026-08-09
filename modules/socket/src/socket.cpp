@@ -1142,7 +1142,7 @@ Lode::Table BuildClientMethods(Lode::State& vm, const std::shared_ptr<SocketMana
         auto self = Lode::ObjectWrap<TcpClient>::Unwrap(vm2, 1);
         if (!self)
             return Lode::Value(false);
-        return Lode::Value(self->connected && !self->closed);
+        return Lode::Value(self->connected && !self->closing && !self->closed);
     }));
 
     m.Set("LocalAddress", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
