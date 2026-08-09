@@ -20,6 +20,7 @@ return {
             http = "modules/http",
             json = "modules/json",
             socket = "modules/socket",
+            websocket = "modules/websocket",
         }
     }
 }

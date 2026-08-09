@@ -248,6 +248,10 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/modules/socket/CMakeLists.txt")
     add_subdirectory(modules/socket)
 endif()
 
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/modules/websocket/CMakeLists.txt")
+    add_subdirectory(modules/websocket)
+endif()
+
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/modules/json/CMakeLists.txt")
     add_subdirectory(modules/json)
 endif()
