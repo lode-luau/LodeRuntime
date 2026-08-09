@@ -19,6 +19,7 @@ return {
             toml = "modules/toml",
             http = "modules/http",
             json = "modules/json",
+            socket = "modules/socket",
         }
     }
 }

@@ -189,8 +189,11 @@ Result<int> State::ExecuteBytecodeWithResults(std::string_view bytecode, std::st
     int resStatus = lua_resume(co, nullptr, 0);
     if (resStatus != LUA_OK && resStatus != LUA_YIELD)
     {
+        const char* msg = lua_tostring(co, -1);
+        lua_rawcheckstack(co, 2);
+        luaL_traceback(co, co, msg, 1);
         std::string errStr = LuaErrorMessage(co, -1);
-        lua_pop(co, 1);
+        lua_pop(co, 2);
         lua_unref(L_, coRef);
         return Error::Runtime("Execution failed: " + errStr);
     }
@@ -317,6 +320,14 @@ void State::SetUserdataMetatable(int index, const Table& metatable)
     if (!L_) return;
     metatable.PushToLuaState(L_);
     lua_setmetatable(L_, index < 0 ? index - 1 : index);
+}
+
+void State::FreezeTable(const Table& table)
+{
+    if (!L_ || !table.GetLuaState()) return;
+    table.PushToLuaState(L_);
+    lua_setreadonly(L_, -1, true);
+    Pop(1);
 }
 
 void State::SetUserdataGC(const Table& metatable, void(*destructor)(void* ptr))

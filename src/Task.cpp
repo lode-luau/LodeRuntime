@@ -120,6 +120,7 @@ static void OnTimerFired(uv_timer_t* handle)
                     data->coroutine.GetThreadState() == data->ctx->mainThread)
                 {
                     data->ctx->mainThreadError = res.GetError().ErrorMessage();
+                    uv_stop(handle->loop);
                 }
                 else
                 {
@@ -395,7 +396,11 @@ bool Task::IsMainThread(State& vm, lua_State* L)
 void Task::SetMainThreadError(State& vm, std::string message)
 {
     TaskContext* ctx = GetOrCreateContext(vm.GetMainThread());
-    if (ctx) ctx->mainThreadError = std::move(message);
+    if (ctx)
+    {
+        ctx->mainThreadError = std::move(message);
+        uv_stop(vm.GetEventLoop().GetUVLoop());
+    }
 }
 
 } // namespace Lode

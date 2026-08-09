@@ -246,18 +246,26 @@ Diagnostic Logger::ParseLuauError(std::string_view rawError, std::string_view de
     // Strip common Lode/Luau error prefixes
     const std::vector<std::string> prefixes = {
         "Bytecode load failed: ",
-        "Execution failed: "
+        "Execution failed: ",
+        "C++ callback exception: ",
+        "Coroutine execution error: "
     };
 
-    for (const auto& prefix : prefixes)
+    bool stripped;
+    do
     {
-        size_t p = errStr.find(prefix);
-        if (p != std::string::npos)
+        stripped = false;
+        for (const auto& prefix : prefixes)
         {
-            errStr = errStr.substr(p + prefix.length());
-            break;
+            size_t p = errStr.find(prefix);
+            if (p != std::string::npos)
+            {
+                errStr = errStr.substr(p + prefix.length());
+                stripped = true;
+                break; // break the inner loop to restart checking from the new beginning
+            }
         }
-    }
+    } while (stripped);
 
     // If the error starts with ':' (e.g. ":1: Expected..."), prepend the file path
     if (errStr.rfind(":", 0) == 0 && !diag.filePath.empty())
@@ -265,59 +273,95 @@ Diagnostic Logger::ParseLuauError(std::string_view rawError, std::string_view de
         errStr = diag.filePath + errStr;
     }
 
-    // Match the pattern: <file_path>:<line>: <message>
-    // or:                <file_path>:<line>:<column>: <message>
+    size_t firstNewline = errStr.find('\n');
+    std::string firstLine = (firstNewline != std::string::npos) ? errStr.substr(0, firstNewline) : errStr;
+
     size_t lineColon = std::string::npos;
-    for (size_t i = 0; i < errStr.length(); ++i)
+    for (size_t i = 0; i < firstLine.length(); ++i)
     {
-        if (errStr[i] == ':' && i + 1 < errStr.length() && std::isdigit(errStr[i + 1]))
+        if (firstLine[i] == ':' && i + 1 < firstLine.length() && std::isdigit(firstLine[i + 1]))
         {
             lineColon = i;
             break;
         }
     }
 
+    bool parsedFromFirstLine = false;
     if (lineColon != std::string::npos)
     {
-        if (lineColon > 0)
-        {
-            diag.filePath = errStr.substr(0, lineColon);
-        }
-
-        size_t nextColon = errStr.find(':', lineColon + 1);
+        size_t nextColon = firstLine.find(':', lineColon + 1);
         if (nextColon != std::string::npos)
         {
-            std::string lineStr = errStr.substr(lineColon + 1, nextColon - lineColon - 1);
+            diag.filePath = firstLine.substr(0, lineColon);
+            std::string lineStr = firstLine.substr(lineColon + 1, nextColon - lineColon - 1);
             try
             {
                 diag.line = std::stoi(lineStr);
-
-                // Check whether a column number follows (e.g. :1:15: msg)
-                size_t msgColon = errStr.find(':', nextColon + 1);
-                if (msgColon != std::string::npos && std::isdigit(errStr[nextColon + 1]))
+                size_t msgColon = firstLine.find(':', nextColon + 1);
+                if (msgColon != std::string::npos && std::isdigit(firstLine[nextColon + 1]))
                 {
-                    std::string colStr = errStr.substr(nextColon + 1, msgColon - nextColon - 1);
+                    std::string colStr = firstLine.substr(nextColon + 1, msgColon - nextColon - 1);
                     diag.column = std::stoi(colStr);
+                    // The rest of the whole error string (not just first line)
                     diag.message = errStr.substr(msgColon + 1);
+                    // Trim leading spaces from message
+                    size_t firstNonSpace = diag.message.find_first_not_of(" \t");
+                    if (firstNonSpace != std::string::npos)
+                        diag.message = diag.message.substr(firstNonSpace);
                 }
                 else
                 {
                     diag.message = errStr.substr(nextColon + 1);
+                    size_t firstNonSpace = diag.message.find_first_not_of(" \t");
+                    if (firstNonSpace != std::string::npos)
+                        diag.message = diag.message.substr(firstNonSpace);
                 }
+                parsedFromFirstLine = true;
             }
             catch (...)
             {
-                diag.message = errStr;
             }
         }
-        else
-        {
-            diag.message = errStr;
-        }
     }
-    else
+
+    if (!parsedFromFirstLine)
     {
         diag.message = errStr;
+        // Search subsequent lines for a traceback
+        if (firstNewline != std::string::npos)
+        {
+            std::string secondLine = errStr.substr(firstNewline + 1);
+            size_t secondNewline = secondLine.find('\n');
+            if (secondNewline != std::string::npos)
+            {
+                secondLine = secondLine.substr(0, secondNewline);
+            }
+            
+            size_t tbColon = std::string::npos;
+            for (size_t i = 0; i < secondLine.length(); ++i)
+            {
+                if (secondLine[i] == ':' && i + 1 < secondLine.length() && std::isdigit(secondLine[i + 1]))
+                {
+                    tbColon = i;
+                    break;
+                }
+            }
+            
+            if (tbColon != std::string::npos)
+            {
+                diag.filePath = secondLine.substr(0, tbColon);
+                // line might be followed by space (e.g. `:20 function`)
+                size_t spaceAfterLine = secondLine.find(' ', tbColon + 1);
+                std::string lineStr = secondLine.substr(tbColon + 1, spaceAfterLine - tbColon - 1);
+                try
+                {
+                    diag.line = std::stoi(lineStr);
+                }
+                catch (...)
+                {
+                }
+            }
+        }
     }
 
     // Strip leading whitespace from the message
