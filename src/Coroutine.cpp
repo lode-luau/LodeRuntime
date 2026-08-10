@@ -5,6 +5,7 @@
 #include "LuaError.hpp"
 #include "PinnedRef.hpp"
 #include "lua.h"
+#include "lualib.h"
 #include "lstate.h"
 
 namespace Lode
@@ -34,8 +35,11 @@ namespace
     {
         if (resumeStatus != LUA_OK && resumeStatus != LUA_YIELD)
         {
+            const char* msg = lua_tostring(co, -1);
+            lua_rawcheckstack(co, 2);
+            luaL_traceback(co, co, msg, 1);
             std::string errStr = LuaErrorMessage(co, -1);
-            lua_pop(co, 1);
+            lua_pop(co, 2);
             return Error::Runtime("Coroutine execution error: " + errStr);
         }
 

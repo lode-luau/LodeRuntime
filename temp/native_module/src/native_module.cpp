@@ -6,6 +6,7 @@
 #include "Lode/Task.hpp"
 #include "Lode/Metatable.hpp"
 #include "Lode/ClassBuilder.hpp"
+#include "Lode/Signal.hpp"
 #include <cstring>
 #include <string>
 #include <cmath>
@@ -244,16 +245,28 @@ LODE_MODULE(vm)
     exports.Set("sibling", Lode::Value(sibling));
 
     // --- Test 3: Native Signal Integration ---
-    // Loads modules/signal, instantiates a Signal, and schedules a C++ task to fire it.
-    auto signalMod = vm.Require("../../modules/signal").AsTable();
-    auto mySignal = signalMod.CallFunctionSingle("new").GetValue().AsTable();
-    
-    // Expose the public interface of the signal so Luau can connect to it (but not Fire it directly)
-    exports.Set("onTick", mySignal.CallMethodSingle("Public").GetValue());
+    // Creates a Lode::Signal from C++ and exposes only its read-only public
+    // proxy to Luau. Luau can Connect/Once/Wait but never Fire.
+    auto onTickSignal = Lode::Signal::Create(vm);
 
-    // Schedule a native delay task to fire this signal after 0.5 seconds
-    Lode::Value fireMethod = mySignal.Get("Fire").GetValue();
-    Lode::Task::Delay(vm, 0.5, fireMethod, { Lode::Value(mySignal), Lode::Value("Ticked from native C++ after 0.5s!") });
+    // Public proxy: a frozen table with Connect/Once/Wait (equivalent to
+    // modules/signal's Public()), so type(onTick) == "table".
+    exports.Set("onTick", onTickSignal->CreatePublic());
+
+    // Fires the signal immediately with the given message. Exposed to Luau so
+    // the test can exercise Connect/Once/Disconnect/Wait deterministically.
+    exports.Set("fireOnTick", vm.CreateFunction([onTickSignal](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+        std::string message = (args.size() > 0 && args[0].IsString()) ? args[0].AsString() : "Ticked from native C++!";
+        onTickSignal->Fire({ Lode::Value(message) });
+        return Lode::Value();
+    }));
+
+    // Schedule a native delay task to fire the signal once after 0.5 seconds.
+    Lode::Value delayedFire = vm.CreateFunction([onTickSignal](Lode::State&, const std::vector<Lode::Value>&) -> Lode::Value {
+        onTickSignal->Fire({ Lode::Value(std::string("Ticked from native C++ after 0.5s!")) });
+        return Lode::Value();
+    });
+    Lode::Task::Delay(vm, 0.5, delayedFire);
 
     // 2. Class Binding: Vector3
     Lode::ClassBuilder<Vector3> vec3Builder(vm, "Vector3");

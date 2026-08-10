@@ -35,8 +35,16 @@ public:
      */
     static lua_CompileOptions ParseOptionsFromSource(std::string_view source, std::string_view filePath = "");
 
-    /** 
+    /**
      * @brief Compiles source code to a Luau bytecode string.
+     *
+     * @note Luau's bytecode compiler (`luau_compile`) parses source hotcomments
+     * (e.g. `--!native`, `--!optimize`) internally. If it detects `--!native`, it will
+     * forcefully override the provided `lua_CompileOptions` to enable aggressive
+     * inlining (`optimizationLevel = max(..., 1)` and `typeInfoLevel = 1`).
+     * This inlining can destroy local function stack frames, truncating `debug.traceback()`.
+     * To get a full traceback in the interpreter, remove `--!native` from the script.
+     *
      * @param source The Luau source code.
      * @param options Custom compilation options (if null, options are parsed from source).
      * @param filePath Optional file path for context.

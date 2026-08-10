@@ -1,0 +1,76 @@
+--!strict
+--!native
+
+local sanity = require("../init")
+local describe = sanity.describe
+local it = sanity.it
+local expect = sanity.expect
+
+local udp = require("../../udp")
+
+describe("udp", function()
+    it("exposes the UdpSocket class", function()
+        expect(typeof(udp.UdpSocket)).toBe("table")
+        expect(typeof(udp.UdpSocket.Create)).toBe("function")
+    end)
+
+    it("rejects Bind on an invalid host", function()
+        local ok, err = pcall(function()
+            udp.UdpSocket:Create():Bind("not an ip address", 12345)
+        end)
+        expect(ok).toBe(false)
+        local msg = tostring(err)
+        expect(msg:find("IPv4 or IPv6 address", 1, true) ~= nil).toBe(true)
+    end)
+
+    it("rejects Bind with invalid port", function()
+        local ok, err = pcall(function()
+            udp.UdpSocket:Create():Bind("127.0.0.1", -1)
+        end)
+        expect(ok).toBe(false)
+        local msg = tostring(err)
+        expect(msg:find("port must be an integer", 1, true) ~= nil).toBe(true)
+    end)
+
+    it("rejects Send on unbound socket", function()
+        local ok, err = pcall(function()
+            udp.UdpSocket:Create():Send("hello", "127.0.0.1", 12345)
+        end)
+        expect(ok).toBe(false)
+        local msg = tostring(err)
+        expect(msg:find("not bound", 1, true) ~= nil).toBe(true)
+    end)
+
+    it("rejects LocalAddress on unbound socket", function()
+        local ok, err = pcall(function()
+            udp.UdpSocket:Create():LocalAddress()
+        end)
+        expect(ok).toBe(false)
+        local msg = tostring(err)
+        expect(msg:find("not bound", 1, true) ~= nil).toBe(true)
+    end)
+
+    it("rejects Send with non-string/buffer data", function()
+        local s = udp.UdpSocket:Create()
+        s:Bind("127.0.0.1", 0)
+        local ok, err = pcall(function()
+            s:Send(123 :: any, "127.0.0.1", 12345)
+        end)
+        s:Close()
+        expect(ok).toBe(false)
+        local msg = tostring(err)
+        expect(msg:find("data must be a string or buffer", 1, true) ~= nil).toBe(true)
+    end)
+    
+    it("rejects Send with invalid destination host", function()
+        local s = udp.UdpSocket:Create()
+        s:Bind("127.0.0.1", 0)
+        local ok, err = pcall(function()
+            s:Send("hello", "not an ip", 12345)
+        end)
+        s:Close()
+        expect(ok).toBe(false)
+        local msg = tostring(err)
+        expect(msg:find("IPv4 or IPv6 address", 1, true) ~= nil).toBe(true)
+    end)
+end)

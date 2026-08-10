@@ -1,0 +1,72 @@
+--!strict
+--!native
+
+local sanity = require("../init")
+local describe = sanity.describe
+local it = sanity.it
+local expect = sanity.expect
+
+local tcp = require("../../tcp")
+
+describe("tcp", function()
+    it("exposes the TcpSocket and Server classes", function()
+        expect(typeof(tcp.TcpSocket)).toBe("table")
+        expect(typeof(tcp.Server)).toBe("table")
+        expect(typeof(tcp.TcpSocket.Create)).toBe("function")
+        expect(typeof(tcp.Server.Create)).toBe("function")
+    end)
+
+    it("rejects an invalid host", function()
+        local ok, err = pcall(function()
+            tcp.TcpSocket:Create():Connect("not an ip address", 12345)
+        end)
+        expect(ok).toBe(false)
+        local msg = tostring(err)
+        expect(msg:find("dns:", 1, true) ~= nil).toBe(true)
+    end)
+
+    it("rejects an invalid port", function()
+        local ok, err = pcall(function()
+            tcp.TcpSocket:Create():Connect("127.0.0.1", -1)
+        end)
+        expect(ok).toBe(false)
+        local msg = tostring(err)
+        expect(msg:find("port must be an integer", 1, true) ~= nil).toBe(true)
+    end)
+
+    it("rejects non-string host", function()
+        local ok, err = pcall(function()
+            tcp.TcpSocket:Create():Connect(123 :: any, 12345)
+        end)
+        expect(ok).toBe(false)
+        local msg = tostring(err)
+        expect(msg:find("host must be a string", 1, true) ~= nil).toBe(true)
+    end)
+
+    it("fails with connection refused on unreachable port", function()
+        local ok, err = pcall(function()
+            tcp.TcpSocket:Create():Connect("127.0.0.1", 1)
+        end)
+        expect(ok).toBe(false)
+        local msg = tostring(err)
+        expect(msg:find("connection refused", 1, true) ~= nil).toBe(true)
+    end)
+
+    it("rejects a server on an invalid host", function()
+        local ok, err = pcall(function()
+            tcp.Server:Create():Listen(0, "not an ip address")
+        end)
+        expect(ok).toBe(false)
+        local msg = tostring(err)
+        expect(msg:find("IPv4 or IPv6 address", 1, true) ~= nil).toBe(true)
+    end)
+    
+    it("rejects sending on unconnected socket", function()
+        local ok, err = pcall(function()
+            tcp.TcpSocket:Create():Send("hello")
+        end)
+        expect(ok).toBe(false)
+        local msg = tostring(err)
+        expect(msg:find("not connected", 1, true) ~= nil).toBe(true)
+    end)
+end)

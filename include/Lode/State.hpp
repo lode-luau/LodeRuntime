@@ -146,6 +146,9 @@ public:
     /** @deprecated Luau metatables do not run __gc; pass a destructor to CreateUserdata instead. */
     void SetUserdataGC(const Table& metatable, void(*destructor)(void* ptr));
 
+    /** @brief Marks a table as read-only (frozen) so Luau cannot modify it. */
+    void FreezeTable(const Table& table);
+
     /**
      * @brief Yields the current executing Luau coroutine.
      * 

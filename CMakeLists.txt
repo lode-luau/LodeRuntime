@@ -132,6 +132,7 @@ set(LODE_CORE_SOURCES
     src/Buffer.cpp
     src/Table.cpp
     src/Coroutine.cpp
+    src/Signal.cpp
     src/Metatable.cpp
     src/EventLoop.cpp
     src/Task.cpp
@@ -161,6 +162,7 @@ set(LODE_CORE_HEADERS
     include/Lode/Buffer.hpp
     include/Lode/Table.hpp
     include/Lode/Metatable.hpp
+    include/Lode/Signal.hpp
     include/Lode/ObjectWrap.hpp
     include/Lode/ClassBuilder.hpp
     include/Lode/EventLoop.hpp
@@ -242,6 +244,22 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/modules/http/CMakeLists.txt")
     add_subdirectory(modules/http)
 endif()
 
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/modules/tcp/CMakeLists.txt")
+    add_subdirectory(modules/tcp)
+endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/modules/socket/CMakeLists.txt")
+    add_subdirectory(modules/socket)
+endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/modules/websocket/CMakeLists.txt")
+    add_subdirectory(modules/websocket)
+endif()
+
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/modules/json/CMakeLists.txt")
     add_subdirectory(modules/json)
+endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/modules/udp/CMakeLists.txt")
+    add_subdirectory(modules/udp)
 endif()
