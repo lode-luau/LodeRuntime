@@ -220,46 +220,12 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/temp/native_module/CMakeLists.txt")
     add_subdirectory(temp/native_module)
 endif()
 
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/modules/task/CMakeLists.txt")
-    add_subdirectory(modules/task)
+# All native modules under modules/ are aggregated by modules/CMakeLists.txt,
+# which globs for CMakeLists.txt files so new modules need no top-level edit.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/modules/CMakeLists.txt")
+    add_subdirectory(modules)
 endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/temp/simd_module/CMakeLists.txt")
     add_subdirectory(temp/simd_module)
-endif()
-
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/modules/stdio/CMakeLists.txt")
-    add_subdirectory(modules/stdio)
-endif()
-
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/modules/path/CMakeLists.txt")
-    add_subdirectory(modules/path)
-endif()
-
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/modules/filesystem/CMakeLists.txt")
-    add_subdirectory(modules/filesystem)
-endif()
-
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/modules/http/CMakeLists.txt")
-    add_subdirectory(modules/http)
-endif()
-
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/modules/tcp/CMakeLists.txt")
-    add_subdirectory(modules/tcp)
-endif()
-
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/modules/socket/CMakeLists.txt")
-    add_subdirectory(modules/socket)
-endif()
-
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/modules/websocket/CMakeLists.txt")
-    add_subdirectory(modules/websocket)
-endif()
-
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/modules/json/CMakeLists.txt")
-    add_subdirectory(modules/json)
-endif()
-
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/modules/udp/CMakeLists.txt")
-    add_subdirectory(modules/udp)
 endif()
