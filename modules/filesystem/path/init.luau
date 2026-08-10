@@ -7,7 +7,7 @@
     
     Usage:
     ```lua
-    local path = require("@path")
+    local path = require("@filesystem/path")
     
     local fullPath = path.join("myFolder", "subFolder", "file.txt")
     print(path.dirname(fullPath)) -- myFolder/subFolder

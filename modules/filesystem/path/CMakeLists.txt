@@ -1,13 +1,16 @@
 # CMakeLists.txt for Lode path module
 set(MODULE_NAME path)
 
-file(GLOB SOURCES "src/*.cpp")
+add_library(path SHARED 
+    src/Main.cpp
+    src/Path.cpp
+)
 
-add_library(${MODULE_NAME} SHARED ${SOURCES})
 target_compile_definitions(${MODULE_NAME} PRIVATE LODE_MODULE_BUILD)
 
 target_include_directories(${MODULE_NAME} PRIVATE 
     ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/include
     ${json_SOURCE_DIR}/include
     ${luau_SOURCE_DIR}/VM/include

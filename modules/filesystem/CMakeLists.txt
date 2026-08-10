@@ -4,9 +4,25 @@ project(filesystem LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_library(filesystem SHARED src/filesystem.cpp)
+add_library(filesystem SHARED 
+    src/Main.cpp 
+    src/FileHandle.cpp 
+    src/ReadStream.cpp 
+    src/FileWatcher.cpp
+    src/FsStatic.cpp
+    src/FsClasses.cpp
+)
 
-target_link_libraries(filesystem PRIVATE LodeCore)
+target_include_directories(filesystem PRIVATE 
+    include
+    path/include
+)
+
+target_link_libraries(filesystem PRIVATE 
+    LodeCore
+)
+
+add_subdirectory(path)
 
 # Size Optimization Flags (Option C)
 if(MSVC)

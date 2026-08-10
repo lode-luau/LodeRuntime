@@ -1,42 +1,40 @@
 --!strict
 --!native
 
+--- Represents a connection to a signal.
+export type SignalConnection = {
+    --- Whether this connection is still active.
+    Connected: boolean,
+    --- Disconnects this connection, preventing the callback from being fired.
+    --- @param self The connection instance
+    Disconnect: (self: SignalConnection) -> (),
+}
 
-export type PathModule = {
-    --- Resolves paths into an absolute path.
-    --- @return The resolved absolute path
-    resolve: (
-        --- The path segments to resolve
-        ...string
-    ) -> string,
-    
-    --- Joins path segments together.
-    --- @return The joined path
-    join: (
-        --- The path segments to join
-        ...string
-    ) -> string,
-    
-    --- Returns the directory name of a path.
-    --- @return The directory name
-    dirname: (
-        --- The path
-        p: string
-    ) -> string,
-    
-    --- Returns the base name of a path.
-    --- @return The base name
-    basename: (
-        --- The path
-        p: string
-    ) -> string,
-    
-    --- Returns the extension of a path.
-    --- @return The extension
-    extname: (
-        --- The path
-        p: string
-    ) -> string,
+--- A native signal implementation for events.
+export type Signal<T...> = {
+    --- Connects a callback to the signal.
+    --- @return A connection object that can be disconnected
+    Connect: (
+        self: Signal<T...>,
+        --- The function to call when the signal fires
+        callback: (T...) -> ()
+    ) -> SignalConnection,
+
+    --- Creates a connection that will only fire once.
+    --- @return A connection object that can be disconnected
+    Once: (
+        self: Signal<T...>,
+        --- The function to call when the signal fires
+        callback: (T...) -> ()
+    ) -> SignalConnection,
+
+    --- Yields the current thread until the signal fires.
+    --- @return The arguments passed to Fire
+    Wait: (
+        self: Signal<T...>,
+        --- Optional max seconds to wait
+        timeout: number?
+    ) -> T...,
 }
 
 --- File status information
@@ -55,6 +53,50 @@ export type FileStat = {
     ctime: number
 }
 
+--- Handle to an open file
+export type FileHandle = {
+    --- Reads from the file returning a string
+    Read: (self: FileHandle, length: number, offset: number?) -> string,
+    --- Reads from the file returning a buffer
+    ReadBuffer: (self: FileHandle, length: number, offset: number?) -> buffer,
+    --- Writes to the file
+    Write: (self: FileHandle, data: string | buffer, offset: number?) -> (),
+    --- Retrieves file status for the handle
+    Stat: (self: FileHandle) -> FileStat,
+    --- Synchronizes file state to disk
+    Sync: (self: FileHandle) -> (),
+    --- Closes the file
+    Close: (self: FileHandle) -> (),
+    --- Returns whether the file is open
+    IsOpen: (self: FileHandle) -> boolean
+}
+
+--- Readable stream for a file
+export type ReadStream = {
+    --- Signal emitted when data is received (buffer)
+    DataReceived: Signal<buffer>,
+    --- Signal emitted when the stream reaches EOF
+    EndOfStream: Signal<>,
+    --- Signal emitted on error
+    ErrorOccurred: Signal<string>,
+    --- Starts the stream
+    Start: (self: ReadStream) -> (),
+    --- Closes the stream
+    Close: (self: ReadStream) -> ()
+}
+
+--- Watcher for file system changes
+export type FileWatcher = {
+    --- Signal emitted when the file changes
+    Changed: Signal<string, string>,
+    --- Signal emitted on error
+    ErrorOccurred: Signal<string>,
+    --- Starts the watcher (recursive optionally)
+    Start: (self: FileWatcher, recursive: boolean?) -> (),
+    --- Stops the watcher
+    Stop: (self: FileWatcher) -> ()
+}
+
 --[[
     Filesystem Module (fs).
     Provides functions for interacting with the file system.
@@ -64,20 +106,17 @@ export type FileStat = {
     ```lua
     local fs = require("@filesystem")
     
-    fs.writeFile("test.txt", "Hello File!")
-    local contents = fs.readFile("test.txt")
+    fs.WriteFile("test.txt", "Hello File!")
+    local contents = fs.ReadFile("test.txt")
     print(contents)
     
-    local files = fs.readDir(".")
+    local files = fs.ReadDirectory(".")
     for _, file in ipairs(files) do
         print(file)
     end
     ```
 ]]
 export type FileSystemModule = {
-    --- Path utilities
-    path: PathModule,
-
     -- =======================================================
     -- Coroutine-Yielding Methods
     -- Suspends current coroutine and resumes when ready.
@@ -86,227 +125,133 @@ export type FileSystemModule = {
 
     --- Reads a file asynchronously and returns its contents as a string.
     --- @return The file contents
-    readFile: (
+    ReadFile: (
         --- The path to the file
         filePath: string
     ) -> string,
 
     --- Reads a file asynchronously and returns its contents as a buffer.
     --- @return The file contents as a buffer
-    readFileBuffer: (
+    ReadFileBuffer: (
         --- The path to the file
         filePath: string
     ) -> buffer,
 
-    --- Reads a file directly into a pre-allocated buffer with zero memory allocations.
+    --- Reads a file asynchronously into a provided buffer.
     --- @return The number of bytes read
-    readToBuffer: (
+    ReadToBuffer: (
         --- The path to the file
         filePath: string,
-        --- The buffer to write the data into
+        --- The buffer to read into
         buf: buffer,
-        --- Optional offset in the buffer to start writing (defaults to 0)
+        --- Optional byte offset in the buffer (default 0)
         offset: number?
     ) -> number,
 
-    --- Writes data to a file asynchronously, replacing its contents if it exists.
-    writeFile: (
+    --- Writes a string or buffer to a file asynchronously.
+    WriteFile: (
         --- The path to the file
         filePath: string,
-        --- The data to write (string or buffer)
-        contents: string | buffer
+        --- The data to write
+        data: string | buffer
     ) -> (),
 
-    --- Appends data to a file asynchronously, creating the file if it does not exist.
-    appendFile: (
+    --- Appends a string or buffer to a file asynchronously.
+    AppendFile: (
         --- The path to the file
         filePath: string,
-        --- The data to append (string or buffer)
-        contents: string | buffer
+        --- The data to append
+        data: string | buffer
     ) -> (),
 
-    --- Copies a file to a new location asynchronously. Overwrites the destination if it exists.
-    copyFile: (
-        --- The path to the source file
+    --- Copies a file asynchronously.
+    CopyFile: (
+        --- The source file path
         srcPath: string,
-        --- The path to the destination
+        --- The destination file path
         destPath: string
     ) -> (),
 
-    --- Renames or moves a file or directory asynchronously.
-    rename: (
-        --- The current path
+    --- Renames or moves a file asynchronously.
+    Rename: (
+        --- The current file path
         oldPath: string,
-        --- The new path
+        --- The new file path
         newPath: string
     ) -> (),
 
-    --- Checks if a path exists asynchronously.
-    --- @return True if the path exists, false otherwise
-    exists: (
+    --- Checks if a file or directory exists asynchronously.
+    --- @return True if it exists, false otherwise
+    Exists: (
         --- The path to check
-        filePath: string
+        path: string
     ) -> boolean,
 
-    --- Creates a directory and any necessary subdirectories asynchronously.
-    mkdir: (
-        --- The path to the directory
-        filePath: string
+    --- Creates a directory and all parent directories asynchronously.
+    CreateDirectory: (
+        --- The directory path to create
+        dirPath: string
     ) -> (),
 
     --- Reads the contents of a directory asynchronously.
-    --- @return An array of strings representing the names of files and directories
-    readDir: (
-        --- The path to the directory
+    --- @return An array of file and folder names
+    ReadDirectory: (
+        --- The directory path
         dirPath: string
     ) -> { string },
 
-    --- Retrieves file or directory information asynchronously.
-    --- @return A FileStat table containing metadata
-    stat: (
-        --- The path to query
-        filePath: string
+    --- Retrieves file status information asynchronously.
+    --- @return A table with file statistics
+    Stat: (
+        --- The path to check
+        path: string
     ) -> FileStat,
 
-    --- Resolves a path to its absolute, canonical form, resolving symlinks asynchronously.
-    --- @return The canonical path
-    realpath: (
+    --- Resolves the absolute path of a file asynchronously.
+    --- @return The real absolute path
+    RealPath: (
         --- The path to resolve
-        filePath: string
+        path: string
     ) -> string,
 
-    --- Removes a file or directory asynchronously.
-    rm: (
-        --- The path to remove
-        filePath: string,
-        --- Optional boolean to remove directories recursively
-        recursive: boolean?
+    --- Removes a file asynchronously.
+    RemoveFile: (
+        --- The path to the file to remove
+        filePath: string
     ) -> (),
 
-    -- =======================================================
-    -- Callback-Based Methods
-    -- Callback receives a boolean success indicator.
-    -- If success is true, second arg is the data (if applicable).
-    -- If success is false, second arg is the error message.
-    -- =======================================================
-
-    --- Reads a file asynchronously and executes a callback with its contents as a string.
-    readFileWithCallback: (
-        --- The path to the file
-        filePath: string,
-        --- Function called when complete. If success is true, data_or_err contains the string data. Otherwise, it contains the error message.
-        callback: (success: boolean, data_or_err: string) -> ()
-    ) -> (),
-    
-    --- Reads a file asynchronously and executes a callback with its contents as a buffer.
-    readFileBufferWithCallback: (
-        --- The path to the file
-        filePath: string,
-        --- Function called when complete. If success is true, data_or_err contains the buffer. Otherwise, it contains the error message.
-        callback: (success: boolean, data_or_err: any) -> ()
-    ) -> (),
-    
-    --- Reads a file directly into a pre-allocated buffer asynchronously and executes a callback.
-    readToBufferWithCallback: (
-        --- The path to the file
-        filePath: string,
-        --- The buffer to write the data into
-        buf: buffer,
-        --- Function called when complete. If success is true, bytes_or_err contains the number of bytes read. Otherwise, it contains the error message.
-        callback: (success: boolean, bytes_or_err: any) -> (),
-        --- Optional offset in the buffer to start writing (defaults to 0)
-        offset: number?
-    ) -> (),
-    
-    --- Writes data to a file asynchronously and executes a callback.
-    writeFileWithCallback: (
-        --- The path to the file
-        filePath: string,
-        --- The data to write (string or buffer)
-        contents: string | buffer,
-        --- Function called when complete. If success is false, err contains the error message.
-        callback: (success: boolean, err: string?) -> ()
-    ) -> (),
-    
-    --- Appends data to a file asynchronously and executes a callback.
-    appendFileWithCallback: (
-        --- The path to the file
-        filePath: string,
-        --- The data to append (string or buffer)
-        contents: string | buffer,
-        --- Function called when complete. If success is false, err contains the error message.
-        callback: (success: boolean, err: string?) -> ()
-    ) -> (),
-    
-    --- Copies a file to a new location asynchronously and executes a callback.
-    copyFileWithCallback: (
-        --- The path to the source file
-        srcPath: string,
-        --- The path to the destination
-        destPath: string,
-        --- Function called when complete. If success is false, err contains the error message.
-        callback: (success: boolean, err: string?) -> ()
-    ) -> (),
-    
-    --- Renames or moves a file or directory asynchronously and executes a callback.
-    renameWithCallback: (
-        --- The current path
-        oldPath: string,
-        --- The new path
-        newPath: string,
-        --- Function called when complete. If success is false, err contains the error message.
-        callback: (success: boolean, err: string?) -> ()
-    ) -> (),
-    
-    --- Checks if a path exists asynchronously and executes a callback.
-    existsWithCallback: (
-        --- The path to check
-        filePath: string,
-        --- Function called when complete. If success is true, exists_or_err is a boolean. Otherwise, it contains the error message.
-        callback: (success: boolean, exists_or_err: any) -> ()
-    ) -> (),
-    
-    --- Creates a directory asynchronously and executes a callback.
-    mkdirWithCallback: (
-        --- The path to the directory
-        filePath: string,
-        --- Function called when complete. If success is false, err contains the error message.
-        callback: (success: boolean, err: string?) -> ()
-    ) -> (),
-    
-    --- Reads the contents of a directory asynchronously and executes a callback.
-    readDirWithCallback: (
-        --- The path to the directory
+    --- Removes a directory asynchronously.
+    RemoveDirectory: (
+        --- The path to the directory to remove
         dirPath: string,
-        --- Function called when complete. If success is true, files_or_err is an array of strings. Otherwise, it contains the error message.
-        callback: (success: boolean, files_or_err: any) -> ()
-    ) -> (),
-    
-    --- Retrieves file or directory information asynchronously and executes a callback.
-    statWithCallback: (
-        --- The path to query
-        filePath: string,
-        --- Function called when complete. If success is true, stat_or_err is a FileStat table. Otherwise, it contains the error message.
-        callback: (success: boolean, stat_or_err: any) -> ()
-    ) -> (),
-    
-    --- Resolves a path to its absolute, canonical form asynchronously and executes a callback.
-    realpathWithCallback: (
-        --- The path to resolve
-        filePath: string,
-        --- Function called when complete. If success is true, data_or_err contains the canonical path. Otherwise, it contains the error message.
-        callback: (success: boolean, data_or_err: string) -> ()
-    ) -> (),
-    
-    --- Removes a file or directory asynchronously and executes a callback.
-    rmWithCallback: (
-        --- The path to remove
-        filePath: string,
-        --- Function called when complete. If success is false, err contains the error message.
-        callback: (success: boolean, err: string?) -> (),
-        --- Optional boolean to remove directories recursively
+        --- Whether to remove recursively (default false)
         recursive: boolean?
     ) -> (),
+
+    -- =======================================================
+    -- Callbacks and Objects
+    -- =======================================================
+    
+    --- File interactions using streams and handles
+    File: {
+        --- Opens a file and returns a handle.
+        --- @return A FileHandle instance
+        Open: (self: any, path: string, mode: string?) -> FileHandle
+    },
+    
+    --- Readable stream using signals
+    ReadStream: {
+        --- Creates a ReadStream for a file
+        --- @return A ReadStream instance
+        Create: (self: any, path: string) -> ReadStream
+    },
+    
+    --- File system watcher
+    Watcher: {
+        --- Creates a Watcher for a file or directory
+        --- @return A FileWatcher instance
+        Create: (self: any, path: string) -> FileWatcher
+    }
 }
 
 return {} :: FileSystemModule
