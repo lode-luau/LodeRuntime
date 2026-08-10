@@ -13,11 +13,11 @@ local Deps = require("./Deps")
 --- Returns relative paths (with forward slashes) from `dir`, sorted.
 local function discover(dir: string, pattern: string): { string }
     local fs = Deps.fs
-    local path = fs.path
+    local path = Deps.path
     local files: { string } = {}
 
     local function walk(current: string, relPrefix: string)
-        local ok, entries = pcall(fs.readDir, current)
+        local ok, entries = pcall(fs.ReadDirectory, current)
         if not ok then
             return
         end
@@ -26,7 +26,7 @@ local function discover(dir: string, pattern: string): { string }
             local full = path.join(current, entry)
             local rel = relPrefix .. entry
 
-            local okStat, st = pcall(fs.stat, full)
+            local okStat, st = pcall(fs.Stat, full)
             if okStat then
                 if st.isDirectory then
                     walk(full, rel .. "/")

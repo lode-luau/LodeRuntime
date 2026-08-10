@@ -8,7 +8,7 @@
 -- Lode's own modules from .config.luau (filesystem, path).
 
 local fs = require("@filesystem")
-local path = require("@path")
+local path = require("@filesystem/path")
 
 local N_BLOCKS = 84
 local BODY = 18
@@ -92,5 +92,5 @@ push("local result: number = main()")
 push("print(\"fixture ok\", check(result), result % 1000000)")
 
 local target = path.resolve("@self", "big.luau")
-fs.writeFile(target, table.concat(lines, "\n") .. "\n")
+fs.WriteFile(target, table.concat(lines, "\n") .. "\n")
 print("wrote " .. target .. " (" .. #lines .. " lines)")

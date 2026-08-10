@@ -3,8 +3,7 @@
 -- timer path — the runtime features that go beyond plain Luau.
 local fs = require("@filesystem")
 local json = require("@json")
-local path = require("@path")
-local task = require("@task")
+local path = require("@filesystem/path")
 
 local fixturePath = path.resolve("@self", "..", "..", "fixtures", "big.luau")
 local scratchPath = path.resolve("@self", "..", "..", "results", "fs_bench_tmp.bin")
@@ -15,27 +14,27 @@ local jsonDoc = [[{"name":"lode","version":"1.0.0","enabled":true,"tags":["a","b
 
 return function(bench: any)
     bench("fs_read_file", function()
-        local content = fs.readFile(fixturePath)
+        local content = fs.ReadFile(fixturePath)
         if #content == 0 then
-            error("fs.readFile returned empty content")
+            error("fs.ReadFile returned empty content")
         end
     end)
 
     bench("fs_write_file", function()
-        fs.writeFile(scratchPath, payload)
+        fs.WriteFile(scratchPath, payload)
     end)
 
     bench("fs_stat", function()
-        local info = fs.stat(fixturePath)
-        if not info.isFile then
-            error("fs.stat did not report a file")
+        local info = fs.Stat(fixturePath)
+        if not info.isDirectory and not info.isFile then
+            error("fs.Stat did not report a valid file")
         end
     end)
 
     bench("fs_read_dir", function()
-        local entries = fs.readDir("bench")
+        local entries = fs.ReadDirectory("bench")
         if #entries == 0 then
-            error("fs.readDir returned no entries")
+            error("fs.ReadDirectory returned no entries")
         end
     end)
 

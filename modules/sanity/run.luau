@@ -35,7 +35,7 @@ if ok and typeof(loaded) == "table" then
 end
 
 local fs = Deps.fs
-local path = fs.path
+local path = Deps.path
 
 local selfDir = path.resolve("@self")
 local testDir = path.join(selfDir, config.testDir)

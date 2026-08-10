@@ -10,6 +10,7 @@ local expect = sanity.expect
 
 local task = require("../../../modules/task")
 local fs = require("../../filesystem")
+local path = require("../../filesystem/path")
 
 describe("async tests", function()
     it("task.wait yields and resumes", function()
@@ -20,15 +21,15 @@ describe("async tests", function()
     end)
 
     it("async filesystem write/read", function()
-        local path = fs.path
+
         local selfDir = path.resolve("@self")
         local file = path.join(selfDir, "async_tmp.txt")
 
-        pcall(fs.rm, file)
-        fs.writeFile(file, "async data")
-        local data = fs.readFile(file)
+        pcall(fs.RemoveFile, file)
+        fs.WriteFile(file, "async data")
+        local data = fs.ReadFile(file)
         expect(data).toBe("async data")
-        pcall(fs.rm, file)
+        pcall(fs.RemoveFile, file)
     end)
 
     it("task.spawn resumes an existing coroutine", function()

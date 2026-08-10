@@ -31,7 +31,7 @@ describe("runtime lifecycle and error handling", function()
 
     it("reports failed filesystem operations without corrupting the VM", function()
         local ok, err = pcall(function()
-            fs.readFile("@self/does-not-exist.luau")
+            fs.ReadFile("@self/does-not-exist.luau")
         end)
 
         expect(ok).toBe(false)

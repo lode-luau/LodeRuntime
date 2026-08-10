@@ -31,10 +31,12 @@ end
 
 local stdio = tryRequire("@stdio", "../../stdio")
 local fs = tryRequire("@filesystem", "../../filesystem")
+local path = tryRequire("@filesystem/path", "../../filesystem/path")
 local task = tryRequire("@task", "../../task")
 
 return {
     stdio = stdio,
     fs = fs,
+    path = path,
     task = task,
 }
