@@ -5,10 +5,16 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_library(websocket SHARED
-    src/websocket.cpp
+    src/Main.cpp
+    src/WsHelpers.cpp
+    src/WebSocketManager.cpp
+    src/WsClient.cpp
+    src/WsServer.cpp
 )
 
-target_link_libraries(websocket PRIVATE LodeCore)
+target_include_directories(websocket PUBLIC include PRIVATE ../tcp/include)
+target_compile_definitions(websocket PRIVATE WEBSOCKET_BUILD_SHARED NOMINMAX)
+target_link_libraries(websocket PRIVATE LodeCore tcp)
 
 if(MSVC)
     target_compile_options(websocket PRIVATE $<$<NOT:$<CONFIG:Debug>>:/O1> /GR- /GL)
