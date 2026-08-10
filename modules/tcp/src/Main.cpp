@@ -204,9 +204,13 @@ LODE_MODULE(vm)
             auto backlog = args[1].AsTable().Get("backlog");
             if (backlog.IsOk() && !backlog.GetValue().IsNil())
             {
+                if (!backlog.GetValue().IsNumber())
+                {
+                    vm2.RaiseError("socket.Server:Create: backlog must be a number");
+                    return Lode::Value();
+                }
                 double value = backlog.GetValue().AsNumber();
-                // We use lodetcp::IsValidPort to validate
-                bool valid = true; // Inlined validation for simplicity
+                bool valid = true;
                 if (value < 1 || value > 65535) valid = false;
                 if (!valid)
                 {
