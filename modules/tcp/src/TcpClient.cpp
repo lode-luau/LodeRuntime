@@ -187,12 +187,12 @@ Lode::Value TcpClient::MethodConnect(Lode::State& vm, const std::vector<Lode::Va
         vm.RaiseError("socket Connect: socket is closed");
         return Lode::Value();
     }
-    if (args.size() < 3 || !args[1].IsString())
+    if (args.size() < 2 || !args[1].IsString())
     {
         vm.RaiseError("socket Connect: host must be a string");
         return Lode::Value();
     }
-    if (!args[2].IsNumber())
+    if (args.size() < 3 || !args[2].IsNumber())
     {
         vm.RaiseError("socket Connect: port must be a number");
         return Lode::Value();

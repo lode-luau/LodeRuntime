@@ -1,5 +1,4 @@
 --!strict
---!native
 
 -- Regression tests for the native path module. Both path.join and
 -- path.resolve must stay lexical (no filesystem access): they used to call
@@ -10,7 +9,7 @@ local describe = sanity.describe
 local it = sanity.it
 local expect = sanity.expect
 
-local path = require("../../path")
+local path = require("../../filesystem/path")
 
 local function norm(s: string): string
     -- Native separator is platform-specific; compare in forward-slash form.
@@ -80,5 +79,47 @@ describe("path.resolve", function()
         local absBase = path.resolve("@self")
         local n = norm(path.resolve("other", absBase, "w.txt"))
         expect(n).toBe(norm(path.join(absBase, "w.txt")))
+    end)
+end)
+
+describe("path error categorization", function()
+    it("rejects a non-string argument in join", function()
+        local ok, err = pcall(function()
+            (path.join :: any)("a", 123)
+        end)
+        expect(ok).toBe(false)
+        expect(tostring(err):find("path.join: path must be a string", 1, true) ~= nil).toBe(true)
+    end)
+
+    it("rejects a non-string argument in resolve", function()
+        local ok, err = pcall(function()
+            (path.resolve :: any)(123)
+        end)
+        expect(ok).toBe(false)
+        expect(tostring(err):find("path.resolve: path must be a string", 1, true) ~= nil).toBe(true)
+    end)
+
+    it("rejects a non-string argument in basename", function()
+        local ok, err = pcall(function()
+            (path.basename :: any)(true)
+        end)
+        expect(ok).toBe(false)
+        expect(tostring(err):find("path.basename: path must be a string", 1, true) ~= nil).toBe(true)
+    end)
+
+    it("rejects a non-string argument in dirname", function()
+        local ok, err = pcall(function()
+            (path.dirname :: any)({})
+        end)
+        expect(ok).toBe(false)
+        expect(tostring(err):find("path.dirname: path must be a string", 1, true) ~= nil).toBe(true)
+    end)
+
+    it("rejects a non-string argument in extname", function()
+        local ok, err = pcall(function()
+            (path.extname :: any)(42)
+        end)
+        expect(ok).toBe(false)
+        expect(tostring(err):find("path.extname: path must be a string", 1, true) ~= nil).toBe(true)
     end)
 end)

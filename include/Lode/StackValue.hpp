@@ -98,6 +98,9 @@ public:
     /** @brief Returns the number of arguments provided. */
     [[nodiscard]] size_t Size() const;
     
+    /** @brief Converts all arguments to a std::vector<Value>. */
+    [[nodiscard]] std::vector<Value> ToVector() const;
+    
     /** 
      * @brief Accesses an argument by index (0-based, like standard C++ arrays).
      * @param i The index of the argument.

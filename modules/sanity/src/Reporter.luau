@@ -98,6 +98,10 @@ local function printResultLine(result: any)
     if result.status == "passed" then
         stdio.print("  " .. color(ANSI.green, "✓ ") .. suite .. name
             .. color(ANSI.dim, string.format(" (%.0fms)", result.durationMs)))
+    elseif result.status == "skipped" then
+        local msg = (tostring(result.error):gsub("^%[SKIPPED%] ", ""))
+        stdio.print("  " .. color(ANSI.yellow, "○ ") .. suite .. name
+            .. color(ANSI.dim, string.format(" [skipped: %s]", msg)))
     else
         stdio.print("  " .. color(ANSI.red, "✗ ") .. suite .. name
             .. color(ANSI.dim, string.format(" (%.0fms)", result.durationMs)))
@@ -108,8 +112,11 @@ local function printResultLine(result: any)
             stdio.print(color(ANSI.dim, "      expected: " .. tostring(err.expected)))
             stdio.print(color(ANSI.dim, "      received: " .. tostring(err.received)))
         else
-            stdio.print(color(ANSI.red, "      " .. tostring(err)))
+            local errStr = tostring(result.error)
+            local formatted = "      " .. errStr:gsub("\n", "\n      ")
+            stdio.print(color(ANSI.red, formatted))
         end
+        stdio.print("")
     end
 end
 

@@ -52,7 +52,7 @@ Lode::Value UdpSocket::MethodBind(Lode::State& vm, const std::vector<Lode::Value
         vm.RaiseError("udp Bind: host must be a string");
         return Lode::Value();
     }
-    if (!args[2].IsNumber())
+    if (args.size() < 3 || !args[2].IsNumber())
     {
         vm.RaiseError("udp Bind: port must be a number");
         return Lode::Value();
@@ -111,17 +111,17 @@ Lode::Value UdpSocket::MethodSend(Lode::State& vm, const std::vector<Lode::Value
         vm.RaiseError("udp Send: not bound, use Bind first");
         return Lode::Value();
     }
-    if (args.size() < 4 || (!args[1].IsString() && !args[1].IsBuffer()))
+    if (args.size() < 2 || (!args[1].IsString() && !args[1].IsBuffer()))
     {
         vm.RaiseError("udp Send: data must be a string or buffer");
         return Lode::Value();
     }
-    if (!args[2].IsString())
+    if (args.size() < 3 || !args[2].IsString())
     {
         vm.RaiseError("udp Send: host must be a string");
         return Lode::Value();
     }
-    if (!args[3].IsNumber())
+    if (args.size() < 4 || !args[3].IsNumber())
     {
         vm.RaiseError("udp Send: port must be a number");
         return Lode::Value();

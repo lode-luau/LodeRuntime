@@ -82,27 +82,48 @@ static fs::path ResolveImpl(Lode::State& vm, const std::string& rawPathStr)
     return currentPath.lexically_normal();
 }
 
-LODE_MODULE(vm)
-{
-    Lode::Table exports = vm.CreateTable();
+#include "Path.hpp"
 
-    exports.Set("resolve", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
+namespace lodefs::path
+{
+
+void BindPathMethods(Lode::Exports& exports)
+{
+    exports.Function("resolve", [](Lode::State& vm, const std::vector<Lode::Value>& args) -> Lode::Value {
         fs::path resolved = fs::current_path();
-        if (args.Size() > 0)
+        if (!args.empty())
         {
-            resolved = ResolveImpl(vm, args[0].AsString());
-            for (size_t i = 1; i < args.Size(); ++i)
+            if (!args[0].IsString())
             {
+                vm.RaiseError("path.resolve: path must be a string");
+                return Lode::Value();
+            }
+            resolved = ResolveImpl(vm, args[0].AsString());
+            for (size_t i = 1; i < args.size(); ++i)
+            {
+                if (!args[i].IsString())
+                {
+                    vm.RaiseError("path.resolve: path must be a string");
+                    return Lode::Value();
+                }
                 resolved /= args[i].AsString();
             }
         }
         return Lode::Value(resolved.lexically_normal().string());
-    }));
+    });
 
-    exports.Set("join", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
-        if (args.Size() == 0) return Lode::Value("");
+    exports.Function("join", [](Lode::State& vm, const std::vector<Lode::Value>& args) -> Lode::Value {
+        if (args.empty()) return Lode::Value("");
+        for (const auto& a : args)
+        {
+            if (!a.IsString())
+            {
+                vm.RaiseError("path.join: path must be a string");
+                return Lode::Value();
+            }
+        }
         fs::path p = args[0].AsString();
-        for (size_t i = 1; i < args.Size(); ++i)
+        for (size_t i = 1; i < args.size(); ++i)
         {
             p /= args[i].AsString();
         }
@@ -111,25 +132,41 @@ LODE_MODULE(vm)
         // every join perform per-component disk I/O (CreateFile +
         // GetFinalPathNameByHandle per component on Windows).
         return Lode::Value(p.lexically_normal().string());
-    }));
+    });
 
-    exports.Set("basename", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
-        if (args.Size() == 0) return Lode::Value("");
+    exports.Function("basename", [](Lode::State& vm, const std::vector<Lode::Value>& args) -> Lode::Value {
+        if (args.empty()) return Lode::Value("");
+        if (!args[0].IsString())
+        {
+            vm.RaiseError("path.basename: path must be a string");
+            return Lode::Value();
+        }
         fs::path p = args[0].AsString();
         return Lode::Value(p.filename().string());
-    }));
+    });
 
-    exports.Set("dirname", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
-        if (args.Size() == 0) return Lode::Value("");
+    exports.Function("dirname", [](Lode::State& vm, const std::vector<Lode::Value>& args) -> Lode::Value {
+        if (args.empty()) return Lode::Value("");
+        if (!args[0].IsString())
+        {
+            vm.RaiseError("path.dirname: path must be a string");
+            return Lode::Value();
+        }
         fs::path p = args[0].AsString();
         return Lode::Value(p.parent_path().string());
-    }));
+    });
 
-    exports.Set("extname", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
-        if (args.Size() == 0) return Lode::Value("");
+    exports.Function("extname", [](Lode::State& vm, const std::vector<Lode::Value>& args) -> Lode::Value {
+        if (args.empty()) return Lode::Value("");
+        if (!args[0].IsString())
+        {
+            vm.RaiseError("path.extname: path must be a string");
+            return Lode::Value();
+        }
         fs::path p = args[0].AsString();
         return Lode::Value(p.extension().string());
-    }));
+    });
 
-    return { Lode::Value(exports) };
 }
+
+} // namespace lodefs::path
