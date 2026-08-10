@@ -5,14 +5,27 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_library(http SHARED
-    src/http.cpp
-    src/http_client.cpp
+    src/Main.cpp
+    src/HttpManager.cpp
+    src/HttpClient.cpp
+    src/HttpServer.cpp
+    src/HttpHelpers.cpp
+    src/HttpTls.cpp
 )
 
 target_link_libraries(http PRIVATE LodeCore)
 
+if(WIN32)
+    target_link_libraries(http PRIVATE Secur32)
+endif()
+
+target_include_directories(http PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+)
+
 if(MSVC)
-    target_compile_options(http PRIVATE $<$<NOT:$<CONFIG:Debug>>:/O1> /GR- /GL)
+    target_compile_options(http PRIVATE $<$<NOT:$<CONFIG:Debug>>:/O1> $<$<NOT:$<CONFIG:Debug>>:/GR-> $<$<NOT:$<CONFIG:Debug>>:/GL>)
     target_link_options(http PRIVATE $<$<NOT:$<CONFIG:Debug>>:/OPT:REF> $<$<NOT:$<CONFIG:Debug>>:/OPT:ICF> $<$<NOT:$<CONFIG:Debug>>:/LTCG>)
 else()
     target_compile_options(http PRIVATE -Os -fno-rtti -fvisibility=hidden -flto)
