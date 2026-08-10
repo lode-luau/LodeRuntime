@@ -33,6 +33,11 @@ void TcpClient::FireError(const std::string& message)
 {
     if (mgr->shuttingDown || closed || closing)
         return;
+    if (cppOnError)
+    {
+        cppOnError(message);
+        return;
+    }
     errorSig->Fire(Lode::Value(message));
 }
 
@@ -53,6 +58,11 @@ void TcpClient::UpdateAddresses()
 
 void TcpClient::NotifyConnectOk()
 {
+    if (cppOnConnected)
+    {
+        cppOnConnected();
+        return;
+    }
     if (!connectCo.IsValid())
         return;
     Lode::State vm(mainL);
@@ -64,6 +74,11 @@ void TcpClient::NotifyConnectOk()
 
 void TcpClient::NotifyConnectError(const std::string& message)
 {
+    if (cppOnError && connectPending)
+    {
+        cppOnError(message);
+        return;
+    }
     if (!connectCo.IsValid())
         return;
     Lode::State vm(mainL);
@@ -139,6 +154,22 @@ int TcpClient::BeginConnect()
     return 0;
 }
 
+int TcpClient::ConnectNative(const std::string& host, int port, uint64_t timeoutMs)
+{
+    if (connected || connectPending || closing || closed)
+        return -1;
+    connectHost = host;
+    connectPort = port;
+    connectTimeoutMs = timeoutMs;
+    connectPending = true;
+    int r = BeginConnect();
+    if (r != 0)
+    {
+        connectPending = false;
+    }
+    return r;
+}
+
 Lode::Value TcpClient::MethodConnect(Lode::State& vm, const std::vector<Lode::Value>& args)
 {
     if (connected)
@@ -210,6 +241,28 @@ Lode::Value TcpClient::MethodConnect(Lode::State& vm, const std::vector<Lode::Va
         return Lode::Value();
     }
     return vm.YieldThread();
+}
+
+void TcpClient::SendNative(const char* data, size_t size)
+{
+    if (closed || closing || !connected)
+        return;
+    std::vector<char> vec;
+    if (size > 0 && data)
+        vec.assign(data, data + size);
+    auto* wreq = new WriteRequest();
+    std::memset(&wreq->req, 0, sizeof(wreq->req));
+    wreq->req.data = this;
+    wreq->data = std::move(vec);
+    uv_buf_t buf;
+    buf.base = wreq->data.empty() ? const_cast<char*>("") : wreq->data.data();
+    buf.len = wreq->data.size();
+    int r = uv_write(&wreq->req, reinterpret_cast<uv_stream_t*>(&tcp), &buf, 1, OnWritten);
+    if (r != 0)
+    {
+        delete wreq;
+        FireError(std::string("write: ") + uv_strerror(r));
+    }
 }
 
 Lode::Value TcpClient::MethodSend(Lode::State& vm, const std::vector<Lode::Value>& args)
@@ -330,7 +383,7 @@ void TcpClient::FailConnect(const std::string& message)
     if (closing)
         return;
     closing = true;
-    if (connectPending && !connectResumed && connectCo.IsValid())
+    if (connectPending && !connectResumed)
     {
         connectResumed = true;
         NotifyConnectError(message);
@@ -351,10 +404,16 @@ void TcpClient::FinishClosed()
     if (closed)
         return;
     closed = true;
-    if (!mgr->shuttingDown && everConnected && !disconnectedFired)
+    if (connected || everConnected)
     {
-        disconnectedFired = true;
-        disconnectedSig->Fire();
+        if (!disconnectedFired)
+        {
+            disconnectedFired = true;
+            if (cppOnDisconnected)
+                cppOnDisconnected();
+            else
+                disconnectedSig->Fire();
+        }
     }
     mgr->RemoveClient(shared_from_this());
     selfGuard.reset();
@@ -418,7 +477,7 @@ void TcpClient::OnConnected(uv_connect_t* req, int status)
         uv_close(reinterpret_cast<uv_handle_t*>(&self->timer), OnHandleClosed);
         ++self->closeCount;
     }
-    if (!self->connectResumed && self->connectCo.IsValid())
+    if (!self->connectResumed)
     {
         self->connectResumed = true;
         self->NotifyConnectOk();
@@ -426,7 +485,10 @@ void TcpClient::OnConnected(uv_connect_t* req, int status)
     if (self->closing)
         return;
     if (!self->mgr->shuttingDown)
-        self->connectedSig->Fire();
+    {
+        if (!self->cppOnConnected)
+            self->connectedSig->Fire();
+    }
     self->StartReading();
 }
 
@@ -452,8 +514,14 @@ void TcpClient::OnRead(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf)
     auto* self = static_cast<TcpClient*>(stream->data);
     if (nread > 0)
     {
-        if (!self->mgr->shuttingDown)
+        if (self->cppOnMessage)
+        {
+            self->cppOnMessage(buf->base, nread);
+        }
+        else if (!self->mgr->shuttingDown)
+        {
             self->messageSig->Fire(Lode::Value(std::string(buf->base, static_cast<size_t>(nread))));
+        }
     }
     else if (nread == UV_EOF)
     {

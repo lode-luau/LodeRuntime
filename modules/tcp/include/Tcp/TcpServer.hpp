@@ -8,6 +8,7 @@
 #include "Lode/State.hpp"
 #include "Lode/Value.hpp"
 #include "uv.h"
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -39,10 +40,16 @@ struct TCP_API TcpServer : std::enable_shared_from_this<TcpServer>
 
     std::shared_ptr<TcpServer> selfGuard;
 
+    std::function<void(std::shared_ptr<TcpClient>)> cppOnClient;
+    std::function<void(const std::string&)> cppOnError;
+
     void InitSignals(Lode::State& vm);
     void FireError(const std::string& message);
     void UpdateAddresses();
     void BindFail(Lode::State& vm, const std::string& message);
+    void BindFailNative(const std::string& message);
+
+    void ListenNative(const std::string& host, int port);
 
     Lode::Value MethodListen(Lode::State& vm, const std::vector<Lode::Value>& args);
     Lode::Value MethodLocalAddress(Lode::State& vm);

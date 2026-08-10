@@ -21,6 +21,11 @@ void TcpServer::FireError(const std::string& message)
 {
     if (mgr->shuttingDown || closed || closing)
         return;
+    if (cppOnError)
+    {
+        cppOnError(message);
+        return;
+    }
     errorSig->Fire(Lode::Value(message));
 }
 
@@ -104,6 +109,44 @@ Lode::Value TcpServer::MethodListen(Lode::State& vm, const std::vector<Lode::Val
     return Lode::Value();
 }
 
+void TcpServer::ListenNative(const std::string& host, int port)
+{
+    if (closing || closed || listening)
+        return;
+    std::memset(&tcp, 0, sizeof(tcp));
+    tcpInited = true;
+    tcp.data = this;
+    int r = uv_tcp_init(loop, &tcp);
+    if (r != 0)
+    {
+        BindFailNative(std::string("tcp: ") + uv_strerror(r));
+        return;
+    }
+
+    struct sockaddr_storage addr;
+    int namelen = 0;
+    r = MakeSockAddr(host, port, addr, namelen);
+    if (r != 0)
+    {
+        BindFailNative("host must be an IPv4 or IPv6 address");
+        return;
+    }
+    r = uv_tcp_bind(&tcp, reinterpret_cast<const struct sockaddr*>(&addr), 0);
+    if (r != 0)
+    {
+        BindFailNative(std::string("bind: ") + uv_strerror(r));
+        return;
+    }
+    r = uv_listen(reinterpret_cast<uv_stream_t*>(&tcp), backlog, OnConnection);
+    if (r != 0)
+    {
+        BindFailNative(std::string("listen: ") + uv_strerror(r));
+        return;
+    }
+    listening = true;
+    UpdateAddresses();
+}
+
 Lode::Value TcpServer::MethodLocalAddress(Lode::State& vm)
 {
     if (!listening || closed)
@@ -125,6 +168,17 @@ void TcpServer::BindFail(Lode::State& vm, const std::string& message)
         uv_close(reinterpret_cast<uv_handle_t*>(&tcp), OnHandleClosed);
     }
     vm.RaiseError("socket Server: " + message);
+}
+
+void TcpServer::BindFailNative(const std::string& message)
+{
+    if (tcpInited && !tcpClosed)
+    {
+        tcpClosed = true;
+        uv_close(reinterpret_cast<uv_handle_t*>(&tcp), OnHandleClosed);
+    }
+    if (cppOnError)
+        cppOnError("socket Server: " + message);
 }
 
 void TcpServer::RequestClose()
@@ -225,8 +279,15 @@ void TcpServer::OnConnection(uv_stream_t* server, int status)
     client->UpdateAddresses();
     client->StartReading();
 
-    Lode::Value clientValue = WrapClient(vm, client, self->mgr->clientMethods);
-    self->clientSig->Fire(clientValue);
+    if (self->cppOnClient)
+    {
+        self->cppOnClient(client);
+    }
+    else
+    {
+        Lode::Value clientValue = WrapClient(vm, client, self->mgr->clientMethods);
+        self->clientSig->Fire(clientValue);
+    }
 }
 
 Lode::Value WrapServer(Lode::State& vm, const std::shared_ptr<TcpServer>& server, const Lode::Table& methods)
