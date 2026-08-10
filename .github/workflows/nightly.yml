@@ -56,40 +56,73 @@ jobs:
         shell: pwsh
         run: |
           $ver = "${{ steps.version.outputs.version }}"
-          $dist = "dist/$ver"
-          New-Item -ItemType Directory -Force -Path $dist | Out-Null
-          Copy-Item build/bin/Release/lode_runtime.exe $dist
-          Copy-Item build/bin/Release/LodeCore.dll $dist
-          Copy-Item build/bin/Release/uv.dll $dist
+          $runtimeDist = "dist/runtime"
+          $modulesDist = "dist/modules"
+          New-Item -ItemType Directory -Force -Path $runtimeDist | Out-Null
+          New-Item -ItemType Directory -Force -Path $modulesDist | Out-Null
 
-          # Modules are discovered automatically: any modules/<name> folder with
-          # a lode.json manifest is a package (native or pure-Luau). New modules
-          # get packaged without touching this workflow.
+          # ---- Runtime artifact: executable, core DLLs, headers ----
+          Copy-Item build/bin/Release/lode_runtime.exe $runtimeDist
+          Copy-Item build/bin/Release/LodeCore.dll $runtimeDist
+          Copy-Item build/bin/Release/uv.dll $runtimeDist
+          Copy-Item include/Lode $runtimeDist/Lode -Recurse
+          Copy-Item LICENSE, README.md $runtimeDist
+          Set-Content -Path "$runtimeDist/VERSION" -Value $ver
+
+          # ---- Modules artifact: recursive module discovery ----
+          # Every directory (recursively) that has a lode.json manifest is a
+          # package (native or pure-Luau). This supports nested modules such as
+          # filesystem/path without touching this workflow when modules change.
+          $moduleDirs = Get-ChildItem modules -Directory -Recurse | Where-Object { Test-Path (Join-Path $_.FullName "lode.json") }
+          $modulesRoot = (Resolve-Path modules).Path
+
+          # Map of module relative paths (forward slashes) so a parent module's
+          # copy skips its nested module directories (handled separately).
+          $moduleRelSet = @{}
+          foreach ($mdir in $moduleDirs) {
+              $rel = $mdir.FullName.Substring($modulesRoot.Length + 1).Replace('\', '/')
+              $moduleRelSet[$rel] = $true
+          }
+
           $shipped = @()
-          foreach ($m in (Get-ChildItem modules -Directory | Where-Object { Test-Path (Join-Path $_.FullName "lode.json") } | Select-Object -ExpandProperty Name)) {
-              $src = "modules/$m"
-              $dst = Join-Path $dist "modules/$m"
+          foreach ($mdir in $moduleDirs) {
+              $rel = $mdir.FullName.Substring($modulesRoot.Length + 1).Replace('\', '/')
+              $name = $mdir.Name
+              $src = "modules/$rel"
+              $dst = Join-Path $modulesDist "modules/$rel"
               New-Item -ItemType Directory -Force -Path $dst | Out-Null
-              # Everything except build-time files and the libs/ tree (rebuilt
-              # below with only the shipped platform, windows/x64). src/ is
-              # excluded only for native modules (those with a CMakeLists.txt);
-              # pure-Luau modules keep their src/ (e.g. sanity's Reporter).
-              $excludes = @("CMakeLists.txt", "libs")
-              if (Test-Path "$src/CMakeLists.txt") { $excludes += "src" }
-              Copy-Item "$src/*" $dst -Recurse -Exclude $excludes
+
+              $isNative = Test-Path "$src/CMakeLists.txt"
+              Get-ChildItem $src | ForEach-Object {
+                  $childRel = "$rel/$($_.Name)"
+                  $isNestedModule = $_.PSIsContainer -and $moduleRelSet.ContainsKey($childRel)
+                  # Exclude build-time files and the libs/ tree (rebuilt below
+                  # with only the shipped platform, windows/x64). src/ is
+                  # excluded only for native modules (those with a
+                  # CMakeLists.txt); pure-Luau modules keep their src/.
+                  $isExcluded = $_.Name -eq "CMakeLists.txt" -or $_.Name -eq "libs" -or ($_.Name -eq "src" -and $isNative)
+                  if (-not $isNestedModule -and -not $isExcluded) {
+                      Copy-Item $_.FullName (Join-Path $dst $_.Name) -Recurse
+                  }
+              }
+
               # Native modules keep their config-matched DLL only in the
               # module's own libs/ entry from lode.json.
-              $nativeLib = "build/bin/Release/$m.dll"
+              $nativeLib = "build/bin/Release/$name.dll"
               if (Test-Path $nativeLib) {
                   $libDir = "$dst/libs/windows/x64"
                   New-Item -ItemType Directory -Force -Path $libDir | Out-Null
-                  Copy-Item "$src/libs/windows/x64/$m.dll" $libDir
+                  Copy-Item "$src/libs/windows/x64/$name.dll" $libDir
               }
-              $shipped += $m
+              $shipped += $rel
           }
 
           # Alias config so require("@name") resolves for every shipped module.
-          $aliasLines = foreach ($m in $shipped) { "            $m = `"modules/$m`"," }
+          $aliasLines = foreach ($mdir in $moduleDirs) {
+              $rel = $mdir.FullName.Substring($modulesRoot.Length + 1).Replace('\', '/')
+              $name = $mdir.Name
+              "            $name = `"modules/$rel`","
+          }
           $config = @"
           return {
               luau = {
@@ -106,15 +139,15 @@ jobs:
               }
           }
           "@
-          Set-Content -Path "$dist/.config.luau" -Value $config
+          Set-Content -Path "$modulesDist/.config.luau" -Value $config
+          Copy-Item LICENSE, README.md $modulesDist
+          Set-Content -Path "$modulesDist/VERSION" -Value $ver
 
-          Copy-Item include/Lode $dist/Lode -Recurse
-          Copy-Item LICENSE, README.md $dist
-          Set-Content -Path "$dist/VERSION" -Value $ver
-          Compress-Archive -Path $dist -DestinationPath "lode-windows-x64-$ver.zip"
+          Compress-Archive -Path $runtimeDist -DestinationPath "lode-windows-x64-$ver.zip"
+          Compress-Archive -Path $modulesDist -DestinationPath "lode-windows-x64-modules-$ver.zip"
 
       - name: Publish nightly release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ steps.version.outputs.version }}" "lode-windows-x64-${{ steps.version.outputs.version }}.zip" --title "Nightly ${{ steps.version.outputs.version }}" --notes "Automated nightly build. Built and validated on the sanity suite and integration tests." --prerelease
+          gh release create "${{ steps.version.outputs.version }}" "lode-windows-x64-${{ steps.version.outputs.version }}.zip" "lode-windows-x64-modules-${{ steps.version.outputs.version }}.zip" --title "Nightly ${{ steps.version.outputs.version }}" --notes "Automated nightly build. Built and validated on the sanity suite and integration tests." --prerelease
