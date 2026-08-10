@@ -141,6 +141,12 @@ export type SanityModule = {
         --- The test function
         fn: () -> ()
     ) -> (),
+
+    --- Immediately skips the current test.
+    skip: (
+        --- The reason for skipping
+        reason: string?
+    ) -> (),
     
     --- Expects a value to meet certain conditions.
     expect: (
@@ -205,6 +211,7 @@ local sanity = {
     describe = Registry.describe,
     it = Registry.it,
     test = Registry.test,
+    skip = function(msg: string?) error("[SKIPPED] " .. (msg or "")) end,
     expect = Expect.expect,
     beforeAll = Registry.beforeAll,
     afterAll = Registry.afterAll,

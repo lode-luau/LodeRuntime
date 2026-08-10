@@ -15,7 +15,7 @@ local Deps = require("./Deps")
 export type TestResult = {
     suite: string,
     name: string,
-    status: "passed" | "failed",
+    status: "passed" | "failed" | "skipped",
     error: any,
     durationMs: number,
 }
@@ -59,8 +59,13 @@ local function runTest(deps: any, suite: any, test: any, config: any, suiteName:
             if ok2 then
                 result.status = "passed"
             else
-                result.status = "failed"
-                result.error = err2
+                if type(err2) == "string" and string.match(err2, "^%[SKIPPED%]") then
+                    result.status = "skipped"
+                    result.error = err2
+                else
+                    result.status = "failed"
+                    result.error = err2
+                end
             end
         else
             result.status = "failed"
