@@ -1,35 +1,56 @@
 -- Copyright (c) 2026 yanlvl99, Lode Runtime Contributors
 -- SPDX-License-Identifier: MIT
 
---- @module path
---- Provides utilities for manipulating and resolving file and directory paths.
-
+--[[
+    Path Module.
+    Provides utilities for manipulating and resolving file and directory paths.
+    
+    Usage:
+    ```lua
+    local path = require("@path")
+    
+    local fullPath = path.join("myFolder", "subFolder", "file.txt")
+    print(path.dirname(fullPath)) -- myFolder/subFolder
+    print(path.basename(fullPath)) -- file.txt
+    print(path.extname(fullPath)) -- .txt
+    ```
+]]
 export type PathModule = {
     --- Resolves a sequence of paths or path segments into an absolute path.
     --- Supports `@self` relative to the package directory of the caller.
-    --- @param ... The sequence of paths to resolve.
     --- @return The resolved absolute path.
-    resolve: (...string) -> string,
+    resolve: (
+        --- The sequence of paths to resolve.
+        ...string
+    ) -> string,
 
     --- Joins a sequence of paths or path segments.
-    --- @param ... The sequence of paths to join.
     --- @return The joined path string.
-    join: (...string) -> string,
+    join: (
+        --- The sequence of paths to join.
+        ...string
+    ) -> string,
 
     --- Returns the directory name of a path.
-    --- @param p The path to evaluate.
     --- @return The directory name.
-    dirname: (p: string) -> string,
+    dirname: (
+        --- The path to evaluate.
+        p: string
+    ) -> string,
 
     --- Returns the last portion of a path.
-    --- @param p The path to evaluate.
     --- @return The base name.
-    basename: (p: string) -> string,
+    basename: (
+        --- The path to evaluate.
+        p: string
+    ) -> string,
 
     --- Returns the extension of the path.
-    --- @param p The path to evaluate.
     --- @return The extension of the path.
-    extname: (p: string) -> string,
+    extname: (
+        --- The path to evaluate.
+        p: string
+    ) -> string,
 }
 
 return {} :: PathModule
