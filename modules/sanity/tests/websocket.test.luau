@@ -93,4 +93,52 @@ describe("websocket", function()
         local msg = tostring(err)
         expect(msg:find("host must be an IPv4 or IPv6 address", 1, true) ~= nil).toBe(true)
     end)
+
+    it("can connect, send and receive messages, and close", function()
+        local server = websocket.WebSocketServer:Create()
+        local acceptedClient = nil
+        local receivedOnServer = nil
+        local receivedOnClient = nil
+        local clientDisconnectedFired = false
+        local serverClientDisconnectedFired = false
+        
+        server.ClientConnected:Connect(function(client)
+            acceptedClient = client
+            client.MessageReceived:Connect(function(msg)
+                receivedOnServer = msg
+                client:Send("hello from server")
+            end)
+            client.Disconnected:Connect(function(code, reason)
+                serverClientDisconnectedFired = true
+                server:Close()
+            end)
+        end)
+        
+        server:Listen(0, "127.0.0.1")
+        local serverAddr = server:LocalAddress()
+        
+        local client = websocket.WebSocket:Create()
+        client.Connected:Connect(function()
+            client:Send("hello from client")
+        end)
+        
+        client.MessageReceived:Connect(function(msg)
+            receivedOnClient = msg
+            client:Close()
+        end)
+        
+        client.Disconnected:Connect(function(code, reason)
+            clientDisconnectedFired = true
+        end)
+        
+        client:Connect("ws://127.0.0.1:" .. tostring(serverAddr.port))
+        
+        task.wait(1)
+        
+        expect(acceptedClient ~= nil).toBe(true)
+        expect(receivedOnServer).toBe("hello from client")
+        expect(receivedOnClient).toBe("hello from server")
+        expect(clientDisconnectedFired).toBe(true)
+        expect(serverClientDisconnectedFired).toBe(true)
+    end)
 end)
