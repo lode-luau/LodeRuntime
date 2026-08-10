@@ -23,6 +23,9 @@ return {
             websocket = "modules/websocket",
             tcp = "modules/tcp",
             udp = "modules/udp",
+            sys = "modules/sys",
+            tty = "modules/tty",
+            pipe = "modules/pipe",
         }
     }
 }

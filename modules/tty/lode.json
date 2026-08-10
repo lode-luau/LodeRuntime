@@ -1,0 +1,18 @@
+{
+  "name": "tty",
+  "version": "0.1.0",
+  "description": "Lode TTY module (Terminal Streams, Async/LibUV)",
+  "author": "Lode Team",
+  "license": "MIT",
+  "libraries": {
+    "windows": {
+      "x64": "libs/windows/x64/tty.dll"
+    },
+    "linux": {
+      "x64": "libs/linux/x64/tty.so"
+    },
+    "macos": {
+      "x64": "libs/macos/x64/tty.dylib"
+    }
+  }
+}
