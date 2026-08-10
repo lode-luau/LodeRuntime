@@ -59,7 +59,10 @@ local function runTest(deps: any, suite: any, test: any, config: any, suiteName:
             if ok2 then
                 result.status = "passed"
             else
-                if type(err2) == "string" and string.match(err2, "^%[SKIPPED%]") then
+                -- `error("[SKIPPED] ...")` prefixes the message with the source
+                -- location (e.g. "init.luau:214: [SKIPPED] ..."), so match the
+                -- marker anywhere in the string rather than only at the start.
+                if type(err2) == "string" and string.find(err2, "[SKIPPED]", 1, true) then
                     result.status = "skipped"
                     result.error = err2
                 else

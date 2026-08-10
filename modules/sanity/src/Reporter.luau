@@ -99,7 +99,10 @@ local function printResultLine(result: any)
         stdio.print("  " .. color(ANSI.green, "✓ ") .. suite .. name
             .. color(ANSI.dim, string.format(" (%.0fms)", result.durationMs)))
     elseif result.status == "skipped" then
-        local msg = (tostring(result.error):gsub("^%[SKIPPED%] ", ""))
+        -- The error is prefixed with the source location and the [SKIPPED]
+        -- marker (e.g. "init.luau:214: [SKIPPED] reason"); strip both.
+        local msg = tostring(result.error)
+        msg = msg:gsub("^.-:%d+: %[SKIPPED%] ?", "")
         stdio.print("  " .. color(ANSI.yellow, "○ ") .. suite .. name
             .. color(ANSI.dim, string.format(" [skipped: %s]", msg)))
     else
@@ -177,10 +180,13 @@ local function report(results: { any }, totalDurationMs: number, testsElapsedMs:
 
     local passed = 0
     local failed = 0
+    local skipped = 0
 
     for _, r in ipairs(results) do
         if r.status == "passed" then
             passed += 1
+        elseif r.status == "skipped" then
+            skipped += 1
         else
             failed += 1
         end
@@ -188,10 +194,16 @@ local function report(results: { any }, totalDurationMs: number, testsElapsedMs:
 
     local runnerElapsedMs = totalDurationMs - testsElapsedMs
 
+    local summary = color(ANSI.green, tostring(passed) .. " passed")
+        .. "  "
+        .. color(ANSI.red, tostring(failed) .. " failed")
+    if skipped > 0 then
+        summary = summary .. "  " .. color(ANSI.yellow, tostring(skipped) .. " skipped")
+    end
+
     stdio.print(string.format(
-        "  %s  %s  %s",
-        color(ANSI.green, tostring(passed) .. " passed"),
-        color(ANSI.red, tostring(failed) .. " failed"),
+        "  %s  %s",
+        summary,
         color(ANSI.dim, string.format(
             "(%.0fms total · %.0fms tests · %.0fms runner)",
             totalDurationMs,
