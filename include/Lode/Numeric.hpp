@@ -16,7 +16,7 @@ namespace Lode::Numeric
 inline Result<size_t> ToSize(double value, const char* name)
 {
     if (!std::isfinite(value) || value < 0.0 || std::trunc(value) != value ||
-        value >= static_cast<double>(std::numeric_limits<size_t>::max()))
+        value >= static_cast<double>((std::numeric_limits<size_t>::max)()))
     {
         return Error::Type(std::string(name) + " must be a finite non-negative integer");
     }
@@ -33,7 +33,7 @@ inline Result<uint64_t> ToMilliseconds(double value, double multiplier, const ch
 
     double milliseconds = value * multiplier;
     if (!std::isfinite(milliseconds) ||
-        milliseconds >= static_cast<double>(std::numeric_limits<uint64_t>::max()))
+        milliseconds >= static_cast<double>((std::numeric_limits<uint64_t>::max)()))
     {
         return Error::Type(std::string(name) + " is out of range");
     }

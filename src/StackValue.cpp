@@ -130,6 +130,17 @@ size_t StackArgs::Size() const
     return numArgs_;
 }
 
+std::vector<Value> StackArgs::ToVector() const
+{
+    std::vector<Value> vec;
+    vec.reserve(numArgs_);
+    for (int i = 1; i <= numArgs_; ++i)
+    {
+        vec.push_back(Value::FromLuaState(L_, i));
+    }
+    return vec;
+}
+
 StackValue StackArgs::operator[](size_t i) const
 {
     // Lua stack starts at 1, but C++ APIs usually start at 0
