@@ -9,9 +9,14 @@
 namespace Lode::Detail
 {
 // Converts a UTF-8 path string to a std::filesystem::path.
+//
+// std::filesystem::u8path was deprecated in C++20 (and is slated for removal
+// in C++26); constructing the path directly from a char8_t view is the
+// portable, non-deprecated equivalent on every supported platform.
 inline std::filesystem::path PathFromUtf8(std::string_view path)
 {
-    return std::filesystem::u8path(path);
+    std::u8string_view u8(reinterpret_cast<const char8_t*>(path.data()), path.size());
+    return std::filesystem::path(u8);
 }
 
 // Converts a std::filesystem::path back to a UTF-8 string.

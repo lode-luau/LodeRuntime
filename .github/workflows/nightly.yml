@@ -43,14 +43,17 @@ jobs:
       - name: Validate Debug (sanity suite)
         run: ./build/bin/Debug/lode_runtime.exe modules/sanity/run.luau
 
-      - name: Validate Debug (integration test)
-        run: ./build/bin/Debug/lode_runtime.exe temp/test.luau
+      - name: "Validate Debug (ctest: native fixtures + diagnostics)"
+        run: ctest --test-dir build -C Debug --output-on-failure
 
       - name: Build Release
         run: cmake --build build --config Release
 
       - name: Validate Release (sanity suite)
         run: ./build/bin/Release/lode_runtime.exe modules/sanity/run.luau
+
+      - name: "Validate Release (ctest: native fixtures + diagnostics)"
+        run: ctest --test-dir build -C Release --output-on-failure
 
       - name: Package
         shell: pwsh

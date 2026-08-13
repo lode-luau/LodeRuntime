@@ -6,6 +6,7 @@ local describe = sanity.describe
 local it = sanity.it
 local expect = sanity.expect
 
+local task = require("../../../modules/task")
 local udp = require("../../udp")
 
 describe("udp", function()
@@ -93,5 +94,36 @@ describe("udp", function()
         expect(ok).toBe(false)
         local msg = tostring(err)
         expect(msg:find("port must be a number", 1, true) ~= nil).toBe(true)
+    end)
+end)
+
+describe("udp send/receive", function()
+    it("exchanges datagrams between two bound sockets", function()
+        local server = udp.UdpSocket:Create()
+        server:Bind("127.0.0.1", 0)
+        local serverAddr = server:LocalAddress()
+
+        local serverGot: any = nil
+        server.MessageReceived:Connect(function(msg, addr)
+            serverGot = msg
+            server:Send("pong", addr.host, addr.port)
+        end)
+
+        local client = udp.UdpSocket:Create()
+        client:Bind("127.0.0.1", 0)
+
+        local clientGot: any = nil
+        client.MessageReceived:Connect(function(msg)
+            clientGot = msg
+        end)
+
+        client:Send("ping", serverAddr.host, serverAddr.port)
+        task.wait(0.2)
+
+        expect(serverGot).toBe("ping")
+        expect(clientGot).toBe("pong")
+
+        client:Close()
+        server:Close()
     end)
 end)

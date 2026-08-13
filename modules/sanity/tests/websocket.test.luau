@@ -1,10 +1,9 @@
 --!strict
 --!native
 
--- Regression tests for the native websocket module.
--- These tests only exercise deterministic error paths (no network or live
--- server required); positive-path coverage is done against a local loopback
--- server via temp/test_websocket.luau.
+-- Regression tests for the native websocket module: deterministic error
+-- paths plus a full positive-path round trip (connect, send/receive,
+-- close) against a local loopback server.
 
 local sanity = require("../init")
 local describe = sanity.describe

@@ -1,6 +1,6 @@
 --!strict
 -- Scenario: native call throughput (fast and slow closure paths) using the
--- existing native_module exports from temp/native_module.
+-- existing native_module exports from tests/native/native_module.
 return function(bench: any, NativeMod: any)
     local square = NativeMod.square
     local roundTripReference = NativeMod.roundTripReference

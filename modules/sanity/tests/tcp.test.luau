@@ -6,6 +6,7 @@ local describe = sanity.describe
 local it = sanity.it
 local expect = sanity.expect
 
+local task = require("../../../modules/task")
 local tcp = require("../../tcp")
 
 describe("tcp", function()
@@ -86,5 +87,54 @@ describe("tcp", function()
         expect(ok).toBe(false)
         local msg = tostring(err)
         expect(msg:find("port must be a number", 1, true) ~= nil).toBe(true)
+    end)
+end)
+
+describe("tcp connect/send/receive", function()
+    it("exchanges messages between a client and an accepted server connection", function()
+        local server = tcp.Server:Create()
+        local serverGot: any = nil
+        local serverDisconnected = false
+
+        server.ClientConnected:Connect(function(client)
+            client.MessageReceived:Connect(function(msg)
+                serverGot = msg
+                client:Send("hello from server")
+            end)
+            client.Disconnected:Connect(function()
+                serverDisconnected = true
+            end)
+        end)
+
+        server:Listen(0, "127.0.0.1")
+        local serverAddr = server:LocalAddress()
+        expect(serverAddr.port > 0).toBe(true)
+
+        local client = tcp.TcpSocket:Create()
+        local clientGot: any = nil
+        local clientDisconnected = false
+
+        client.MessageReceived:Connect(function(msg)
+            clientGot = msg
+        end)
+        client.Disconnected:Connect(function()
+            clientDisconnected = true
+        end)
+
+        client:Connect(serverAddr.host, serverAddr.port)
+        expect(client:IsConnected()).toBe(true)
+
+        client:Send("hello from client")
+        local reply = { client.MessageReceived:Wait(5) }
+        expect(#reply > 0).toBe(true)
+        expect(reply[1]).toBe("hello from server")
+        expect(serverGot).toBe("hello from client")
+
+        client:Close()
+        task.wait(0.1)
+        expect(clientDisconnected or not client:IsConnected()).toBe(true)
+        expect(serverDisconnected).toBe(true)
+
+        server:Close()
     end)
 end)

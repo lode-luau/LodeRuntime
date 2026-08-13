@@ -63,7 +63,7 @@ end
 
 print("=== LodeRuntime Luau benchmarks ===")
 
-local NativeMod = require("../../temp/native_module")
+local NativeMod = require("../../tests/native/native_module")
 
 local scenarios = {
     require("./scenarios/native_calls"),

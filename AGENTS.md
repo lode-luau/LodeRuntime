@@ -22,7 +22,7 @@
 - Configure when needed: `cmake -B build`.
 - Build Debug: `cmake --build build --config Debug`.
 - Build Release: `cmake --build build --config Release`.
-- Tests: `build/bin/Debug/lode_runtime.exe modules/sanity/run.luau`, `build/bin/Release/lode_runtime.exe modules/sanity/run.luau`, and `build/bin/Debug/lode_runtime.exe temp/test.luau`.
+- Tests: `build/bin/Debug/lode_runtime.exe modules/sanity/run.luau`, `build/bin/Release/lode_runtime.exe modules/sanity/run.luau`, and `ctest --test-dir build -C Debug --output-on-failure` (native fixtures under `tests/native/` and diagnostics under `tests/diagnostics/`).
 - The sanity suite currently contains 33 tests; treat the reported count as authoritative if it changes.
 - Run Debug and Release builds sequentially when native DLL copy steps can conflict; retry a failed copy-only build before changing code.
 
@@ -51,4 +51,4 @@
 ## Notes
 - Do not keep temporary probe executables/targets in the repo; validate through the real runtime path (`lode_runtime` + `.luau`), not standalone probes that link Luau twice.
 - Native modules and asynchronous resources must be tested through the real runtime path and must be shut down before the owning `State` is destroyed.
-- The canonical integration test is `temp/test.luau`; the canonical regression suite is `modules/sanity/run.luau`.
+- The canonical integration/regression tests are the CTest suite under `tests/` (native fixtures + diagnostics, see `tests/CMakeLists.txt`) and `modules/sanity/run.luau`.

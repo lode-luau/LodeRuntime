@@ -58,7 +58,7 @@ LODE_MODULE(vm)
     auto utils = vm.Require("@self/utils").AsTable();
 
     // --- Test 2: require("./sibling_module") ---
-    // Loads temp/sibling_module.luau — one level above this package folder.
+    // Loads tests/native/sibling_module.luau — one level above this package folder.
     // ./X from a native module resolves relative to the parent of the package folder,
     // the same way it does from an init.luau-based package.
     auto sibling = vm.Require("./sibling_module").AsTable();

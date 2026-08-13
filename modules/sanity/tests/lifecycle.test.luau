@@ -6,7 +6,7 @@ local it = sanity.it
 local expect = sanity.expect
 local task = require("../../../modules/task")
 local fs = require("../../filesystem")
-local native = require("../../../temp/native_module")
+local native = require("../../../tests/native/native_module")
 
 describe("runtime lifecycle and error handling", function()
     it("preserves non-string Lua errors through protected calls", function()
@@ -91,7 +91,7 @@ describe("runtime lifecycle and error handling", function()
     it("reports malformed native module metadata as a Lua error", function()
         local req: (string) -> any = require
         local ok, err = pcall(function()
-            req("../../../temp/invalid_module")
+            req("../../../tests/native/invalid_module")
         end)
         expect(ok).toBe(false)
         expect(typeof(err)).toBe("string")
@@ -100,7 +100,7 @@ describe("runtime lifecycle and error handling", function()
     it("rejects native libraries outside the module directory", function()
         local req: (string) -> any = require
         local ok, err = pcall(function()
-            req("../../../temp/path_escape_module")
+            req("../../../tests/native/path_escape_module")
         end)
         expect(ok).toBe(false)
         expect(typeof(err)).toBe("string")

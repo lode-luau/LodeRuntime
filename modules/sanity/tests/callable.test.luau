@@ -8,7 +8,7 @@ local describe = sanity.describe
 local it = sanity.it
 local expect = sanity.expect
 
-local native = require("../../../temp/native_module")
+local native = require("../../../tests/native/native_module")
 
 describe("callable values", function()
     it("calls a table with __call through the native Value API", function()
