@@ -33,11 +33,12 @@ A fast, modular runtime environment for executing Luau scripts.
 
 ### Running Tests
 
-    ./build/bin/Release/lode_runtime temp/test.luau
+    ./build/bin/Release/lode_runtime modules/sanity/run.luau
+    ctest --test-dir build -C Release --output-on-failure
 
 ## Contributing
 
-Please read our [Contributing Guide](CONTRIBUTING.md) and [Code of Conduct](CODE_OF_CONDUCT.md). For security matters, see [SECURITY.md](SECURITY.md).
+Please read our [Contributing Guide](CONTRIBUTING.md) and [Code of Conduct](CODE_OF_CONDUCT.md). For security matters, see [SECURITY.md](SECURITY.md). See [CHANGELOG.md](CHANGELOG.md) for notable changes.
 
 ## License
 

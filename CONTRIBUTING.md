@@ -114,11 +114,14 @@ Run the full validation flow, Debug and Release sequentially:
 
 * `build/bin/Debug/lode_runtime.exe modules/sanity/run.luau`
 * `build/bin/Release/lode_runtime.exe modules/sanity/run.luau`
-* `build/bin/Debug/lode_runtime.exe temp/test.luau`
+* `ctest --test-dir build -C Debug --output-on-failure`
 
 The sanity suite currently contains 33 tests; treat the reported count as
-authoritative if it changes. Validation must go through the real runtime path
-(`lode_runtime` + `.luau`) — do not keep temporary probe executables in the
+authoritative if it changes. The `ctest` run covers the native module
+fixtures and integration scripts under `tests/native/` and the diagnostic
+regression scripts under `tests/diagnostics/`. Validation must go through the
+real runtime path (`lode_runtime` + `.luau`) — do not keep temporary probe
+executables in the repo.
 repository.
 
 ### Reviewing Pull Requests
