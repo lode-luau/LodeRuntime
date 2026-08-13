@@ -1,0 +1,24 @@
+# Minimal, non-invasive style config matching the existing codebase
+# (Allman braces, 4-space indent, ~120 column soft limit). Intended to keep
+# new/changed code consistent; not enforced in CI yet.
+BasedOnStyle: Microsoft
+Language: Cpp
+Standard: c++20
+
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 120
+
+BreakBeforeBraces: Allman
+AllowShortIfStatementsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortLambdasOnASingleLine: All
+IndentCaseLabels: true
+NamespaceIndentation: None
+
+PointerAlignment: Left
+ReferenceAlignment: Left
+SpaceAfterTemplateKeyword: false
+
+SortIncludes: Never
