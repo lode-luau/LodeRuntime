@@ -77,9 +77,13 @@ FetchContent_Declare(
 
 
 # Fetch nlohmann_json for lightweight lode.json parsing
+# URL_HASH pins the exact artifact content (supply-chain / reproducibility
+# guard): if upstream ever serves different bytes for this tag, configure
+# fails loudly instead of silently building against unknown code.
 FetchContent_Declare(
     json
     URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
+    URL_HASH SHA256=d6c65aca6b1ed68e7a182f4757257b107ae403032760ed6ef121c9d55e81757d
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
 
@@ -90,6 +94,7 @@ FetchContent_Declare(
 FetchContent_Declare(
     rapidjson
     URL https://github.com/Tencent/rapidjson/archive/v1.1.0.tar.gz
+    URL_HASH SHA256=bf7ced29704a1e696fbccf2a2b4ea068e7774fa37f6d7dd4039d0787f8bed98e
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
 
@@ -215,17 +220,14 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/bench/CMakeLists.txt")
     add_subdirectory(bench)
 endif()
 
-# Add subdirectories for optional/test modules
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/temp/native_module/CMakeLists.txt")
-    add_subdirectory(temp/native_module)
-endif()
-
 # All native modules under modules/ are aggregated by modules/CMakeLists.txt,
 # which globs for CMakeLists.txt files so new modules need no top-level edit.
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/modules/CMakeLists.txt")
     add_subdirectory(modules)
 endif()
 
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/temp/simd_module/CMakeLists.txt")
-    add_subdirectory(temp/simd_module)
+# Regression/integration tests, driven by CTest. See tests/CMakeLists.txt.
+enable_testing()
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.txt")
+    add_subdirectory(tests)
 endif()
