@@ -1,0 +1,37 @@
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-validate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -B build
+
+      - name: Build Debug
+        run: cmake --build build --config Debug
+
+      - name: Validate Debug (sanity suite)
+        run: ./build/bin/Debug/lode_runtime.exe modules/sanity/run.luau
+
+      - name: Validate Debug (ctest: native fixtures + diagnostics)
+        run: ctest --test-dir build -C Debug --output-on-failure
+
+      - name: Build Release
+        run: cmake --build build --config Release
+
+      - name: Validate Release (sanity suite)
+        run: ./build/bin/Release/lode_runtime.exe modules/sanity/run.luau
+
+      - name: Validate Release (ctest: native fixtures + diagnostics)
+        run: ctest --test-dir build -C Release --output-on-failure
