@@ -9,9 +9,6 @@ on:
 permissions:
   contents: read
 
-env:
-  SCCACHE_DIR: ${{ runner.temp }}/sccache
-
 jobs:
   build-and-validate:
     runs-on: windows-latest
@@ -44,8 +41,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-fetchcontent-
 
-      # 4. Configure Debug (Ninja single-config tree)
+      # 4. Configure Debug (Ninja single-config tree). ${{ runner.temp }} is
+      #    only available in step-level env, not workflow/job-level env.
       - name: Configure Debug
+        env:
+          SCCACHE_DIR: ${{ runner.temp }}/sccache
         run: >-
           cmake -B build-debug -G Ninja -DCMAKE_BUILD_TYPE=Debug
           -DFETCHCONTENT_BASE_DIR=${{ runner.temp }}/_deps
@@ -53,6 +53,8 @@ jobs:
           -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
 
       - name: Build Debug
+        env:
+          SCCACHE_DIR: ${{ runner.temp }}/sccache
         run: cmake --build build-debug
 
       - name: Validate Debug (sanity suite)
@@ -63,6 +65,8 @@ jobs:
 
       # 5. Configure Release (Ninja single-config tree, reuses shared deps)
       - name: Configure Release
+        env:
+          SCCACHE_DIR: ${{ runner.temp }}/sccache
         run: >-
           cmake -B build-release -G Ninja -DCMAKE_BUILD_TYPE=Release
           -DFETCHCONTENT_BASE_DIR=${{ runner.temp }}/_deps
@@ -70,6 +74,8 @@ jobs:
           -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
 
       - name: Build Release
+        env:
+          SCCACHE_DIR: ${{ runner.temp }}/sccache
         run: cmake --build build-release
 
       - name: Validate Release (sanity suite)
@@ -80,4 +86,6 @@ jobs:
 
       # 6. Report cache hit rate in the log
       - name: Show sccache stats
+        env:
+          SCCACHE_DIR: ${{ runner.temp }}/sccache
         run: sccache --show-stats
