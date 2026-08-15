@@ -67,6 +67,8 @@ jobs:
       - name: "Validate Release (ctest: native fixtures + diagnostics)"
         run: ctest --test-dir build -C Release --output-on-failure
 
-      # 5. Report cache hit rate in the log
+      # 5. Report cache hit rate in the log (against the cached SCCACHE_DIR)
       - name: Show sccache stats
+        env:
+          SCCACHE_DIR: ${{ runner.temp }}/sccache
         run: sccache --show-stats

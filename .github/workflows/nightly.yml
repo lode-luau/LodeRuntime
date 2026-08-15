@@ -89,6 +89,8 @@ jobs:
         run: ctest --test-dir build -C Release --output-on-failure
 
       - name: Show sccache stats
+        env:
+          SCCACHE_DIR: ${{ runner.temp }}/sccache
         run: sccache --show-stats
 
       - name: Package
