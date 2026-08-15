@@ -15,10 +15,39 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 1. Set up the sccache tool
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.8
+
+      # 2. Restore/save cache of compiled C++ objects
+      - name: Cache sccache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/sccache
+          key: ${{ runner.os }}-sccache-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-sccache-
+
+      # 3. Restore/save dependencies downloaded via FetchContent
+      - name: Cache FetchContent
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: ${{ runner.os }}-fetchcontent-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-fetchcontent-
+
+      # 4. Configure, injecting sccache into CMake
       - name: Configure
+        env:
+          SCCACHE_DIR: ${{ runner.temp }}/sccache
+          CMAKE_C_COMPILER_LAUNCHER: sccache
+          CMAKE_CXX_COMPILER_LAUNCHER: sccache
         run: cmake -B build
 
       - name: Build Debug
+        env:
+          SCCACHE_DIR: ${{ runner.temp }}/sccache
         run: cmake --build build --config Debug
 
       - name: Validate Debug (sanity suite)
@@ -28,6 +57,8 @@ jobs:
         run: ctest --test-dir build -C Debug --output-on-failure
 
       - name: Build Release
+        env:
+          SCCACHE_DIR: ${{ runner.temp }}/sccache
         run: cmake --build build --config Release
 
       - name: Validate Release (sanity suite)
@@ -35,3 +66,7 @@ jobs:
 
       - name: "Validate Release (ctest: native fixtures + diagnostics)"
         run: ctest --test-dir build -C Release --output-on-failure
+
+      # 5. Report cache hit rate in the log
+      - name: Show sccache stats
+        run: sccache --show-stats
