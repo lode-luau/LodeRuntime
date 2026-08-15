@@ -34,10 +34,41 @@ jobs:
           N=$((MAX + 1))
           echo "version=0.1.0-nightly.${DATE_UTC}.${N}" >> "$GITHUB_OUTPUT"
 
+      # 1. Set up the sccache tool
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.8
+
+      # 2. Restore/save cache of compiled C++ objects, falling back to the
+      #    cache written by the ci workflow so main and nightly share hits.
+      - name: Cache sccache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/sccache
+          key: ${{ runner.os }}-sccache-nightly-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-sccache-nightly-
+            ${{ runner.os }}-sccache-
+
+      # 3. Restore/save dependencies downloaded via FetchContent
+      - name: Cache FetchContent
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: ${{ runner.os }}-fetchcontent-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-fetchcontent-
+
+      # 4. Configure, injecting sccache into CMake
       - name: Configure
+        env:
+          SCCACHE_DIR: ${{ runner.temp }}/sccache
+          CMAKE_C_COMPILER_LAUNCHER: sccache
+          CMAKE_CXX_COMPILER_LAUNCHER: sccache
         run: cmake -B build
 
       - name: Build Debug
+        env:
+          SCCACHE_DIR: ${{ runner.temp }}/sccache
         run: cmake --build build --config Debug
 
       - name: Validate Debug (sanity suite)
@@ -47,6 +78,8 @@ jobs:
         run: ctest --test-dir build -C Debug --output-on-failure
 
       - name: Build Release
+        env:
+          SCCACHE_DIR: ${{ runner.temp }}/sccache
         run: cmake --build build --config Release
 
       - name: Validate Release (sanity suite)
@@ -54,6 +87,9 @@ jobs:
 
       - name: "Validate Release (ctest: native fixtures + diagnostics)"
         run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Show sccache stats
+        run: sccache --show-stats
 
       - name: Package
         shell: pwsh
