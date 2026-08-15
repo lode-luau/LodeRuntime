@@ -9,6 +9,11 @@ if(POLICY CMP0091)
     cmake_policy(SET CMP0091 NEW)
 endif()
 
+# rapidjson v1.1.0 declares cmake_minimum_required(VERSION 2.8), which modern
+# CMake refuses to configure. Floor the minimum supported policy version so
+# its header-only target can be added via FetchContent_MakeAvailable below.
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+
 project(LodeRuntime LANGUAGES C CXX)
 
 if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
