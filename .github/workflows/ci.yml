@@ -41,13 +41,19 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-fetchcontent-
 
-      # 4. Configure Debug (Ninja single-config tree). ${{ runner.temp }} is
+      # 4. Ninja needs the MSVC toolchain on PATH; without this it would pick
+      #    the MinGW GCC that is also present on windows-latest runners.
+      - name: Enable MSVC toolchain
+        uses: ilammy/msvc-dev-cmd@v1
+
+      # 5. Configure Debug (Ninja single-config tree). ${{ runner.temp }} is
       #    only available in step-level env, not workflow/job-level env.
       - name: Configure Debug
         env:
           SCCACHE_DIR: ${{ runner.temp }}/sccache
         run: >-
           cmake -B build-debug -G Ninja -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl
           -DFETCHCONTENT_BASE_DIR=${{ runner.temp }}/_deps
           -DCMAKE_C_COMPILER_LAUNCHER=sccache
           -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
@@ -63,12 +69,13 @@ jobs:
       - name: "Validate Debug (ctest: native fixtures + diagnostics)"
         run: ctest --test-dir build-debug -C Debug --output-on-failure
 
-      # 5. Configure Release (Ninja single-config tree, reuses shared deps)
+      # 6. Configure Release (Ninja single-config tree, reuses shared deps)
       - name: Configure Release
         env:
           SCCACHE_DIR: ${{ runner.temp }}/sccache
         run: >-
           cmake -B build-release -G Ninja -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl
           -DFETCHCONTENT_BASE_DIR=${{ runner.temp }}/_deps
           -DCMAKE_C_COMPILER_LAUNCHER=sccache
           -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
@@ -84,7 +91,7 @@ jobs:
       - name: "Validate Release (ctest: native fixtures + diagnostics)"
         run: ctest --test-dir build-release -C Release --output-on-failure
 
-      # 6. Report cache hit rate in the log
+      # 7. Report cache hit rate in the log
       - name: Show sccache stats
         env:
           SCCACHE_DIR: ${{ runner.temp }}/sccache
