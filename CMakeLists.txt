@@ -44,12 +44,15 @@ if(NOT CMAKE_CONFIGURATION_TYPES AND CMAKE_BUILD_TYPE)
 endif()
 
 if(MSVC)
+    # /O2 is the standard speed optimization. /Zi (not /ZI) keeps MSVC output
+    # cacheable by sccache; /GL and /LTCG were removed because whole-program
+    # optimization / link-time codegen defeats most of the sccache benefit.
     add_compile_options(
-        $<$<CONFIG:Release>:/O1>
-        $<$<CONFIG:Release>:/GL>
+        $<$<CONFIG:Release>:/O2>
+        $<$<CONFIG:Release>:/Zi>
     )
     add_link_options(
-        $<$<CONFIG:Release>:/LTCG>
+        # Keep dead symbol and duplicate-COMDAT removal
         $<$<CONFIG:Release>:/OPT:REF>
         $<$<CONFIG:Release>:/OPT:ICF>
     )
