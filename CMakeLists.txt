@@ -92,14 +92,18 @@ FetchContent_Declare(
 
 # Fetch rapidjson for the native JSON parse/stringify core (SAX Reader +
 # Writer; header-only, no intermediate DOM). See src/Json.cpp.
-# NOTE: rapidjson's own CMakeLists.txt requires CMake < 3.5, so it cannot be
-# added with MakeAvailable; header-only, so we only need its include dir.
+# rapidjson builds docs/examples/tests by default, so disable them and let
+# FetchContent_MakeAvailable add the header-only RapidJSON target.
 FetchContent_Declare(
     rapidjson
     URL https://github.com/Tencent/rapidjson/archive/v1.1.0.tar.gz
     URL_HASH SHA256=bf7ced29704a1e696fbccf2a2b4ea068e7774fa37f6d7dd4039d0787f8bed98e
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
+set(RAPIDJSON_BUILD_DOC OFF CACHE BOOL "" FORCE)
+set(RAPIDJSON_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(RAPIDJSON_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(RAPIDJSON_BUILD_THIRDPARTY_GTEST OFF CACHE BOOL "" FORCE)
 
 # Fetch libuv for high-performance OS Event Loop
 FetchContent_Declare(
@@ -111,12 +115,7 @@ FetchContent_Declare(
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
 
-FetchContent_MakeAvailable(luau json libuv)
-
-FetchContent_GetProperties(rapidjson)
-if(NOT rapidjson_POPULATED)
-    FetchContent_Populate(rapidjson)
-endif()
+FetchContent_MakeAvailable(luau json libuv rapidjson)
 
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include
