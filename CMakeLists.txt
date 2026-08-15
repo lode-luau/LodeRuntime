@@ -52,7 +52,10 @@ if(MSVC)
     # /O2 is the standard speed optimization. /Zi (not /ZI) keeps MSVC output
     # cacheable by sccache; /GL and /LTCG were removed because whole-program
     # optimization / link-time codegen defeats most of the sccache benefit.
+    # /FS forces synchronous PDB writes so concurrent Ninja jobs compiling the
+    # same target do not corrupt its .pdb (MSBuild already defaults to /FS).
     add_compile_options(
+        /FS
         $<$<CONFIG:Release>:/O2>
         $<$<CONFIG:Release>:/Zi>
     )
