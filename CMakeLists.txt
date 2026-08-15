@@ -1,5 +1,16 @@
 cmake_minimum_required(VERSION 3.20)
 
+# MSVC debug info must be Embedded (/Z7) so each object file is self-contained
+# instead of sharing one .pdb. With /Zi, concurrent CL.EXE processes need /FS
+# to coordinate; sccache silently strips /FS (sccache#1012), so parallel Ninja
+# builds then fail with C1041. /Z7 keeps the .obj fully cacheable by sccache.
+# CMP0141 + CMAKE_MSVC_DEBUG_INFORMATION_FORMAT must be set before project(),
+# because MSVC compiler flags are initialized during enable_language().
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.25)
+    cmake_policy(SET CMP0141 NEW)
+    set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "Embedded")
+endif()
+
 if(POLICY CMP0135)
     cmake_policy(SET CMP0135 NEW)
 endif()
@@ -49,15 +60,12 @@ if(NOT CMAKE_CONFIGURATION_TYPES AND CMAKE_BUILD_TYPE)
 endif()
 
 if(MSVC)
-    # /O2 is the standard speed optimization. /Zi (not /ZI) keeps MSVC output
-    # cacheable by sccache; /GL and /LTCG were removed because whole-program
-    # optimization / link-time codegen defeats most of the sccache benefit.
-    # /FS forces synchronous PDB writes so concurrent Ninja jobs compiling the
-    # same target do not corrupt its .pdb (MSBuild already defaults to /FS).
+    # /O2 is the standard speed optimization. /GL and /LTCG were removed
+    # because whole-program optimization / link-time codegen defeats most of
+    # the sccache benefit.
     add_compile_options(
         /FS
         $<$<CONFIG:Release>:/O2>
-        $<$<CONFIG:Release>:/Zi>
     )
     add_link_options(
         # Keep dead symbol and duplicate-COMDAT removal
