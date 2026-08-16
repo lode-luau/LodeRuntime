@@ -210,12 +210,27 @@ bool ParseFetchOptions(Lode::State& vm, const Lode::Value& val, HttpRequestOptio
         auto b = t.Get("body");
         if (b.IsOk() && !b.GetValue().IsNil())
         {
-            if (!b.GetValue().IsString())
+            if (b.GetValue().IsString())
             {
-                vm.RaiseError("fetch options 'body' must be a string");
+                opts.body = b.GetValue().AsString();
+            }
+            else if (b.GetValue().IsBuffer())
+            {
+                size_t size = 0;
+                void* data = b.GetValue().AsBuffer(&size);
+                if (data || size == 0)
+                    opts.body.assign(static_cast<const char*>(data), size);
+                else
+                {
+                    vm.RaiseError("fetch options 'body' buffer is invalid");
+                    return false;
+                }
+            }
+            else
+            {
+                vm.RaiseError("fetch options 'body' must be a string or buffer");
                 return false;
             }
-            opts.body = b.GetValue().AsString();
         }
     }
 
