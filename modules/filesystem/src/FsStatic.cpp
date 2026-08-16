@@ -236,7 +236,8 @@ static void LodeuvFsWork(uv_work_t* req) {
                 break;
             }
             case FsOp::CopyFile: {
-                fs::copy(p, fs::path(ctx->destPath), fs::copy_options::overwrite_existing);
+                fs::copy(p, fs::path(ctx->destPath),
+                         fs::copy_options::recursive | fs::copy_options::overwrite_existing);
                 ctx->success = true;
                 break;
             }

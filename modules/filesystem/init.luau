@@ -164,7 +164,7 @@ export type FileSystemModule = {
         data: string | buffer
     ) -> (),
 
-    --- Copies a file asynchronously.
+    --- Copies a file or directory tree asynchronously.
     CopyFile: (
         --- The source file path
         srcPath: string,
