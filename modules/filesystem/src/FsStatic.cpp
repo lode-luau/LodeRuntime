@@ -22,11 +22,127 @@ namespace fs = std::filesystem;
 namespace lodefs {
 
 // ============================================================================
+// GLOB MATCHING
+// ============================================================================
+
+// Matches a single path segment against a pattern supporting '*' and '?'.
+static bool GlobSegmentMatch(const std::string& pattern, const std::string& name) {
+    size_t pi = 0;
+    size_t ni = 0;
+    while (pi < pattern.size())
+    {
+        char pc = pattern[pi];
+        if (pc == '*')
+        {
+            for (size_t k = ni; k <= name.size(); ++k)
+            {
+                if (GlobSegmentMatch(pattern.substr(pi + 1), name.substr(k)))
+                    return true;
+            }
+            return false;
+        }
+        if (pc == '?')
+        {
+            if (ni >= name.size())
+                return false;
+            ++pi;
+            ++ni;
+            continue;
+        }
+        if (pi < pattern.size() && ni < name.size() && pattern[pi] == name[ni])
+        {
+            ++pi;
+            ++ni;
+            continue;
+        }
+        return false;
+    }
+    return ni == name.size();
+}
+
+// Recursively matches relative path segments against glob parts. '**' matches
+// zero or more segments; '*' and '?' match within a single segment.
+static bool GlobPathsMatch(const std::vector<std::string>& parts, size_t pi,
+                           const std::vector<std::string>& segs, size_t si) {
+    if (pi == parts.size())
+        return si == segs.size();
+    if (parts[pi] == "**")
+    {
+        for (size_t skip = 0; skip <= segs.size() - si; ++skip)
+        {
+            if (GlobPathsMatch(parts, pi + 1, segs, si + skip))
+                return true;
+        }
+        return false;
+    }
+    if (si >= segs.size())
+        return false;
+    if (!GlobSegmentMatch(parts[pi], segs[si]))
+        return false;
+    return GlobPathsMatch(parts, pi + 1, segs, si + 1);
+}
+
+// Collects file entries under root whose path relative to root matches pattern.
+static void GlobCollect(const std::string& pattern,
+                        std::vector<std::string>& out) {
+    std::string normalized = pattern;
+    for (char& c : normalized)
+    {
+        if (c == '\\')
+            c = '/';
+    }
+
+    size_t wildcard = normalized.find_first_of("*?");
+    size_t separator = wildcard == std::string::npos ? std::string::npos : normalized.rfind('/', wildcard);
+    std::string baseText = separator == std::string::npos ? "." : normalized.substr(0, separator);
+    std::string globText = separator == std::string::npos ? normalized : normalized.substr(separator + 1);
+    if (baseText.empty())
+        baseText = "/";
+
+    fs::path base = fs::path(baseText);
+
+    // Split the wildcard portion on '/'.
+    std::vector<std::string> parts;
+    std::string cur;
+    for (char c : globText)
+    {
+        if (c == '/' || c == '\\')
+        {
+            if (!cur.empty())
+                parts.push_back(cur);
+            cur.clear();
+            continue;
+        }
+        cur.push_back(c);
+    }
+    if (!cur.empty())
+        parts.push_back(cur);
+
+    if (!fs::exists(base) || !fs::is_directory(base))
+        return;
+
+    std::vector<std::string> tail = std::move(parts);
+    std::error_code ec;
+    for (auto it = fs::recursive_directory_iterator(base, fs::directory_options::skip_permission_denied, ec);
+         it != fs::recursive_directory_iterator(); it.increment(ec))
+    {
+        if (it->is_directory())
+            continue;
+        fs::path rel = it->path().lexically_relative(base);
+        std::vector<std::string> segs;
+        for (const auto& part : rel)
+            segs.push_back(part.generic_string());
+        if (GlobPathsMatch(tail, 0, segs, 0))
+            out.push_back(rel.generic_string());
+    }
+}
+
+// ============================================================================
 // FS WORK CONTEXT & WORKER THREAD
 // ============================================================================
 enum class FsOp {
     ReadFile, WriteFile, AppendFile, CopyFile, Rename,
-    Exists, Mkdir, ReadDir, Stat, Realpath, Rm, ReadToBuffer
+    Exists, Mkdir, ReadDir, Stat, Realpath, Rm, ReadToBuffer, Glob
 };
 
 struct FsWorkContext {
@@ -40,6 +156,7 @@ struct FsWorkContext {
     std::string targetPath;
     std::string destPath;     // For copy/rename
     std::string writeData;    // For write/append
+    std::string globPattern;  // For Glob
     bool isBuffer = false;    // For readFile returning buffer
     
     bool recursive = false;   // For Rm
@@ -146,6 +263,11 @@ static void LodeuvFsWork(uv_work_t* req) {
                 ctx->success = true;
                 break;
             }
+            case FsOp::Glob: {
+                GlobCollect(ctx->globPattern, ctx->dirFiles);
+                ctx->success = true;
+                break;
+            }
             case FsOp::Stat: {
                 if (!fs::exists(p)) throw std::runtime_error("Path does not exist: " + ctx->targetPath);
                 ctx->statIsDirectory = fs::is_directory(p);
@@ -215,7 +337,7 @@ static bool SubmitWork(Lode::State& vmOuter, FsWorkContext* ctx) {
                 args.push_back(Lode::Value(ctx->readDataStr));
             } else if (ctx->op == FsOp::Exists) {
                 args.push_back(Lode::Value(ctx->statIsFile)); // We stored bool in statIsFile
-            } else if (ctx->op == FsOp::ReadDir) {
+            } else if (ctx->op == FsOp::ReadDir || ctx->op == FsOp::Glob) {
                 Lode::Table t = vm.CreateTable();
                 for (size_t i = 0; i < ctx->dirFiles.size(); ++i) {
                     t.Set(static_cast<int>(i + 1), Lode::Value(ctx->dirFiles[i]));
@@ -274,6 +396,8 @@ static Lode::Value CreateAsyncMethod(Lode::State& vmOuter, FsOp op, bool isBuffe
         ctx->isYield = true;
         ctx->isBuffer = isBuffer;
         ctx->targetPath = args[0].AsString();
+        if (op == FsOp::Glob)
+            ctx->globPattern = ctx->targetPath;
         
         if (op == FsOp::WriteFile || op == FsOp::AppendFile) {
             if (args.size() > 1) {
@@ -337,6 +461,7 @@ void BindStaticMethods(Lode::State& vm, Lode::Exports& exports)
     exports.SetValue("Exists", CreateAsyncMethod(vm, FsOp::Exists, false));
     exports.SetValue("CreateDirectory", CreateAsyncMethod(vm, FsOp::Mkdir, false));
     exports.SetValue("ReadDirectory", CreateAsyncMethod(vm, FsOp::ReadDir, false));
+    exports.SetValue("Glob", CreateAsyncMethod(vm, FsOp::Glob, false));
     exports.SetValue("Stat", CreateAsyncMethod(vm, FsOp::Stat, false));
     exports.SetValue("RealPath", CreateAsyncMethod(vm, FsOp::Realpath, false));
     exports.SetValue("RemoveFile", CreateAsyncMethod(vm, FsOp::Rm, false));

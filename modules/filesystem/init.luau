@@ -200,6 +200,13 @@ export type FileSystemModule = {
         dirPath: string
     ) -> { string },
 
+    --- Finds files matching *, ?, and ** glob patterns asynchronously.
+    --- @return Paths relative to the non-wildcard portion of the pattern
+    Glob: (
+        --- The glob pattern
+        pattern: string
+    ) -> { string },
+
     --- Retrieves file status information asynchronously.
     --- @return A table with file statistics
     Stat: (
