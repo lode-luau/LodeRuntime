@@ -89,6 +89,7 @@ describe("http", function()
         expect(tostring(err):find("already listening", 1, true) ~= nil).toBe(true)
         server:Close()
     end)
+
     it("fetch rejects invalid options type", function()
         local ok, err = pcall(function()
             http.fetch("http://127.0.0.1:1/", "not a table")
@@ -126,6 +127,82 @@ describe("http", function()
         end)
         expect(ok).toBe(false)
         expect(tostring(err):find("expected host as string", 1, true) ~= nil).toBe(true)
+        server:Close()
+    end)
+
+    it("HttpServer handles HTTP request and response cycle", function()
+        local server = http.Server.Create()
+        server:Listen(0, "127.0.0.1")
+        local addr = server:LocalAddress()
+        expect(addr.port > 0).toBe(true)
+
+        local receivedMethod = ""
+        local receivedPath = ""
+        local receivedQuery = ""
+        local receivedHeader = ""
+
+        server.RequestReceived:Connect(function(req, res)
+            receivedMethod = req.method
+            receivedPath = req.path
+            receivedQuery = req.query
+            receivedHeader = req.headers["x-client-test"] or ""
+
+            res:SetHeader("X-Server-Response", "LodeHttpTest")
+            res:SetStatus(200)
+            res:Send("Hello from HttpServer!")
+        end)
+
+        local url = string.format("http://127.0.0.1:%d/api/greet?user=alice", addr.port)
+        local response = http.fetch(url, {
+            headers = {
+                ["x-client-test"] = "ClientGreeting",
+            }
+        })
+
+        expect(response.status).toBe(200)
+        expect(tostring(response.body)).toBe("Hello from HttpServer!")
+        expect(response.headers["x-server-response"]).toBe("LodeHttpTest")
+
+        expect(receivedMethod).toBe("GET")
+        expect(receivedPath).toBe("/api/greet")
+        expect(receivedQuery).toBe("user=alice")
+        expect(receivedHeader).toBe("ClientGreeting")
+
+        server:Close()
+    end)
+
+    it("HttpServer handles concurrent requests cleanly", function()
+        local server = http.Server.Create()
+        server:Listen(0, "127.0.0.1")
+        local addr = server:LocalAddress()
+
+        local count = 0
+        server.RequestReceived:Connect(function(req, res)
+            count += 1
+            res:SetStatus(200)
+            res:Send("Echo: " .. req.path)
+        end)
+
+        local t1 = task.spawn(function()
+            local r = http.fetch(string.format("http://127.0.0.1:%d/req1", addr.port))
+            expect(r.status).toBe(200)
+            expect(tostring(r.body)).toBe("Echo: /req1")
+        end)
+
+        local t2 = task.spawn(function()
+            local r = http.fetch(string.format("http://127.0.0.1:%d/req2", addr.port))
+            expect(r.status).toBe(200)
+            expect(tostring(r.body)).toBe("Echo: /req2")
+        end)
+
+        local t3 = task.spawn(function()
+            local r = http.fetch(string.format("http://127.0.0.1:%d/req3", addr.port))
+            expect(r.status).toBe(200)
+            expect(tostring(r.body)).toBe("Echo: /req3")
+        end)
+
+        task.wait(0.2)
+        expect(count).toBe(3)
         server:Close()
     end)
 end)

@@ -50,6 +50,7 @@ LODE_MODULE(vm)
         server->mgr = mgr;
         server->mainL = mgr->mainL;
         server->loop = mgr->loop;
+        server->responseMethods = lodehttp::BuildResponseMethods(vm2);
         server->InitSignals(vm2);
         mgr->AddServer(server);
         server->selfGuard = server;
