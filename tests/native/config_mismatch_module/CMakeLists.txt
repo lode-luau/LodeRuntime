@@ -28,10 +28,10 @@ else()
     set(TARGET_ARCH "x86")
 endif()
 
-set(NATIVE_OUTPUT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/libs/${TARGET_PLATFORM}/${TARGET_ARCH}")
+set(NATIVE_OUTPUT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/libs/${TARGET_PLATFORM}/${TARGET_ARCH}/$<CONFIG>")
 
 add_custom_command(TARGET config_mismatch_module POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "${NATIVE_OUTPUT_DIR}"
     COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:config_mismatch_module> "${NATIVE_OUTPUT_DIR}/${TARGET_LIB_NAME}"
-    COMMENT "Copying config_mismatch_module binary to libs/${TARGET_PLATFORM}/${TARGET_ARCH}"
+    COMMENT "Copying config_mismatch_module binary to libs/${TARGET_PLATFORM}/${TARGET_ARCH}/$<CONFIG>"
 )

@@ -35,19 +35,20 @@ set_target_properties(simd_module PROPERTIES
 
 if(WIN32)
     add_custom_command(TARGET simd_module POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:simd_module> "${CMAKE_CURRENT_SOURCE_DIR}/libs/windows/x64/$<TARGET_FILE_NAME:simd_module>"
-        COMMENT "Copying simd_module binary to libs/windows/x64"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_SOURCE_DIR}/libs/windows/x64/$<CONFIG>"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:simd_module> "${CMAKE_CURRENT_SOURCE_DIR}/libs/windows/x64/$<CONFIG>/$<TARGET_FILE_NAME:simd_module>"
+        COMMENT "Copying simd_module binary to libs/windows/x64/$<CONFIG>"
     )
 elseif(APPLE)
     add_custom_command(TARGET simd_module POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_SOURCE_DIR}/libs/macos/x64"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:simd_module> "${CMAKE_CURRENT_SOURCE_DIR}/libs/macos/x64/$<TARGET_FILE_NAME:simd_module>"
-        COMMENT "Copying simd_module binary to libs/macos/x64"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_SOURCE_DIR}/libs/macos/x64/$<CONFIG>"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:simd_module> "${CMAKE_CURRENT_SOURCE_DIR}/libs/macos/x64/$<CONFIG>/$<TARGET_FILE_NAME:simd_module>"
+        COMMENT "Copying simd_module binary to libs/macos/x64/$<CONFIG>"
     )
 else()
     add_custom_command(TARGET simd_module POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_SOURCE_DIR}/libs/linux/x64"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:simd_module> "${CMAKE_CURRENT_SOURCE_DIR}/libs/linux/x64/$<TARGET_FILE_NAME:simd_module>"
-        COMMENT "Copying simd_module binary to libs/linux/x64"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_SOURCE_DIR}/libs/linux/x64/$<CONFIG>"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:simd_module> "${CMAKE_CURRENT_SOURCE_DIR}/libs/linux/x64/$<CONFIG>/$<TARGET_FILE_NAME:simd_module>"
+        COMMENT "Copying simd_module binary to libs/linux/x64/$<CONFIG>"
     )
 endif()

@@ -171,13 +171,14 @@ jobs:
                   }
               }
 
-              # Native modules keep their config-matched DLL only in the
-              # module's own libs/ entry from lode.json.
+              # Native modules keep their config-matched DLL in the module's
+              # own libs/<platform>/<arch>/<config> entry from lode.json; the
+              # loader resolves the config-aware subdir per runtime build.
               $nativeLib = "build-release/bin/Release/$name.dll"
               if (Test-Path $nativeLib) {
-                  $libDir = "$dst/libs/windows/x64"
+                  $libDir = "$dst/libs/windows/x64/Release"
                   New-Item -ItemType Directory -Force -Path $libDir | Out-Null
-                  Copy-Item "$src/libs/windows/x64/$name.dll" $libDir
+                  Copy-Item "$src/libs/windows/x64/Release/$name.dll" $libDir
               }
               $shipped += $rel
           }

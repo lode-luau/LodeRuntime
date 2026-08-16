@@ -501,24 +501,27 @@ static ModuleLoadResult LoadModuleNoJump(lua_State* L, void* ctx, const char* pa
                 }
 
                 std::string relLibPath = libraryEntry.get<std::string>();
-                fs::path fullLibPath = dirPath / PathFromUtf8(relLibPath);
+                fs::path baseLibPath = dirPath / PathFromUtf8(relLibPath);
+                fs::path fullLibPath = baseLibPath;
 
-                if (relLibPath.empty() || !IsPathInside(fullLibPath, dirPath))
+                // Prefer the config-aware copy the module CMake writes to
+                // libs/<platform>/<arch>/<config>/<name>. Debug and Release
+                // builds no longer clobber each other's binary: each POST_BUILD
+                // step outputs into its own config subdirectory, so the runtime
+                // always loads a module built with the same CRT/std::string ABI
+                // as itself. Flat paths still work for third-party/prebuilt
+                // modules that do not ship config subdirectories.
+                const char* buildConfig = LodeBuildConfigName();
+                if (buildConfig && buildConfig[0] != '\0')
                 {
-                    return { 0, "Native library path must remain inside module directory: " + relLibPath };
+                    fs::path configAwareLibPath = baseLibPath.parent_path() / buildConfig / baseLibPath.filename();
+                    if (fs::exists(configAwareLibPath) || !fs::exists(baseLibPath))
+                        fullLibPath = configAwareLibPath;
                 }
 
-                // Prefer the module binary next to the executable: the build drops a
-                // config-matched copy there (Debug or Release), while the lode.json
-                // "libs/" copy is overwritten by whichever configuration was built
-                // last. Loading a module built with a different CRT/std::string ABI
-                // than the running exe corrupts cross-boundary strings and crashes.
-                std::string exePath = Platform::GetExecutablePath();
-                if (!exePath.empty())
+                if (relLibPath.empty() || !IsPathInside(baseLibPath, dirPath))
                 {
-                    fs::path exeDirCandidate = PathFromUtf8(exePath).parent_path() / fullLibPath.filename();
-                    if (fs::exists(exeDirCandidate))
-                        fullLibPath = exeDirCandidate;
+                    return { 0, "Native library path must remain inside module directory: " + relLibPath };
                 }
 
                 auto libResult = Platform::DynamicLibrary::Open(PathToUtf8(fullLibPath));
