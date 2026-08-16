@@ -10,11 +10,21 @@ add_library(websocket SHARED
     src/WebSocketManager.cpp
     src/WsClient.cpp
     src/WsServer.cpp
+    ../tcp/src/Resolve.cpp
+    ../tcp/src/TcpClient.cpp
+    ../tcp/src/TcpServer.cpp
+    ../tcp/src/TcpManager.cpp
+    ../tcp/src/TcpHelpers.cpp
 )
 
-target_include_directories(websocket PUBLIC include PRIVATE ../tcp/include)
-target_compile_definitions(websocket PRIVATE WEBSOCKET_BUILD_SHARED NOMINMAX)
-target_link_libraries(websocket PRIVATE LodeCore tcp)
+# websocket needs the tcp implementation, but there is no package manager and
+# no shared module directory anymore (each module's DLL lives in its own
+# libs/<platform>/<arch>/<config>/). Embedding the tcp sources avoids a
+# runtime DLL dependency on tcp.dll, which the Windows loader could not
+# resolve from a separate module directory.
+target_include_directories(websocket PUBLIC include PRIVATE ../tcp/include ../tcp/src)
+target_compile_definitions(websocket PRIVATE WEBSOCKET_BUILD_SHARED NOMINMAX LODE_TCP_BUILD)
+target_link_libraries(websocket PRIVATE LodeCore)
 
 if(MSVC)
     target_compile_options(websocket PRIVATE $<$<NOT:$<CONFIG:Debug>>:/O1> /GR- /GL)
@@ -71,8 +81,10 @@ endif()
 
 set(NATIVE_OUTPUT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/libs/${TARGET_PLATFORM}/${TARGET_ARCH}/$<CONFIG>")
 
-add_custom_command(TARGET websocket POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${NATIVE_OUTPUT_DIR}"
-    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:websocket> "${NATIVE_OUTPUT_DIR}/${TARGET_LIB_NAME}"
-    COMMENT "Copying native binary to libs/${TARGET_PLATFORM}/${TARGET_ARCH}/${TARGET_LIB_NAME}"
-)
+foreach(CONFIG_NAME ${CMAKE_CONFIGURATION_TYPES})
+    string(TOUPPER ${CONFIG_NAME} CONFIG_NAME_UPPER)
+    set_target_properties(websocket PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY_${CONFIG_NAME_UPPER} "${CMAKE_CURRENT_SOURCE_DIR}/libs/${TARGET_PLATFORM}/${TARGET_ARCH}/${CONFIG_NAME}"
+        LIBRARY_OUTPUT_DIRECTORY_${CONFIG_NAME_UPPER} "${CMAKE_CURRENT_SOURCE_DIR}/libs/${TARGET_PLATFORM}/${TARGET_ARCH}/${CONFIG_NAME}"
+    )
+endforeach()
