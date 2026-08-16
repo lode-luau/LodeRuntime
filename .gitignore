@@ -1,11 +1,13 @@
 # Build output
 build/
+build-debug/
 bin/
 obj/
 *.o
 *.obj
 *.exe
 *.dll
+*.pdb
 *.so
 *.dylib
 *.lib

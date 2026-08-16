@@ -28,12 +28,15 @@
 
 ## Commit & PR checklist
 - Keep commits focused and mention the issue or behavior they address when applicable.
+- When a commit addresses a tracked issue, include its reference in the subject using `(#N)`, for example: `filesystem: add glob matching (#96)`.
 - Do not commit generated build output, temporary probe executables, secrets, or unrelated worktree changes.
 - Review the complete branch diff against `main` before opening the PR.
 - In the PR description, list the validation commands and link the relevant issues.
+- In PR summaries, mention related issues in the relevant change bullets using `(#N)`, for example: `- Add filesystem globbing (#96).`.
 - Create PR descriptions with a reviewed file and `gh pr create --body-file <file>` or `gh pr edit --body-file <file>`. Never pass multiline Markdown containing backticks, `$()`, or shell metacharacters in a double-quoted inline argument.
 - Before creating or merging a PR, run `gh pr view <number> --json body --jq .body` and verify the body contains only the intended Markdown, not command output, logs, or literal escape sequences.
 - Keep validation commands in fenced or inline code in the PR body; do not paste their output unless explicitly required.
+- When closing multiple issues from a PR, put each closing keyword on its own line, for example: `Closes #88` followed by `Closes #94`; do not combine multiple issues on one `Closes` line.
 - Do not close issues manually if the PR uses `Closes #N`; let GitHub close them after the merge.
 - Merge with `gh pr merge <number> --merge --delete-branch`, which merges into `main` and deletes the branch automatically.
 
