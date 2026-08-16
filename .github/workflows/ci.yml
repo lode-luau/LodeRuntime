@@ -21,12 +21,22 @@ jobs:
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@v0.0.8
 
-      # 2. Restore/save cache of compiled C++ objects
+      # 2. Restore/save cache of compiled C++ objects.
+      #    Note: caches are branch-scoped, so a merge run on main can never
+      #    reuse a cache written by a pull_request branch (that is why PR
+      #    runs "compile everything again" after the merge). To make
+      #    retries/re-pushes of the SAME PR commit hit, key on the head
+      #    commit SHA instead of github.sha, which on push/pull_request is
+      #    the ephemeral merge-ref SHA and changes on every push. The
+      #    restore-keys prefix then falls back to the newest cache from this
+      #    branch or from the default branch (main), so a PR seeded after a
+      #    recent main/nightly run hits against objects built with identical
+      #    flags.
       - name: Cache sccache
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/sccache
-          key: ${{ runner.os }}-sccache-${{ github.sha }}
+          key: ${{ runner.os }}-sccache-${{ github.event.pull_request.head.sha || github.sha }}
           restore-keys: |
             ${{ runner.os }}-sccache-
 
