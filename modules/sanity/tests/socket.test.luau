@@ -7,7 +7,7 @@ local it = sanity.it
 local expect = sanity.expect
 
 local task = require("../../../modules/task")
-local socket = require("../../socket")
+local socket = require("@socket")
 
 describe("socket", function()
     it("exposes the TcpSocket and Server classes from tcp module", function()
