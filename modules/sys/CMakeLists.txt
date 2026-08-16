@@ -8,6 +8,7 @@ add_library(sys SHARED
     src/Main.cpp
     src/SysInfo.cpp
     src/SysProcess.cpp
+    src/SysSignals.cpp
 )
 
 target_include_directories(sys PUBLIC include)
