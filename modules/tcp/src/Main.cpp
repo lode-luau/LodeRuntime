@@ -90,6 +90,26 @@ Lode::Table BuildClientMethods(Lode::State& vm, const std::shared_ptr<lodetcp::T
         return self->MethodRemoteAddress(vm2);
     }));
 
+    m.Set("SetNoDelay", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+        auto self = Lode::ObjectWrap<lodetcp::TcpClient>::Unwrap(vm2, 1);
+        if (!self)
+        {
+            vm2.RaiseError("socket SetNoDelay: invalid TcpSocket");
+            return Lode::Value();
+        }
+        return self->MethodSetNoDelay(vm2, args);
+    }));
+
+    m.Set("SetKeepAlive", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+        auto self = Lode::ObjectWrap<lodetcp::TcpClient>::Unwrap(vm2, 1);
+        if (!self)
+        {
+            vm2.RaiseError("socket SetKeepAlive: invalid TcpSocket");
+            return Lode::Value();
+        }
+        return self->MethodSetKeepAlive(vm2, args);
+    }));
+
     return m;
 }
 

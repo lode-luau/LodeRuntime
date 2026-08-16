@@ -99,6 +99,15 @@ export type TcpSocket = {
     --- Gets the remote address the socket is connected to.
     --- @return The remote Address
     RemoteAddress: (self: TcpSocket) -> Address,
+
+    -- Options
+
+    --- Enables or disables TCP_NODELAY (disables Nagle's algorithm).
+    SetNoDelay: (self: TcpSocket, enabled: boolean) -> (),
+
+    --- Enables or disables TCP keepalive.
+    --- @param delay Optional delay in seconds before the first keepalive probe.
+    SetKeepAlive: (self: TcpSocket, enabled: boolean, delay: number?) -> (),
 }
 
 --- Options for creating a TCP server.
