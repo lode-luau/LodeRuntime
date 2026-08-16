@@ -52,6 +52,16 @@ Lode::Table BuildClientMethods(Lode::State& vm, const std::shared_ptr<WebSocketM
         return self->MethodClose(vm2, args);
     }));
 
+    m.Set("Ping", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+        auto self = Lode::ObjectWrap<WsClient>::Unwrap(vm2, 1);
+        if (!self)
+        {
+            vm2.RaiseError("websocket Ping: invalid WebSocket");
+            return Lode::Value();
+        }
+        return self->MethodPing(vm2, args);
+    }));
+
     m.Set("LocalAddress", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
         auto self = Lode::ObjectWrap<WsClient>::Unwrap(vm2, 1);
         if (!self)

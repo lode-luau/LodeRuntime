@@ -325,6 +325,56 @@ Lode::Value TcpClient::MethodLocalAddress(Lode::State& vm)
     return Lode::Value(t);
 }
 
+Lode::Value TcpClient::MethodSetNoDelay(Lode::State& vm, const std::vector<Lode::Value>& args)
+{
+    if (!connected || closed)
+    {
+        vm.RaiseError("socket SetNoDelay: not connected");
+        return Lode::Value();
+    }
+    if (args.size() < 2 || !args[1].IsBoolean())
+    {
+        vm.RaiseError("socket SetNoDelay: enabled must be a boolean");
+        return Lode::Value();
+    }
+    if (uv_tcp_nodelay(&tcp, args[1].AsBoolean() ? 1 : 0) != 0)
+    {
+        vm.RaiseError("socket SetNoDelay: failed to apply nodelay");
+    }
+    return Lode::Value();
+}
+
+Lode::Value TcpClient::MethodSetKeepAlive(Lode::State& vm, const std::vector<Lode::Value>& args)
+{
+    if (!connected || closed)
+    {
+        vm.RaiseError("socket SetKeepAlive: not connected");
+        return Lode::Value();
+    }
+    if (args.size() < 2 || !args[1].IsBoolean())
+    {
+        vm.RaiseError("socket SetKeepAlive: enabled must be a boolean");
+        return Lode::Value();
+    }
+    unsigned int delay = 0;
+    if (args.size() > 2 && !args[2].IsNil())
+    {
+        if (!args[2].IsNumber() || args[2].AsNumber() < 0)
+        {
+            vm.RaiseError("socket SetKeepAlive: delay must be a non-negative number of seconds");
+            return Lode::Value();
+        }
+        delay = static_cast<unsigned int>(args[2].AsNumber());
+    }
+    if (args[1].AsBoolean() && delay == 0)
+        delay = 60;
+    if (uv_tcp_keepalive(&tcp, args[1].AsBoolean() ? 1 : 0, delay) != 0)
+    {
+        vm.RaiseError("socket SetKeepAlive: failed to apply keepalive");
+    }
+    return Lode::Value();
+}
+
 Lode::Value TcpClient::MethodRemoteAddress(Lode::State& vm)
 {
     if (!connected || closed)

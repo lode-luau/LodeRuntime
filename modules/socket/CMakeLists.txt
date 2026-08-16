@@ -6,11 +6,21 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_library(socket SHARED
     src/socket.cpp
+    ../tcp/src/Resolve.cpp
+    ../tcp/src/TcpClient.cpp
+    ../tcp/src/TcpServer.cpp
+    ../tcp/src/TcpManager.cpp
+    ../tcp/src/TcpHelpers.cpp
 )
 
-target_link_libraries(socket PRIVATE LodeCore tcp)
-target_include_directories(socket PRIVATE ../tcp/include)
-target_compile_definitions(socket PRIVATE NOMINMAX)
+# socket needs the tcp implementation, but there is no package manager and no
+# shared module directory anymore (each module's DLL lives in its own
+# libs/<platform>/<arch>/<config>/). Embedding the tcp sources avoids a
+# runtime DLL dependency on tcp.dll, which the Windows loader could not
+# resolve from a separate module directory.
+target_link_libraries(socket PRIVATE LodeCore)
+target_include_directories(socket PRIVATE ../tcp/include ../tcp/src)
+target_compile_definitions(socket PRIVATE NOMINMAX LODE_TCP_BUILD)
 
 if(MSVC)
     target_compile_options(socket PRIVATE $<$<NOT:$<CONFIG:Debug>>:/O1> /GR- /GL)
@@ -67,8 +77,17 @@ endif()
 
 set(NATIVE_OUTPUT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/libs/${TARGET_PLATFORM}/${TARGET_ARCH}/$<CONFIG>")
 
-add_custom_command(TARGET socket POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${NATIVE_OUTPUT_DIR}"
-    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:socket> "${NATIVE_OUTPUT_DIR}/${TARGET_LIB_NAME}"
-    COMMENT "Copying native binary to libs/${TARGET_PLATFORM}/${TARGET_ARCH}/${TARGET_LIB_NAME}"
-)
+foreach(CONFIG_NAME ${CMAKE_CONFIGURATION_TYPES})
+    string(TOUPPER ${CONFIG_NAME} CONFIG_NAME_UPPER)
+    set_target_properties(socket PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY_${CONFIG_NAME_UPPER} "${CMAKE_CURRENT_SOURCE_DIR}/libs/${TARGET_PLATFORM}/${TARGET_ARCH}/${CONFIG_NAME}"
+        LIBRARY_OUTPUT_DIRECTORY_${CONFIG_NAME_UPPER} "${CMAKE_CURRENT_SOURCE_DIR}/libs/${TARGET_PLATFORM}/${TARGET_ARCH}/${CONFIG_NAME}"
+    )
+endforeach()
+
+if(NOT CMAKE_CONFIGURATION_TYPES)
+    set_target_properties(socket PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${NATIVE_OUTPUT_DIR}"
+        LIBRARY_OUTPUT_DIRECTORY "${NATIVE_OUTPUT_DIR}"
+    )
+endif()

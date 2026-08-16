@@ -164,7 +164,7 @@ export type FileSystemModule = {
         data: string | buffer
     ) -> (),
 
-    --- Copies a file asynchronously.
+    --- Copies a file or directory tree asynchronously.
     CopyFile: (
         --- The source file path
         srcPath: string,
@@ -198,6 +198,13 @@ export type FileSystemModule = {
     ReadDirectory: (
         --- The directory path
         dirPath: string
+    ) -> { string },
+
+    --- Finds files matching *, ?, and ** glob patterns asynchronously.
+    --- @return Paths relative to the non-wildcard portion of the pattern
+    Glob: (
+        --- The glob pattern
+        pattern: string
     ) -> { string },
 
     --- Retrieves file status information asynchronously.

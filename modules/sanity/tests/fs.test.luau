@@ -69,6 +69,7 @@ describe("fs", function()
         expect(typeof(fs.Exists)).toBe("function")
         expect(typeof(fs.CreateDirectory)).toBe("function")
         expect(typeof(fs.ReadDirectory)).toBe("function")
+        expect(typeof(fs.Glob)).toBe("function")
         expect(typeof(fs.Stat)).toBe("function")
         expect(typeof(fs.RealPath)).toBe("function")
         expect(typeof(fs.RemoveFile)).toBe("function")
@@ -125,6 +126,20 @@ describe("fs", function()
         cleanup()
     end)
 
+    it("copies a directory tree", function()
+        cleanup()
+        local source = path.join(tmpRoot, "copy_src_dir")
+        local nested = path.join(source, "nested")
+        local destination = path.join(tmpRoot, "copy_dst_dir")
+        fs.CreateDirectory(nested)
+        fs.WriteFile(path.join(source, "root.txt"), "root")
+        fs.WriteFile(path.join(nested, "deep.txt"), "deep")
+        fs.CopyFile(source, destination)
+        expect(fs.ReadFile(path.join(destination, "root.txt"))).toBe("root")
+        expect(fs.ReadFile(path.join(destination, "nested", "deep.txt"))).toBe("deep")
+        cleanup()
+    end)
+
     it("renames a file", function()
         cleanup()
         fs.CreateDirectory(tmpRoot)
@@ -134,6 +149,18 @@ describe("fs", function()
         fs.Rename(src, dst)
         expect(fs.Exists(src)).toBe(false)
         expect(fs.ReadFile(dst)).toBe("rename me")
+        cleanup()
+    end)
+
+    it("moves a non-empty directory", function()
+        cleanup()
+        local source = path.join(tmpRoot, "move_src_dir")
+        local destination = path.join(tmpRoot, "move_dst_dir")
+        fs.CreateDirectory(source)
+        fs.WriteFile(path.join(source, "child.txt"), "child")
+        fs.Rename(source, destination)
+        expect(fs.Exists(source)).toBe(false)
+        expect(fs.ReadFile(path.join(destination, "child.txt"))).toBe("child")
         cleanup()
     end)
 
@@ -149,6 +176,34 @@ describe("fs", function()
             if e == "inner.txt" then found = true end
         end
         expect(found).toBe(true)
+        cleanup()
+    end)
+
+    it("matches files with glob patterns", function()
+        cleanup()
+        local nested = path.join(tmpRoot, "subdir", "nested")
+        fs.CreateDirectory(nested)
+        fs.WriteFile(path.join(tmpRoot, "root.lua"), "root")
+        fs.WriteFile(path.join(tmpRoot, "root.txt"), "text")
+        fs.WriteFile(path.join(nested, "deep.lua"), "deep")
+
+        local direct = fs.Glob(path.join(tmpRoot, "*.lua"))
+        expect(#direct).toBe(1)
+        expect(norm(direct[1])).toBe("root.lua")
+
+        local singleChar = fs.Glob(path.join(tmpRoot, "r?ot.lua"))
+        expect(#singleChar).toBe(1)
+        expect(norm(singleChar[1])).toBe("root.lua")
+
+        local recursive = fs.Glob(path.join(tmpRoot, "**", "*.lua"))
+        expect(#recursive).toBe(2)
+        local foundDeep = false
+        for _, entry in ipairs(recursive) do
+            if norm(entry) == "subdir/nested/deep.lua" then
+                foundDeep = true
+            end
+        end
+        expect(foundDeep).toBe(true)
         cleanup()
     end)
 

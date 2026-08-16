@@ -140,4 +140,58 @@ describe("websocket", function()
         expect(clientDisconnectedFired).toBe(true)
         expect(serverClientDisconnectedFired).toBe(true)
     end)
+
+    it("exposes a working Ping method on open sockets and rejects pings when not connected", function()
+        local server = websocket.WebSocketServer:Create()
+        local acceptedClient = nil
+        local serverClientDisconnectedFired = false
+
+        server.ClientConnected:Connect(function(client)
+            acceptedClient = client
+            client.Disconnected:Connect(function(code, reason)
+                serverClientDisconnectedFired = true
+                server:Close()
+            end)
+        end)
+
+        server:Listen(0, "127.0.0.1")
+        local serverAddr = server:LocalAddress()
+
+        local client = websocket.WebSocket:Create()
+        local clientDisconnectedFired = false
+        local clientConnected = false
+
+        client.Connected:Connect(function()
+            clientConnected = true
+        end)
+
+        client.Disconnected:Connect(function(code, reason)
+            clientDisconnectedFired = true
+        end)
+
+        client:Connect("ws://127.0.0.1:" .. tostring(serverAddr.port))
+
+        task.wait(1)
+
+        expect(clientConnected).toBe(true)
+        expect(acceptedClient ~= nil).toBe(true)
+        expect(typeof(client.Ping)).toBe("function")
+
+        client:Ping()
+        client:Ping("payload")
+
+        expect(client:IsConnected()).toBe(true)
+
+        client:Close()
+        task.wait(0.5)
+
+        local ok, err = pcall(function()
+            client:Ping()
+        end)
+        expect(ok).toBe(false)
+        local errStr = tostring(err)
+        expect((errStr:find("not connected", 1, true) ~= nil) or (errStr:find("socket is closed", 1, true) ~= nil)).toBe(true)
+        expect(clientDisconnectedFired).toBe(true)
+        expect(serverClientDisconnectedFired).toBe(true)
+    end)
 end)

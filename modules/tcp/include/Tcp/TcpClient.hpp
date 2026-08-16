@@ -84,6 +84,8 @@ struct TCP_API TcpClient : std::enable_shared_from_this<TcpClient>
 
     Lode::Value MethodConnect(Lode::State& vm, const std::vector<Lode::Value>& args);
     Lode::Value MethodSend(Lode::State& vm, const std::vector<Lode::Value>& args);
+    Lode::Value MethodSetNoDelay(Lode::State& vm, const std::vector<Lode::Value>& args);
+    Lode::Value MethodSetKeepAlive(Lode::State& vm, const std::vector<Lode::Value>& args);
     Lode::Value MethodLocalAddress(Lode::State& vm);
     Lode::Value MethodRemoteAddress(Lode::State& vm);
 

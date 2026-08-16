@@ -164,14 +164,41 @@ describe("tty", function()
         end
     end)
 
-    it("rejects SetMode with a non-number on an open stream", function()
+    it("accepts string and numeric modes on an open stream", function()
+        if tty.IsTTY(1) then
+            local out = tty.TtyStream:Create(1, false)
+            out:SetMode("normal")
+            out:SetMode("raw")
+            out:SetMode("io")
+            out:SetMode(0)
+            out:Close()
+        else
+            sanity.skip("Stdout is not a TTY in this environment.")
+        end
+    end)
+
+    it("rejects an invalid string mode on an open stream", function()
         if tty.IsTTY(1) then
             local out = tty.TtyStream:Create(1, false)
             local ok, err = pcall(function()
-                (out :: any):SetMode("raw")
+                (out :: any):SetMode("bogus")
             end)
             expect(ok).toBe(false)
-            expect(tostring(err):find("mode must be a number", 1, true) ~= nil).toBe(true)
+            expect(tostring(err):find('invalid mode', 1, true) ~= nil).toBe(true)
+            out:Close()
+        else
+            sanity.skip("Stdout is not a TTY in this environment.")
+        end
+    end)
+
+    it("rejects SetMode with a non-string, non-number on an open stream", function()
+        if tty.IsTTY(1) then
+            local out = tty.TtyStream:Create(1, false)
+            local ok, err = pcall(function()
+                (out :: any):SetMode(true)
+            end)
+            expect(ok).toBe(false)
+            expect(tostring(err):find("must be a string or a number", 1, true) ~= nil).toBe(true)
             out:Close()
         else
             sanity.skip("Stdout is not a TTY in this environment.")

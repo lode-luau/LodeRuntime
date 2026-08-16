@@ -341,12 +341,36 @@ Lode::Value TtyStream::MethodSetMode(Lode::State& vm, const std::vector<Lode::Va
         vm.RaiseError("tty SetMode: stream is not open");
         return Lode::Value();
     }
-    if (args.size() < 2 || !args[1].IsNumber())
+    if (args.size() < 2)
     {
-        vm.RaiseError("tty SetMode: mode must be a number");
+        vm.RaiseError("tty SetMode: mode is required");
         return Lode::Value();
     }
-    int m = static_cast<int>(args[1].AsNumber());
+    int m;
+    if (args[1].IsNumber())
+    {
+        m = static_cast<int>(args[1].AsNumber());
+    }
+    else if (args[1].IsString())
+    {
+        const std::string& s = args[1].AsString();
+        if (s == "normal")
+            m = UV_TTY_MODE_NORMAL;
+        else if (s == "raw")
+            m = UV_TTY_MODE_RAW;
+        else if (s == "io")
+            m = UV_TTY_MODE_IO;
+        else
+        {
+            vm.RaiseError("tty SetMode: invalid mode, expected \"normal\", \"raw\", \"io\", or a number");
+            return Lode::Value();
+        }
+    }
+    else
+    {
+        vm.RaiseError("tty SetMode: mode must be a string or a number");
+        return Lode::Value();
+    }
     uv_tty_set_mode(&tty, static_cast<uv_tty_mode_t>(m));
     return Lode::Value();
 }

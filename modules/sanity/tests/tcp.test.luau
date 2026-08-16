@@ -137,4 +137,55 @@ describe("tcp connect/send/receive", function()
 
         server:Close()
     end)
+
+    it("rejects socket options before connecting", function()
+        local client = tcp.TcpSocket:Create()
+        local ok, err = pcall(function()
+            client:SetNoDelay(true)
+        end)
+        expect(ok).toBe(false)
+        expect(tostring(err):find("not connected", 1, true) ~= nil).toBe(true)
+
+        ok, err = pcall(function()
+            client:SetKeepAlive(true, 5)
+        end)
+        expect(ok).toBe(false)
+        expect(tostring(err):find("not connected", 1, true) ~= nil).toBe(true)
+    end)
+
+    it("applies socket options to a connected socket", function()
+        local server = tcp.Server:Create()
+        local serverGot = false
+        server.ClientConnected:Connect(function(_client)
+            serverGot = true
+            _client:Close()
+        end)
+        server:Listen(0, "127.0.0.1")
+        local serverAddr = server:LocalAddress()
+
+        local client = tcp.TcpSocket:Create()
+        client:Connect(serverAddr.host, serverAddr.port)
+        expect(client:IsConnected()).toBe(true)
+
+        client:SetNoDelay(true)
+        client:SetNoDelay(false)
+        client:SetKeepAlive(true)
+        client:SetKeepAlive(true, 5)
+        client:SetKeepAlive(false)
+
+        local ok, err = pcall(function()
+            client:SetNoDelay("yes" :: any)
+        end)
+        expect(ok).toBe(false)
+        expect(tostring(err):find("enabled must be a boolean", 1, true) ~= nil).toBe(true)
+
+        ok, err = pcall(function()
+            client:SetKeepAlive(true, -1)
+        end)
+        expect(ok).toBe(false)
+        expect(tostring(err):find("non-negative number", 1, true) ~= nil).toBe(true)
+
+        client:Close()
+        server:Close()
+    end)
 end)
