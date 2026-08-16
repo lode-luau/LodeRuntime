@@ -35,6 +35,7 @@
 - Before creating or merging a PR, run `gh pr view <number> --json body --jq .body` and verify the body contains only the intended Markdown, not command output, logs, or literal escape sequences.
 - Keep validation commands in fenced or inline code in the PR body; do not paste their output unless explicitly required.
 - Do not close issues manually if the PR uses `Closes #N`; let GitHub close them after the merge.
+- Merge with `gh pr merge <number> --merge --delete-branch`, which merges into `main` and deletes the branch automatically.
 
 ## Issue Writing
 - Write issue descriptions in English using this structure: `Summary`, `Repro`, `Root cause`, `Suggested fix`, and `Acceptance criteria`.
