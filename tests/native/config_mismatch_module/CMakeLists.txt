@@ -30,8 +30,10 @@ endif()
 
 set(NATIVE_OUTPUT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/libs/${TARGET_PLATFORM}/${TARGET_ARCH}/$<CONFIG>")
 
-add_custom_command(TARGET config_mismatch_module POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${NATIVE_OUTPUT_DIR}"
-    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:config_mismatch_module> "${NATIVE_OUTPUT_DIR}/${TARGET_LIB_NAME}"
-    COMMENT "Copying config_mismatch_module binary to libs/${TARGET_PLATFORM}/${TARGET_ARCH}/$<CONFIG>"
-)
+foreach(CONFIG_NAME ${CMAKE_CONFIGURATION_TYPES})
+    string(TOUPPER ${CONFIG_NAME} CONFIG_NAME_UPPER)
+    set_target_properties(config_mismatch_module PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY_${CONFIG_NAME_UPPER} "${CMAKE_CURRENT_SOURCE_DIR}/libs/${TARGET_PLATFORM}/${TARGET_ARCH}/${CONFIG_NAME}"
+        LIBRARY_OUTPUT_DIRECTORY_${CONFIG_NAME_UPPER} "${CMAKE_CURRENT_SOURCE_DIR}/libs/${TARGET_PLATFORM}/${TARGET_ARCH}/${CONFIG_NAME}"
+    )
+endforeach()

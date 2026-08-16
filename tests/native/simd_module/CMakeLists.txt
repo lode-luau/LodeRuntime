@@ -15,11 +15,20 @@ add_library(simd_module MODULE src/simd_module.cpp)
 target_link_libraries(simd_module PRIVATE LodeCore)
 
 if(WIN32)
+    set(TARGET_PLATFORM "windows")
     set(_simd_module_suffix ".dll")
 elseif(APPLE)
+    set(TARGET_PLATFORM "macos")
     set(_simd_module_suffix ".dylib")
 else()
+    set(TARGET_PLATFORM "linux")
     set(_simd_module_suffix ".so")
+endif()
+
+if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+    set(TARGET_ARCH "x64")
+else()
+    set(TARGET_ARCH "x86")
 endif()
 
 set_target_properties(simd_module PROPERTIES
@@ -27,28 +36,14 @@ set_target_properties(simd_module PROPERTIES
     SUFFIX "${_simd_module_suffix}"
 )
 
-# Output it into the build output directory for the active configuration
-set_target_properties(simd_module PROPERTIES
-    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/../build/bin/$<CONFIG>"
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/../build/bin/$<CONFIG>"
-)
-
-if(WIN32)
-    add_custom_command(TARGET simd_module POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_SOURCE_DIR}/libs/windows/x64/$<CONFIG>"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:simd_module> "${CMAKE_CURRENT_SOURCE_DIR}/libs/windows/x64/$<CONFIG>/$<TARGET_FILE_NAME:simd_module>"
-        COMMENT "Copying simd_module binary to libs/windows/x64/$<CONFIG>"
+# Output the simd_module binary directly into its own libs/<platform>/<arch>/<config>
+# directory, so it never lands next to the runtime in build/bin. Per-config
+# properties override the top-level per-config output directories from the
+# root CMakeLists.
+foreach(CONFIG_NAME ${CMAKE_CONFIGURATION_TYPES})
+    string(TOUPPER ${CONFIG_NAME} CONFIG_NAME_UPPER)
+    set_target_properties(simd_module PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY_${CONFIG_NAME_UPPER} "${CMAKE_CURRENT_SOURCE_DIR}/libs/${TARGET_PLATFORM}/${TARGET_ARCH}/${CONFIG_NAME}"
+        LIBRARY_OUTPUT_DIRECTORY_${CONFIG_NAME_UPPER} "${CMAKE_CURRENT_SOURCE_DIR}/libs/${TARGET_PLATFORM}/${TARGET_ARCH}/${CONFIG_NAME}"
     )
-elseif(APPLE)
-    add_custom_command(TARGET simd_module POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_SOURCE_DIR}/libs/macos/x64/$<CONFIG>"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:simd_module> "${CMAKE_CURRENT_SOURCE_DIR}/libs/macos/x64/$<CONFIG>/$<TARGET_FILE_NAME:simd_module>"
-        COMMENT "Copying simd_module binary to libs/macos/x64/$<CONFIG>"
-    )
-else()
-    add_custom_command(TARGET simd_module POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_SOURCE_DIR}/libs/linux/x64/$<CONFIG>"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:simd_module> "${CMAKE_CURRENT_SOURCE_DIR}/libs/linux/x64/$<CONFIG>/$<TARGET_FILE_NAME:simd_module>"
-        COMMENT "Copying simd_module binary to libs/linux/x64/$<CONFIG>"
-    )
-endif()
+endforeach()
