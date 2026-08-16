@@ -657,6 +657,48 @@ Lode::Value WsClient::MethodSend(Lode::State& vm, const std::vector<Lode::Value>
     return Lode::Value();
 }
 
+Lode::Value WsClient::MethodPing(Lode::State& vm, const std::vector<Lode::Value>& args)
+{
+    if (closed || closing)
+    {
+        vm.RaiseError("websocket Ping: socket is closed");
+        return Lode::Value();
+    }
+    if (state != WsState::Open)
+    {
+        vm.RaiseError("websocket Ping: not connected");
+        return Lode::Value();
+    }
+    if (args.size() > 1 && !args[1].IsNil() && !args[1].IsString() && !args[1].IsBuffer())
+    {
+        vm.RaiseError("websocket Ping: data must be a string or buffer or nil");
+        return Lode::Value();
+    }
+    std::vector<char> data;
+    if (args.size() > 1 && !args[1].IsNil())
+    {
+        if (args[1].IsString())
+        {
+            const std::string& text = args[1].AsString();
+            data.assign(text.begin(), text.end());
+        }
+        else
+        {
+            size_t size = 0;
+            void* ptr = args[1].AsBuffer(&size);
+            if (ptr && size > 0)
+                data.assign(static_cast<const char*>(ptr), static_cast<const char*>(ptr) + size);
+        }
+    }
+    if (data.size() > 125)
+    {
+        vm.RaiseError("websocket Ping: payload must be at most 125 bytes");
+        return Lode::Value();
+    }
+    SendFrame(kOpcodePing, data);
+    return Lode::Value();
+}
+
 Lode::Value WsClient::MethodClose(Lode::State& vm, const std::vector<Lode::Value>& args)
 {
     if (closed || closing || state == WsState::Closed)

@@ -110,6 +110,7 @@ struct WEBSOCKET_API WsClient : std::enable_shared_from_this<WsClient>
 
     Lode::Value MethodConnect(Lode::State& vm, const std::vector<Lode::Value>& args);
     Lode::Value MethodSend(Lode::State& vm, const std::vector<Lode::Value>& args);
+    Lode::Value MethodPing(Lode::State& vm, const std::vector<Lode::Value>& args);
     Lode::Value MethodClose(Lode::State& vm, const std::vector<Lode::Value>& args);
     Lode::Value MethodLocalAddress(Lode::State& vm);
     Lode::Value MethodRemoteAddress(Lode::State& vm);
