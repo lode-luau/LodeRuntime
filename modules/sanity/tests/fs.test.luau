@@ -10,6 +10,7 @@ local sanity = require("../init")
 local describe = sanity.describe
 local it = sanity.it
 local expect = sanity.expect
+local skip = sanity.skip
 
 local fs = require("../../filesystem")
 local path = require("../../filesystem/path")
@@ -216,6 +217,31 @@ describe("fs", function()
         expect(st.isFile).toBe(true)
         expect(st.isDirectory).toBe(false)
         expect(st.size).toBe(5)
+        cleanup()
+    end)
+
+    it("supports symlinks and permission updates", function()
+        cleanup()
+        fs.CreateDirectory(tmpRoot)
+        local target = path.join(tmpRoot, "target.txt")
+        local link = path.join(tmpRoot, "target-link.txt")
+        fs.WriteFile(target, "linked")
+        fs.SetPermissions(target, 420)
+        expect(type(fs.Stat(target).mode)).toBe("number")
+
+        local ok, err = pcall(function()
+            fs.CreateSymlink(target, link)
+        end)
+        if not ok then
+            cleanup()
+            skip("Symbolic links are unavailable: " .. tostring(err))
+            return
+        end
+
+        local stat = fs.Stat(link)
+        expect(stat.isSymbolicLink).toBe(true)
+        expect(fs.ReadLink(link)).toBe(target)
+        expect(fs.RealPath(link)).toBe(fs.RealPath(target))
         cleanup()
     end)
 

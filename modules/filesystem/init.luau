@@ -45,6 +45,12 @@ export type FileStat = {
     isDirectory: boolean,
     --- Whether the path is a regular file
     isFile: boolean,
+    --- Whether the path is a symbolic link
+    isSymbolicLink: boolean,
+    --- Target path for a symbolic link
+    linkTarget: string?,
+    --- Permission bits represented as a numeric mode
+    mode: number,
     --- Last modification time (unix timestamp in seconds)
     mtime: number,
     --- Last access time (unix timestamp in seconds)
@@ -220,6 +226,15 @@ export type FileSystemModule = {
         --- The path to resolve
         path: string
     ) -> string,
+
+    --- Creates a symbolic link asynchronously.
+    CreateSymlink: (targetPath: string, linkPath: string) -> (),
+
+    --- Reads the target of a symbolic link asynchronously.
+    ReadLink: (linkPath: string) -> string,
+
+    --- Replaces permission bits using a numeric mode such as 0o644.
+    SetPermissions: (path: string, mode: number) -> (),
 
     --- Removes a file asynchronously.
     RemoveFile: (

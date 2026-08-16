@@ -16,6 +16,7 @@
 #include <mutex>
 #include <chrono>
 #include <cstring>
+#include <cmath>
 
 namespace fs = std::filesystem;
 
@@ -142,7 +143,8 @@ static void GlobCollect(const std::string& pattern,
 // ============================================================================
 enum class FsOp {
     ReadFile, WriteFile, AppendFile, CopyFile, Rename,
-    Exists, Mkdir, ReadDir, Stat, Realpath, Rm, ReadToBuffer, Glob
+    Exists, Mkdir, ReadDir, Stat, Realpath, Rm, ReadToBuffer, Glob,
+    CreateSymlink, ReadLink, SetPermissions
 };
 
 struct FsWorkContext {
@@ -157,6 +159,7 @@ struct FsWorkContext {
     std::string destPath;     // For copy/rename
     std::string writeData;    // For write/append
     std::string globPattern;  // For Glob
+    uint32_t permissionMode = 0;
     bool isBuffer = false;    // For readFile returning buffer
     
     bool recursive = false;   // For Rm
@@ -180,6 +183,9 @@ struct FsWorkContext {
     double statCtime = 0;
     bool statIsDirectory = false;
     bool statIsFile = false;
+    bool statIsSymbolicLink = false;
+    std::string statLinkTarget;
+    uint32_t statMode = 0;
 };
 
 static void LodeuvFsWork(uv_work_t* req) {
@@ -246,6 +252,11 @@ static void LodeuvFsWork(uv_work_t* req) {
                 ctx->success = true;
                 break;
             }
+            case FsOp::CreateSymlink: {
+                fs::create_symlink(p, fs::path(ctx->destPath));
+                ctx->success = true;
+                break;
+            }
             case FsOp::Exists: {
                 ctx->statIsFile = fs::exists(p); // We'll return this bool
                 ctx->success = true;
@@ -270,9 +281,25 @@ static void LodeuvFsWork(uv_work_t* req) {
                 break;
             }
             case FsOp::Stat: {
-                if (!fs::exists(p)) throw std::runtime_error("Path does not exist: " + ctx->targetPath);
-                ctx->statIsDirectory = fs::is_directory(p);
-                ctx->statIsFile = fs::is_regular_file(p);
+                auto linkStatus = fs::symlink_status(p);
+                if (linkStatus.type() == fs::file_type::not_found)
+                    throw std::runtime_error("Path does not exist: " + ctx->targetPath);
+                ctx->statIsSymbolicLink = fs::is_symlink(linkStatus);
+                if (ctx->statIsSymbolicLink)
+                    ctx->statLinkTarget = fs::read_symlink(p).generic_string();
+                auto status = fs::status(p);
+                ctx->statIsDirectory = fs::is_directory(status);
+                ctx->statIsFile = fs::is_regular_file(status);
+                auto perms = status.permissions();
+                if ((perms & fs::perms::owner_read) != fs::perms::none) ctx->statMode |= 0400;
+                if ((perms & fs::perms::owner_write) != fs::perms::none) ctx->statMode |= 0200;
+                if ((perms & fs::perms::owner_exec) != fs::perms::none) ctx->statMode |= 0100;
+                if ((perms & fs::perms::group_read) != fs::perms::none) ctx->statMode |= 0040;
+                if ((perms & fs::perms::group_write) != fs::perms::none) ctx->statMode |= 0020;
+                if ((perms & fs::perms::group_exec) != fs::perms::none) ctx->statMode |= 0010;
+                if ((perms & fs::perms::others_read) != fs::perms::none) ctx->statMode |= 0004;
+                if ((perms & fs::perms::others_write) != fs::perms::none) ctx->statMode |= 0002;
+                if ((perms & fs::perms::others_exec) != fs::perms::none) ctx->statMode |= 0001;
                 if (ctx->statIsFile) ctx->statSize = static_cast<double>(fs::file_size(p));
                 
                 auto ftime = fs::last_write_time(p);
@@ -287,7 +314,27 @@ static void LodeuvFsWork(uv_work_t* req) {
                 break;
             }
             case FsOp::Realpath: {
-                ctx->readDataStr = fs::absolute(p).generic_string();
+                ctx->readDataStr = fs::weakly_canonical(p).generic_string();
+                ctx->success = true;
+                break;
+            }
+            case FsOp::ReadLink: {
+                ctx->readDataStr = fs::read_symlink(p).generic_string();
+                ctx->success = true;
+                break;
+            }
+            case FsOp::SetPermissions: {
+                fs::perms permissions = fs::perms::none;
+                if (ctx->permissionMode & 0400) permissions |= fs::perms::owner_read;
+                if (ctx->permissionMode & 0200) permissions |= fs::perms::owner_write;
+                if (ctx->permissionMode & 0100) permissions |= fs::perms::owner_exec;
+                if (ctx->permissionMode & 0040) permissions |= fs::perms::group_read;
+                if (ctx->permissionMode & 0020) permissions |= fs::perms::group_write;
+                if (ctx->permissionMode & 0010) permissions |= fs::perms::group_exec;
+                if (ctx->permissionMode & 0004) permissions |= fs::perms::others_read;
+                if (ctx->permissionMode & 0002) permissions |= fs::perms::others_write;
+                if (ctx->permissionMode & 0001) permissions |= fs::perms::others_exec;
+                fs::permissions(p, permissions, fs::perm_options::replace);
                 ctx->success = true;
                 break;
             }
@@ -334,7 +381,7 @@ static bool SubmitWork(Lode::State& vmOuter, FsWorkContext* ctx) {
                 } else {
                     args.push_back(Lode::Value(ctx->readDataStr));
                 }
-            } else if (ctx->op == FsOp::Realpath) {
+            } else if (ctx->op == FsOp::Realpath || ctx->op == FsOp::ReadLink) {
                 args.push_back(Lode::Value(ctx->readDataStr));
             } else if (ctx->op == FsOp::Exists) {
                 args.push_back(Lode::Value(ctx->statIsFile)); // We stored bool in statIsFile
@@ -352,6 +399,10 @@ static bool SubmitWork(Lode::State& vmOuter, FsWorkContext* ctx) {
                 t.Set("ctime", Lode::Value(ctx->statCtime));
                 t.Set("isDirectory", Lode::Value(ctx->statIsDirectory));
                 t.Set("isFile", Lode::Value(ctx->statIsFile));
+                t.Set("isSymbolicLink", Lode::Value(ctx->statIsSymbolicLink));
+                if (ctx->statIsSymbolicLink)
+                    t.Set("linkTarget", Lode::Value(ctx->statLinkTarget));
+                t.Set("mode", Lode::Value(static_cast<double>(ctx->statMode)));
                 args.push_back(Lode::Value(t));
             }
         }
@@ -410,7 +461,7 @@ static Lode::Value CreateAsyncMethod(Lode::State& vmOuter, FsOp op, bool isBuffe
                     if (ptr) ctx->writeData.assign(static_cast<const char*>(ptr), sz);
                 }
             }
-        } else if (op == FsOp::CopyFile || op == FsOp::Rename) {
+        } else if (op == FsOp::CopyFile || op == FsOp::Rename || op == FsOp::CreateSymlink) {
             if (args.size() > 1 && args[1].IsString()) {
                 ctx->destPath = args[1].AsString();
             } else {
@@ -438,6 +489,15 @@ static Lode::Value CreateAsyncMethod(Lode::State& vmOuter, FsOp op, bool isBuffe
             if (args.size() > (size_t)recIdx && args[recIdx].IsBoolean()) {
                 ctx->recursive = args[recIdx].AsBoolean();
             }
+        } else if (op == FsOp::SetPermissions) {
+            if (args.size() < 2 || !args[1].IsNumber() || args[1].AsNumber() < 0 || args[1].AsNumber() > 0777 ||
+                std::floor(args[1].AsNumber()) != args[1].AsNumber())
+            {
+                delete ctx;
+                vm.RaiseError("fs: permissions must be an integer from 0 to 0777");
+                return Lode::Value();
+            }
+            ctx->permissionMode = static_cast<uint32_t>(args[1].AsNumber());
         }
 
         ctx->coroutine = Lode::Coroutine(vm.GetLuaState());
@@ -465,6 +525,9 @@ void BindStaticMethods(Lode::State& vm, Lode::Exports& exports)
     exports.SetValue("Glob", CreateAsyncMethod(vm, FsOp::Glob, false));
     exports.SetValue("Stat", CreateAsyncMethod(vm, FsOp::Stat, false));
     exports.SetValue("RealPath", CreateAsyncMethod(vm, FsOp::Realpath, false));
+    exports.SetValue("CreateSymlink", CreateAsyncMethod(vm, FsOp::CreateSymlink, false));
+    exports.SetValue("ReadLink", CreateAsyncMethod(vm, FsOp::ReadLink, false));
+    exports.SetValue("SetPermissions", CreateAsyncMethod(vm, FsOp::SetPermissions, false));
     exports.SetValue("RemoveFile", CreateAsyncMethod(vm, FsOp::Rm, false));
     exports.SetValue("RemoveDirectory", CreateAsyncMethod(vm, FsOp::Rm, false));
 }
