@@ -501,24 +501,27 @@ static ModuleLoadResult LoadModuleNoJump(lua_State* L, void* ctx, const char* pa
                 }
 
                 std::string relLibPath = libraryEntry.get<std::string>();
-                fs::path fullLibPath = dirPath / PathFromUtf8(relLibPath);
+                fs::path baseLibPath = dirPath / PathFromUtf8(relLibPath);
+                fs::path fullLibPath = baseLibPath;
 
-                if (relLibPath.empty() || !IsPathInside(fullLibPath, dirPath))
+                // Prefer the config-aware copy the module CMake writes to
+                // libs/<platform>/<arch>/<config>/<name>. Debug and Release
+                // builds no longer clobber each other's binary: each POST_BUILD
+                // step outputs into its own config subdirectory, so the runtime
+                // always loads a module built with the same CRT/std::string ABI
+                // as itself. Flat paths still work for third-party/prebuilt
+                // modules that do not ship config subdirectories.
+                const char* buildConfig = LodeBuildConfigName();
+                if (buildConfig && buildConfig[0] != '\0')
                 {
-                    return { 0, "Native library path must remain inside module directory: " + relLibPath };
+                    fs::path configAwareLibPath = baseLibPath.parent_path() / buildConfig / baseLibPath.filename();
+                    if (fs::exists(configAwareLibPath) || !fs::exists(baseLibPath))
+                        fullLibPath = configAwareLibPath;
                 }
 
-                // Prefer the module binary next to the executable: the build drops a
-                // config-matched copy there (Debug or Release), while the lode.json
-                // "libs/" copy is overwritten by whichever configuration was built
-                // last. Loading a module built with a different CRT/std::string ABI
-                // than the running exe corrupts cross-boundary strings and crashes.
-                std::string exePath = Platform::GetExecutablePath();
-                if (!exePath.empty())
+                if (relLibPath.empty() || !IsPathInside(baseLibPath, dirPath))
                 {
-                    fs::path exeDirCandidate = PathFromUtf8(exePath).parent_path() / fullLibPath.filename();
-                    if (fs::exists(exeDirCandidate))
-                        fullLibPath = exeDirCandidate;
+                    return { 0, "Native library path must remain inside module directory: " + relLibPath };
                 }
 
                 auto libResult = Platform::DynamicLibrary::Open(PathToUtf8(fullLibPath));
@@ -534,6 +537,31 @@ static ModuleLoadResult LoadModuleNoJump(lua_State* L, void* ctx, const char* pa
                     if (symResult.IsOk())
                     {
                         LodeModuleInitFn initFn = reinterpret_cast<LodeModuleInitFn>(symResult.GetValue());
+
+                        // Refuse to initialize a native module whose build
+                        // configuration (Debug/Release) differs from the running
+                        // runtime. A module built with a different CRT/STL ABI
+                        // corrupts std::string bytes across the DLL boundary and
+                        // crashes the process; rejecting it here before any
+                        // cross-boundary call turns that into a clean, named
+                        // error. Modules that do not export LodeModuleConfig
+                        // (e.g. third-party prebuilt DLLs) cannot be verified and
+                        // are allowed as before.
+                        auto configSymResult = lib->GetSymbol("LodeModuleConfig");
+                        if (configSymResult.IsOk())
+                        {
+                            typedef const char* (*LodeModuleConfigFn)();
+                            LodeModuleConfigFn configFn = reinterpret_cast<LodeModuleConfigFn>(configSymResult.GetValue());
+                            const char* moduleConfig = configFn ? configFn() : nullptr;
+                            const char* runtimeConfig = LodeBuildConfigName();
+                            if (moduleConfig && runtimeConfig && std::strcmp(moduleConfig, runtimeConfig) != 0)
+                            {
+                                return { 0, "Native library " + PathToUtf8(fullLibPath) +
+                                            " was built for configuration '" + moduleConfig +
+                                            "' but the running runtime is '" + runtimeConfig +
+                                            "'. Rebuild the module for the matching configuration to avoid ABI mismatch crashes." };
+                            }
+                        }
 
                         std::string nativeModulePath = PathToUtf8(dirPath);
                         lua_pushstring(L, nativeModulePath.c_str());
