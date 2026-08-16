@@ -179,6 +179,119 @@ Lode::Value UdpSocket::MethodSend(Lode::State& vm, const std::vector<Lode::Value
     return Lode::Value();
 }
 
+static bool RequireUdpOptionString(Lode::State& vm, const std::vector<Lode::Value>& args,
+                                   const char* method, std::string& value)
+{
+    if (args.size() < 2 || !args[1].IsString())
+    {
+        vm.RaiseError(std::string("udp ") + method + ": address must be a string");
+        return false;
+    }
+    value = args[1].AsString();
+    return true;
+}
+
+static bool RequireUdpOptionReady(Lode::State& vm, const UdpSocket& socket, const char* method)
+{
+    if (!socket.udpInited || socket.closed || socket.closing)
+    {
+        vm.RaiseError(std::string("udp ") + method + ": socket is closed");
+        return false;
+    }
+    return true;
+}
+
+Lode::Value UdpSocket::MethodJoinGroup(Lode::State& vm, const std::vector<Lode::Value>& args)
+{
+    if (!RequireUdpOptionReady(vm, *this, "JoinGroup")) return Lode::Value();
+    std::string group;
+    if (!RequireUdpOptionString(vm, args, "JoinGroup", group)) return Lode::Value();
+    const char* interfaceName = nullptr;
+    std::string interfaceValue;
+    if (args.size() > 2 && !args[2].IsNil())
+    {
+        if (!args[2].IsString())
+        {
+            vm.RaiseError("udp JoinGroup: interface must be a string");
+            return Lode::Value();
+        }
+        interfaceValue = args[2].AsString();
+        interfaceName = interfaceValue.c_str();
+    }
+    int r = uv_udp_set_membership(&udp, group.c_str(), interfaceName, UV_JOIN_GROUP);
+    if (r != 0)
+    {
+        vm.RaiseError(std::string("udp JoinGroup: ") + uv_strerror(r));
+        return Lode::Value();
+    }
+    return Lode::Value();
+}
+
+Lode::Value UdpSocket::MethodLeaveGroup(Lode::State& vm, const std::vector<Lode::Value>& args)
+{
+    if (!RequireUdpOptionReady(vm, *this, "LeaveGroup")) return Lode::Value();
+    std::string group;
+    if (!RequireUdpOptionString(vm, args, "LeaveGroup", group)) return Lode::Value();
+    const char* interfaceName = nullptr;
+    std::string interfaceValue;
+    if (args.size() > 2 && !args[2].IsNil())
+    {
+        if (!args[2].IsString())
+        {
+            vm.RaiseError("udp LeaveGroup: interface must be a string");
+            return Lode::Value();
+        }
+        interfaceValue = args[2].AsString();
+        interfaceName = interfaceValue.c_str();
+    }
+    int r = uv_udp_set_membership(&udp, group.c_str(), interfaceName, UV_LEAVE_GROUP);
+    if (r != 0)
+    {
+        vm.RaiseError(std::string("udp LeaveGroup: ") + uv_strerror(r));
+        return Lode::Value();
+    }
+    return Lode::Value();
+}
+
+Lode::Value UdpSocket::MethodSetBroadcast(Lode::State& vm, const std::vector<Lode::Value>& args)
+{
+    if (!RequireUdpOptionReady(vm, *this, "SetBroadcast")) return Lode::Value();
+    if (args.size() < 2 || !args[1].IsBoolean())
+    {
+        vm.RaiseError("udp SetBroadcast: enabled must be a boolean");
+        return Lode::Value();
+    }
+    int r = uv_udp_set_broadcast(&udp, args[1].AsBoolean() ? 1 : 0);
+    if (r != 0) vm.RaiseError(std::string("udp SetBroadcast: ") + uv_strerror(r));
+    return Lode::Value();
+}
+
+Lode::Value UdpSocket::MethodSetTTL(Lode::State& vm, const std::vector<Lode::Value>& args)
+{
+    if (!RequireUdpOptionReady(vm, *this, "SetTTL")) return Lode::Value();
+    if (args.size() < 2 || !args[1].IsNumber() || args[1].AsNumber() < 1 || args[1].AsNumber() > 255)
+    {
+        vm.RaiseError("udp SetTTL: ttl must be a number from 1 to 255");
+        return Lode::Value();
+    }
+    int r = uv_udp_set_ttl(&udp, static_cast<int>(args[1].AsNumber()));
+    if (r != 0) vm.RaiseError(std::string("udp SetTTL: ") + uv_strerror(r));
+    return Lode::Value();
+}
+
+Lode::Value UdpSocket::MethodSetMulticastLoop(Lode::State& vm, const std::vector<Lode::Value>& args)
+{
+    if (!RequireUdpOptionReady(vm, *this, "SetMulticastLoop")) return Lode::Value();
+    if (args.size() < 2 || !args[1].IsBoolean())
+    {
+        vm.RaiseError("udp SetMulticastLoop: enabled must be a boolean");
+        return Lode::Value();
+    }
+    int r = uv_udp_set_multicast_loop(&udp, args[1].AsBoolean() ? 1 : 0);
+    if (r != 0) vm.RaiseError(std::string("udp SetMulticastLoop: ") + uv_strerror(r));
+    return Lode::Value();
+}
+
 Lode::Value UdpSocket::MethodLocalAddress(Lode::State& vm)
 {
     if (!udpInited || closed)

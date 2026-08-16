@@ -78,6 +78,21 @@ export type UdpSocket = {
         --- The destination port
         port: number
     ) -> (),
+
+    --- Joins an IPv4 or IPv6 multicast group.
+    JoinGroup: (self: UdpSocket, group: string, interfaceName: string?) -> (),
+
+    --- Leaves a multicast group.
+    LeaveGroup: (self: UdpSocket, group: string, interfaceName: string?) -> (),
+
+    --- Enables or disables broadcast sends.
+    SetBroadcast: (self: UdpSocket, enabled: boolean) -> (),
+
+    --- Sets the IP time-to-live value.
+    SetTTL: (self: UdpSocket, ttl: number) -> (),
+
+    --- Enables or disables multicast loopback.
+    SetMulticastLoop: (self: UdpSocket, enabled: boolean) -> (),
     
     --- Closes the socket gracefully.
     Close: (self: UdpSocket) -> (),
