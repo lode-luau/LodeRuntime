@@ -240,7 +240,7 @@ describe("fs", function()
 
         local stat = fs.Stat(link)
         expect(stat.isSymbolicLink).toBe(true)
-        expect(fs.ReadLink(link)).toBe(target)
+        expect(norm(fs.ReadLink(link))).toBe(norm(target))
         expect(fs.RealPath(link)).toBe(fs.RealPath(target))
         cleanup()
     end)
