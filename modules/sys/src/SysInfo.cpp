@@ -7,6 +7,25 @@
 namespace lodesys
 {
 
+static Lode::Value GetUvPath(Lode::State& vm, const char* name,
+                             int (*getter)(char*, size_t*))
+{
+    std::string path(256, '\0');
+    size_t size = path.size();
+    int r = getter(path.data(), &size);
+    if (r == UV_ENOBUFS)
+    {
+        path.resize(size);
+        r = getter(path.data(), &size);
+    }
+    if (r < 0)
+    {
+        vm.RaiseError(std::string("sys.") + name + " error: " + uv_strerror(r));
+        return Lode::Value();
+    }
+    return Lode::Value(std::string(path.data(), size));
+}
+
 void BindSysInfo(Lode::State& vm, Lode::Table& exports)
 {
     exports.Set("GetPlatform", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
@@ -78,6 +97,62 @@ void BindSysInfo(Lode::State& vm, Lode::Table& exports)
             return Lode::Value();
         }
         return Lode::Value(uptime);
+    }));
+
+    exports.Set("GetAvailableParallelism", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
+        return Lode::Value(static_cast<double>(uv_available_parallelism()));
+    }));
+
+    exports.Set("GetCpuCount", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
+        uv_cpu_info_t* infos = nullptr;
+        int count = 0;
+        int r = uv_cpu_info(&infos, &count);
+        if (r < 0)
+        {
+            vm.RaiseError(std::string("sys.GetCpuCount error: ") + uv_strerror(r));
+            return Lode::Value();
+        }
+        uv_free_cpu_info(infos, count);
+        return Lode::Value(static_cast<double>(count));
+    }));
+
+    exports.Set("GetCpuInfo", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
+        uv_cpu_info_t* infos = nullptr;
+        int count = 0;
+        int r = uv_cpu_info(&infos, &count);
+        if (r < 0)
+        {
+            vm.RaiseError(std::string("sys.GetCpuInfo error: ") + uv_strerror(r));
+            return Lode::Value();
+        }
+        Lode::Table result = vm.CreateTable();
+        for (int i = 0; i < count; ++i)
+        {
+            Lode::Table cpu = vm.CreateTable();
+            cpu.Set("model", Lode::Value(infos[i].model));
+            cpu.Set("speed", Lode::Value(static_cast<double>(infos[i].speed)));
+            result.Set(i + 1, Lode::Value(cpu));
+        }
+        uv_free_cpu_info(infos, count);
+        return Lode::Value(result);
+    }));
+
+    exports.Set("GetTmpDir", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
+        return GetUvPath(vm, "GetTmpDir", uv_os_tmpdir);
+    }));
+
+    exports.Set("GetHomeDir", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
+        return GetUvPath(vm, "GetHomeDir", uv_os_homedir);
+    }));
+
+    exports.Set("GetLoadAverage", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
+        double average[3];
+        uv_loadavg(average);
+        Lode::Table result = vm.CreateTable();
+        result.Set(1, Lode::Value(average[0]));
+        result.Set(2, Lode::Value(average[1]));
+        result.Set(3, Lode::Value(average[2]));
+        return Lode::Value(result);
     }));
 }
 

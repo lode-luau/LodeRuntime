@@ -65,6 +65,24 @@ export type SysModule = {
     --- @return Uptime in seconds
     GetUptime: () -> number,
 
+    --- Returns the number of threads available for parallel work.
+    GetAvailableParallelism: () -> number,
+
+    --- Returns the number of logical CPUs.
+    GetCpuCount: () -> number,
+
+    --- Returns model and speed information for each logical CPU.
+    GetCpuInfo: () -> { { model: string, speed: number } },
+
+    --- Returns the operating system temporary directory.
+    GetTmpDir: () -> string,
+
+    --- Returns the current user's home directory.
+    GetHomeDir: () -> string,
+
+    --- Returns one-, five-, and fifteen-minute load averages.
+    GetLoadAverage: () -> { number },
+
     --- Retrieves the value of an environment variable.
     --- @param key The name of the environment variable
     --- @return The value of the environment variable, or nil if not found
