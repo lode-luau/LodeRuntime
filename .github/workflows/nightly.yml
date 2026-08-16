@@ -34,26 +34,88 @@ jobs:
           N=$((MAX + 1))
           echo "version=0.1.0-nightly.${DATE_UTC}.${N}" >> "$GITHUB_OUTPUT"
 
-      - name: Configure
-        run: cmake -B build
+      # 1. Set up the sccache tool. The Visual Studio (MSBuild) generator
+      #    ignores CMAKE_<LANG>_COMPILER_LAUNCHER, so CI uses the Ninja
+      #    generator (with separate Debug/Release trees), which honors it.
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.8
+
+      # 2. Restore/save cache of compiled C++ objects, falling back to the
+      #    cache written by the ci workflow so main and nightly share hits.
+      - name: Cache sccache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/sccache
+          key: ${{ runner.os }}-sccache-nightly-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-sccache-nightly-
+            ${{ runner.os }}-sccache-
+
+      # 3. Restore/save dependencies downloaded via FetchContent. Both build
+      #    trees share one base via FETCHCONTENT_BASE_DIR so there is a single
+      #    source/download to cache.
+      - name: Cache FetchContent
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/_deps
+          key: ${{ runner.os }}-fetchcontent-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-fetchcontent-
+
+      # 4. Ninja needs the MSVC toolchain on PATH; without this it would pick
+      #    the MinGW GCC that is also present on windows-latest runners.
+      - name: Enable MSVC toolchain
+        uses: ilammy/msvc-dev-cmd@v1
+
+      # 5. Configure Debug (Ninja single-config tree). ${{ runner.temp }} is
+      #    only available in step-level env, not workflow/job-level env.
+      - name: Configure Debug
+        env:
+          SCCACHE_DIR: ${{ runner.temp }}/sccache
+        run: >-
+          cmake -B build-debug -G Ninja -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl
+          -DFETCHCONTENT_BASE_DIR=${{ runner.temp }}/_deps
+          -DCMAKE_C_COMPILER_LAUNCHER=sccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
 
       - name: Build Debug
-        run: cmake --build build --config Debug
+        env:
+          SCCACHE_DIR: ${{ runner.temp }}/sccache
+        run: cmake --build build-debug
 
       - name: Validate Debug (sanity suite)
-        run: ./build/bin/Debug/lode_runtime.exe modules/sanity/run.luau
+        run: ./build-debug/bin/Debug/lode_runtime.exe modules/sanity/run.luau
 
       - name: "Validate Debug (ctest: native fixtures + diagnostics)"
-        run: ctest --test-dir build -C Debug --output-on-failure
+        run: ctest --test-dir build-debug -C Debug --output-on-failure
+
+      # 6. Configure Release (Ninja single-config tree, reuses shared deps)
+      - name: Configure Release
+        env:
+          SCCACHE_DIR: ${{ runner.temp }}/sccache
+        run: >-
+          cmake -B build-release -G Ninja -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl
+          -DFETCHCONTENT_BASE_DIR=${{ runner.temp }}/_deps
+          -DCMAKE_C_COMPILER_LAUNCHER=sccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
 
       - name: Build Release
-        run: cmake --build build --config Release
+        env:
+          SCCACHE_DIR: ${{ runner.temp }}/sccache
+        run: cmake --build build-release
 
       - name: Validate Release (sanity suite)
-        run: ./build/bin/Release/lode_runtime.exe modules/sanity/run.luau
+        run: ./build-release/bin/Release/lode_runtime.exe modules/sanity/run.luau
 
       - name: "Validate Release (ctest: native fixtures + diagnostics)"
-        run: ctest --test-dir build -C Release --output-on-failure
+        run: ctest --test-dir build-release -C Release --output-on-failure
+
+      - name: Show sccache stats
+        env:
+          SCCACHE_DIR: ${{ runner.temp }}/sccache
+        run: sccache --show-stats
 
       - name: Package
         shell: pwsh
@@ -65,9 +127,9 @@ jobs:
           New-Item -ItemType Directory -Force -Path $modulesDist | Out-Null
 
           # ---- Runtime artifact: executable, core DLLs, headers ----
-          Copy-Item build/bin/Release/lode_runtime.exe $runtimeDist
-          Copy-Item build/bin/Release/LodeCore.dll $runtimeDist
-          Copy-Item build/bin/Release/uv.dll $runtimeDist
+          Copy-Item build-release/bin/Release/lode_runtime.exe $runtimeDist
+          Copy-Item build-release/bin/Release/LodeCore.dll $runtimeDist
+          Copy-Item build-release/bin/Release/uv.dll $runtimeDist
           Copy-Item include/Lode $runtimeDist/Lode -Recurse
           Copy-Item LICENSE, README.md $runtimeDist
           Set-Content -Path "$runtimeDist/VERSION" -Value $ver
@@ -111,7 +173,7 @@ jobs:
 
               # Native modules keep their config-matched DLL only in the
               # module's own libs/ entry from lode.json.
-              $nativeLib = "build/bin/Release/$name.dll"
+              $nativeLib = "build-release/bin/Release/$name.dll"
               if (Test-Path $nativeLib) {
                   $libDir = "$dst/libs/windows/x64"
                   New-Item -ItemType Directory -Force -Path $libDir | Out-Null

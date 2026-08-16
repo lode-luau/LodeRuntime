@@ -1,5 +1,16 @@
 cmake_minimum_required(VERSION 3.20)
 
+# MSVC debug info must be Embedded (/Z7) so each object file is self-contained
+# instead of sharing one .pdb. With /Zi, concurrent CL.EXE processes need /FS
+# to coordinate; sccache silently strips /FS (sccache#1012), so parallel Ninja
+# builds then fail with C1041. /Z7 keeps the .obj fully cacheable by sccache.
+# CMP0141 + CMAKE_MSVC_DEBUG_INFORMATION_FORMAT must be set before project(),
+# because MSVC compiler flags are initialized during enable_language().
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.25)
+    cmake_policy(SET CMP0141 NEW)
+    set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "Embedded")
+endif()
+
 if(POLICY CMP0135)
     cmake_policy(SET CMP0135 NEW)
 endif()
@@ -8,6 +19,11 @@ endif()
 if(POLICY CMP0091)
     cmake_policy(SET CMP0091 NEW)
 endif()
+
+# rapidjson v1.1.0 declares cmake_minimum_required(VERSION 2.8), which modern
+# CMake refuses to configure. Floor the minimum supported policy version so
+# its header-only target can be added via FetchContent_MakeAvailable below.
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 
 project(LodeRuntime LANGUAGES C CXX)
 
@@ -44,12 +60,15 @@ if(NOT CMAKE_CONFIGURATION_TYPES AND CMAKE_BUILD_TYPE)
 endif()
 
 if(MSVC)
+    # /O2 is the standard speed optimization. /GL and /LTCG were removed
+    # because whole-program optimization / link-time codegen defeats most of
+    # the sccache benefit.
     add_compile_options(
-        $<$<CONFIG:Release>:/O1>
-        $<$<CONFIG:Release>:/GL>
+        /FS
+        $<$<CONFIG:Release>:/O2>
     )
     add_link_options(
-        $<$<CONFIG:Release>:/LTCG>
+        # Keep dead symbol and duplicate-COMDAT removal
         $<$<CONFIG:Release>:/OPT:REF>
         $<$<CONFIG:Release>:/OPT:ICF>
     )
@@ -89,14 +108,18 @@ FetchContent_Declare(
 
 # Fetch rapidjson for the native JSON parse/stringify core (SAX Reader +
 # Writer; header-only, no intermediate DOM). See src/Json.cpp.
-# NOTE: rapidjson's own CMakeLists.txt requires CMake < 3.5, so it cannot be
-# added with MakeAvailable; header-only, so we only need its include dir.
+# rapidjson builds docs/examples/tests by default, so disable them and let
+# FetchContent_MakeAvailable add the header-only RapidJSON target.
 FetchContent_Declare(
     rapidjson
     URL https://github.com/Tencent/rapidjson/archive/v1.1.0.tar.gz
     URL_HASH SHA256=bf7ced29704a1e696fbccf2a2b4ea068e7774fa37f6d7dd4039d0787f8bed98e
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
+set(RAPIDJSON_BUILD_DOC OFF CACHE BOOL "" FORCE)
+set(RAPIDJSON_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(RAPIDJSON_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(RAPIDJSON_BUILD_THIRDPARTY_GTEST OFF CACHE BOOL "" FORCE)
 
 # Fetch libuv for high-performance OS Event Loop
 FetchContent_Declare(
@@ -108,12 +131,7 @@ FetchContent_Declare(
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
 
-FetchContent_MakeAvailable(luau json libuv)
-
-FetchContent_GetProperties(rapidjson)
-if(NOT rapidjson_POPULATED)
-    FetchContent_Populate(rapidjson)
-endif()
+FetchContent_MakeAvailable(luau json libuv rapidjson)
 
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include
