@@ -535,6 +535,31 @@ static ModuleLoadResult LoadModuleNoJump(lua_State* L, void* ctx, const char* pa
                     {
                         LodeModuleInitFn initFn = reinterpret_cast<LodeModuleInitFn>(symResult.GetValue());
 
+                        // Refuse to initialize a native module whose build
+                        // configuration (Debug/Release) differs from the running
+                        // runtime. A module built with a different CRT/STL ABI
+                        // corrupts std::string bytes across the DLL boundary and
+                        // crashes the process; rejecting it here before any
+                        // cross-boundary call turns that into a clean, named
+                        // error. Modules that do not export LodeModuleConfig
+                        // (e.g. third-party prebuilt DLLs) cannot be verified and
+                        // are allowed as before.
+                        auto configSymResult = lib->GetSymbol("LodeModuleConfig");
+                        if (configSymResult.IsOk())
+                        {
+                            typedef const char* (*LodeModuleConfigFn)();
+                            LodeModuleConfigFn configFn = reinterpret_cast<LodeModuleConfigFn>(configSymResult.GetValue());
+                            const char* moduleConfig = configFn ? configFn() : nullptr;
+                            const char* runtimeConfig = LodeBuildConfigName();
+                            if (moduleConfig && runtimeConfig && std::strcmp(moduleConfig, runtimeConfig) != 0)
+                            {
+                                return { 0, "Native library " + PathToUtf8(fullLibPath) +
+                                            " was built for configuration '" + moduleConfig +
+                                            "' but the running runtime is '" + runtimeConfig +
+                                            "'. Rebuild the module for the matching configuration to avoid ABI mismatch crashes." };
+                            }
+                        }
+
                         std::string nativeModulePath = PathToUtf8(dirPath);
                         lua_pushstring(L, nativeModulePath.c_str());
                         lua_setfield(L, LUA_REGISTRYINDEX, "_LODE_NATIVE_MODULE_PATH");

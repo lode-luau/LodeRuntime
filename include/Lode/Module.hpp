@@ -103,6 +103,17 @@ Lode::ModuleReturn LodeModuleRegister(Lode::State& vm);
 
 #else
 
+// Only modules built through the Lode CMake (which defines LODE_BUILD_CONFIG_NAME
+// per configuration) export the config-verification symbol. Third-party modules
+// built against these headers without that definition emit nothing, so the loader
+// treats them as unverifiable and allows loading as before.
+#ifdef LODE_HAS_BUILD_CONFIG
+#define LODE_MODULE_CONFIG_EXPORT \
+    LODE_EXPORT const char* LodeModuleConfig() { return LodeBuildConfigName(); }
+#else
+#define LODE_MODULE_CONFIG_EXPORT
+#endif
+
 #define LODE_MODULE_NAMED(name, vm_var) \
     LODE_EXPORT int LodeModuleInit(lua_State* L) { \
         Lode::State vm_var(L); \
@@ -112,6 +123,7 @@ Lode::ModuleReturn LodeModuleRegister(Lode::State& vm);
         } \
         return static_cast<int>(ret.GetValues().size()); \
     } \
+    LODE_MODULE_CONFIG_EXPORT \
     Lode::ModuleReturn LodeModuleRegister(Lode::State& vm_var)
 
 #define LODE_MODULE(vm_var) LODE_MODULE_NAMED(default_module, vm_var)

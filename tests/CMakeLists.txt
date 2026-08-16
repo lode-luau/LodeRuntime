@@ -24,6 +24,10 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/native/simd_module/CMakeLists.txt")
     add_subdirectory(native/simd_module)
 endif()
 
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/native/config_mismatch_module/CMakeLists.txt")
+    add_subdirectory(native/config_mismatch_module)
+endif()
+
 function(lode_add_script_test test_name script_path)
     add_test(
         NAME ${test_name}
@@ -35,6 +39,7 @@ endfunction()
 lode_add_script_test(integration_core_api        native/core_api.luau)
 lode_add_script_test(integration_native_require  native/native_require.luau)
 lode_add_script_test(integration_simd_bench      native/simd_bench.luau)
+lode_add_script_test(integration_config_mismatch native/config_mismatch.luau)
 
 # Diagnostics scripts are expected to fail (non-zero exit) with a specific,
 # well-known error category; WILL_FAIL flips the pass/fail interpretation.

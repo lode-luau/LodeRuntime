@@ -208,6 +208,13 @@ set(LODE_CORE_HEADERS
 add_library(LodeCore SHARED ${LODE_CORE_SOURCES} ${LODE_CORE_HEADERS})
 target_compile_definitions(LodeCore PRIVATE LODE_CORE_BUILD)
 
+# Compile each target (runtime + every native module) with its own build
+# configuration name. The loader compares a module's LodeModuleConfig export
+# against the running runtime's config before calling LodeModuleInit, refusing
+# to load a module built with a different CRT/STL ABI (Debug vs Release) than
+# the runtime.
+target_compile_definitions(LodeCore PUBLIC LODE_BUILD_CONFIG_NAME=$<CONFIG> LODE_HAS_BUILD_CONFIG)
+
 target_include_directories(LodeCore PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
