@@ -47,6 +47,11 @@ Lode::Value UdpSocket::MethodBind(Lode::State& vm, const std::vector<Lode::Value
         vm.RaiseError("udp Bind: socket is closed");
         return Lode::Value();
     }
+    if (udpInited)
+    {
+        vm.RaiseError("udp Bind: socket is already bound");
+        return Lode::Value();
+    }
     if (args.size() < 2 || !args[1].IsString())
     {
         vm.RaiseError("udp Bind: host must be a string");
@@ -425,8 +430,8 @@ void UdpSocket::OnRead(uv_udp_t* handle, ssize_t nread, const uv_buf_t* buf, con
 void UdpSocket::OnSend(uv_udp_send_t* req, int status)
 {
     auto* wreq = reinterpret_cast<SendRequest*>(req);
-    auto* self = static_cast<UdpSocket*>(req->handle->data);
-    if (status != 0 && !self->closing && !self->closed)
+    auto* self = static_cast<UdpSocket*>(req && req->handle ? req->handle->data : nullptr);
+    if (status != 0 && self && !self->closing && !self->closed)
         self->FireError(std::string("send: ") + uv_strerror(status));
     delete wreq;
 }
