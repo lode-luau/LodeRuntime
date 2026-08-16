@@ -12,30 +12,77 @@ export type ArchitectureType = "x86_64" | "AMD64" | "x86" | "i386" | "i686" | "a
 --- Represents the underlying OS handle type detected by libuv.
 export type HandleType = "tty" | "pipe" | "file" | "tcp" | "udp" | "unknown"
 
+--- Represents a connection to a signal.
+export type SignalConnection = {
+    Connected: boolean,
+    Disconnect: (self: SignalConnection) -> (),
+}
+
 export type Signal<T...> = {
-    Connect: (self: Signal<T...>, callback: (T...) -> ()) -> any,
-    Once: (self: Signal<T...>, callback: (T...) -> ()) -> any,
+    Connect: (self: Signal<T...>, callback: (T...) -> ()) -> SignalConnection,
+    Once: (self: Signal<T...>, callback: (T...) -> ()) -> SignalConnection,
     Wait: (self: Signal<T...>, timeout: number?) -> T...,
 }
 
+--- Represents a pipe stream connected to a child process's stdio.
+export type ProcessPipeStream = {
+    DataReceived: Signal<buffer>,
+    EndOfStream: Signal<()>,
+    ErrorOccurred: Signal<string>,
+
+    Write: (self: ProcessPipeStream, data: string | buffer) -> (),
+    WriteLine: (self: ProcessPipeStream, data: string) -> (),
+    Read: (self: ProcessPipeStream, bytes: number?) -> string,
+    ReadBuffer: (self: ProcessPipeStream, bytes: number?) -> buffer,
+    ReadLine: (self: ProcessPipeStream) -> string?,
+    StartStreaming: (self: ProcessPipeStream) -> (),
+    StopStreaming: (self: ProcessPipeStream) -> (),
+    Close: (self: ProcessPipeStream) -> (),
+}
+
+--- Options for spawning a child process.
+export type SpawnOptions = {
+    args: { string }?,
+    cwd: string?,
+    env: { [string]: string }?,
+    stdio: ({ string } | string)?,
+    detached: boolean?,
+    hide: boolean?,
+}
+
+--- Represents a spawned child process.
+export type Process = {
+    pid: number,
+    stdin: ProcessPipeStream?,
+    stdout: ProcessPipeStream?,
+    stderr: ProcessPipeStream?,
+
+    Exited: Signal<number, number>,
+    ErrorOccurred: Signal<string>,
+
+    Kill: (self: Process, signal: number?) -> (),
+    Wait: (self: Process) -> (number, number),
+    GetPid: (self: Process) -> number,
+    GetExitCode: (self: Process) -> number?,
+    GetTermSignal: (self: Process) -> number?,
+    IsRunning: (self: Process) -> boolean,
+    Close: (self: Process) -> (),
+    Destroy: (self: Process) -> (),
+}
+
 --- System Module (sys).
---- Provides synchronous access to operating system information and 
---- low-level process controls.
+--- Provides synchronous access to operating system information,
+--- subprocess creation, and process controls.
 --- 
 --- Usage:
 --- ```lua
 --- local sys = require("@sys")
 --- 
---- print("Platform:", sys.GetPlatform())
---- print("Free RAM:", sys.GetFreeMemory())
---- 
---- sys.SetEnv("MY_VAR", "123")
---- print(sys.GetEnv("MY_VAR"))
---- 
---- local handleType = sys.GuessHandleType(1)
---- print("Stdout is:", handleType)
---- 
---- sys.exit(0)
+--- local child = sys.spawn("cmd.exe", { args = { "/c", "echo hello" } })
+--- local line = child.stdout:ReadLine()
+--- print("Child output:", line)
+--- local exitCode = child:Wait()
+--- print("Exit code:", exitCode)
 --- ```
 export type SysModule = {
     --- Returns the platform string representing the current OS.
@@ -117,10 +164,16 @@ export type SysModule = {
     exit: (code: number) -> (),
 
     --- Attempts to guess the underlying libuv handle type for a given file descriptor.
-    --- Crucial for initializing standard IO streams dynamically.
     --- @param fd The file descriptor (e.g., 0 for stdin)
     --- @return The type of the handle
-    GuessHandleType: (fd: number) -> HandleType, 
+    GuessHandleType: (fd: number) -> HandleType,
+
+    --- Spawns a child process asynchronously.
+    --- @param command Executable name or path, or table with options.
+    --- @param options Optional configuration table.
+    --- @return The spawned Process object.
+    spawn: (command: string, options: SpawnOptions?) -> Process,
+    Spawn: (command: string, options: SpawnOptions?) -> Process,
 }
 
 return {} :: SysModule

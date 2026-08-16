@@ -90,10 +90,8 @@ describe("sys", function()
         it("gets and sets environment variables", function()
             local TEST_KEY = "LODE_SYS_TEST_VAR"
             
-            -- Deveria ser nulo por padrão
             expect(sys.GetEnv(TEST_KEY)).toBe(nil)
             
-            -- Seta e depois pega
             sys.SetEnv(TEST_KEY, "HelloSys")
             expect(sys.GetEnv(TEST_KEY)).toBe("HelloSys")
         end)
@@ -113,11 +111,65 @@ describe("sys", function()
         end)
 
         it("guesses handle type for standard fds", function()
-            -- FD 0 é tipicamente tty, pipe ou file. Se der erro, ele também jogará pcall ou retornará.
             local t = sys.GuessHandleType(0)
             expect(type(t)).toBe("string")
             local valid = (t == "tty" or t == "file" or t == "pipe" or t == "unknown")
             expect(valid).toBe(true)
+        end)
+    end)
+
+    describe("Process Spawning", function()
+        it("exposes spawn function", function()
+            expect(typeof(sys.spawn)).toBe("function")
+            expect(typeof(sys.Spawn)).toBe("function")
+        end)
+
+        it("rejects invalid spawn arguments", function()
+            local ok, err = pcall(function()
+                (sys.spawn :: any)(123)
+            end)
+            expect(ok).toBe(false)
+            expect(tostring(err):find("sys.spawn", 1, true) ~= nil).toBe(true)
+        end)
+
+        it("spawns a child process and reads stdout via pipe", function()
+            local isWin = string.find(string.lower(sys.GetPlatform()), "win", 1, true) ~= nil
+            local cmd = isWin and "cmd.exe" or "echo"
+            local args = isWin and { "/c", "echo", "LodeChildProcessWorks" } or { "LodeChildProcessWorks" }
+
+            local child = sys.spawn(cmd, {
+                args = args,
+                stdio = { "pipe", "pipe", "pipe" }
+            })
+
+            expect(typeof(child)).toBe("userdata")
+            expect(child.pid > 0).toBe(true)
+            expect(typeof(child.stdout)).toBe("userdata")
+
+            local line = child.stdout:ReadLine()
+            expect(type(line)).toBe("string")
+            expect(tostring(line):find("LodeChildProcessWorks", 1, true) ~= nil).toBe(true)
+
+            local exitCode = child:Wait()
+            expect(exitCode).toBe(0)
+            expect(child:GetExitCode()).toBe(0)
+            expect(child:IsRunning()).toBe(false)
+        end)
+
+        it("delivers child exit code on non-zero exit", function()
+            local isWin = string.find(string.lower(sys.GetPlatform()), "win", 1, true) ~= nil
+            local cmd = isWin and "cmd.exe" or "sh"
+            local args = isWin and { "/c", "exit", "42" } or { "-c", "exit 42" }
+
+            local child = sys.spawn(cmd, {
+                args = args,
+                stdio = { "ignore", "ignore", "ignore" }
+            })
+
+            expect(child.pid > 0).toBe(true)
+            local exitCode = child:Wait()
+            expect(exitCode).toBe(42)
+            expect(child:GetExitCode()).toBe(42)
         end)
     end)
 end)
