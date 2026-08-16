@@ -13,6 +13,8 @@ Furthermore, we need a mechanism to provide type information for the Language Se
 ### 1. The `lode.json` Manifest
 To load a native module, the runtime searches the module's directory (or traverses upwards) for a `lode.json` file. This manifest uses the `libraries` field to specify the relative paths (from the directory containing `lode.json`) to the dynamic libraries (`.dll`, `.so`, `.dylib`). The runtime will automatically select and load the correct library based on the current operating system and architecture.
 
+The path given in `libraries.<platform>.<arch>` is the *base* path. When the loading runtime knows its own build configuration, the loader first looks for the config-aware copy at `libs/<platform>/<arch>/<config>/<name>` (the same path with a `<config>` subdirectory inserted before the file name). It falls back to the base path when no config subdirectory exists, so third-party or prebuilt modules that ship flat library trees keep working unchanged. Loading a config-aware copy guarantees the runtime and the module were compiled with the same CRT/STL build (Debug vs Release), avoiding ABI mismatches across the DLL boundary.
+
 **Example `lode.json`:**
 ```json
 {
@@ -40,6 +42,8 @@ To load a native module, the runtime searches the module's directory (or travers
 ```
 
 The standard entry point exported by the dynamic library must be `LodeModuleInit`.
+
+Additionally, modules built through the Lode CMake may export `LodeModuleConfig`, a `const char*` C-linkage function returning the build configuration the module was compiled with (e.g. `"Debug"` or `"Release"`). When the loaded module exports it, the runtime compares the value with its own configuration before calling `LodeModuleInit`; a mismatch aborts the load with a named error instead of risking a cross-boundary CRT/STL ABI crash. Modules that omit `LodeModuleConfig` are treated as unverifiable and load as before.
 
 ### 2. The Role of `init.luau` in Native Modules
 Native modules must include an `init.luau` file alongside the `lode.json` or in the root of the module package. This file serves two critical purposes:
