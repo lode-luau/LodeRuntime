@@ -6,6 +6,7 @@
 #include "Lode/Table.hpp"
 #include "Sys/SysInfo.hpp"
 #include "Sys/SysProcess.hpp"
+#include "Sys/SysSignals.hpp"
 
 LODE_MODULE(vm)
 {
@@ -13,6 +14,7 @@ LODE_MODULE(vm)
     
     lodesys::BindSysInfo(vm, exports);
     lodesys::BindSysProcess(vm, exports);
+    lodesys::BindSysSignals(vm, exports);
     
     return { exports };
 }

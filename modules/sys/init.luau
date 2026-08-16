@@ -12,6 +12,12 @@ export type ArchitectureType = "x86_64" | "AMD64" | "x86" | "i386" | "i686" | "a
 --- Represents the underlying OS handle type detected by libuv.
 export type HandleType = "tty" | "pipe" | "file" | "tcp" | "udp" | "unknown"
 
+export type Signal<T...> = {
+    Connect: (self: Signal<T...>, callback: (T...) -> ()) -> any,
+    Once: (self: Signal<T...>, callback: (T...) -> ()) -> any,
+    Wait: (self: Signal<T...>, timeout: number?) -> T...,
+}
+
 --- System Module (sys).
 --- Provides synchronous access to operating system information and 
 --- low-level process controls.
@@ -82,6 +88,10 @@ export type SysModule = {
 
     --- Returns one-, five-, and fifteen-minute load averages.
     GetLoadAverage: () -> { number },
+
+    --- Returns a read-only signal for an operating system signal.
+    --- Supported names include SIGINT, SIGTERM, SIGHUP, and SIGWINCH where available.
+    Signal: (name: string) -> Signal<number>,
 
     --- Retrieves the value of an environment variable.
     --- @param key The name of the environment variable

@@ -88,6 +88,36 @@ Lode::Table BuildSocketMethods(Lode::State& vm, const std::shared_ptr<UdpManager
         return Lode::Value();
     }));
 
+    m.Set("JoinGroup", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+        auto self = Lode::ObjectWrap<lodeudp::UdpSocket>::Unwrap(vm2, 1);
+        if (!self) { vm2.RaiseError("udp JoinGroup: invalid UdpSocket"); return Lode::Value(); }
+        return self->MethodJoinGroup(vm2, args);
+    }));
+
+    m.Set("LeaveGroup", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+        auto self = Lode::ObjectWrap<lodeudp::UdpSocket>::Unwrap(vm2, 1);
+        if (!self) { vm2.RaiseError("udp LeaveGroup: invalid UdpSocket"); return Lode::Value(); }
+        return self->MethodLeaveGroup(vm2, args);
+    }));
+
+    m.Set("SetBroadcast", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+        auto self = Lode::ObjectWrap<lodeudp::UdpSocket>::Unwrap(vm2, 1);
+        if (!self) { vm2.RaiseError("udp SetBroadcast: invalid UdpSocket"); return Lode::Value(); }
+        return self->MethodSetBroadcast(vm2, args);
+    }));
+
+    m.Set("SetTTL", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+        auto self = Lode::ObjectWrap<lodeudp::UdpSocket>::Unwrap(vm2, 1);
+        if (!self) { vm2.RaiseError("udp SetTTL: invalid UdpSocket"); return Lode::Value(); }
+        return self->MethodSetTTL(vm2, args);
+    }));
+
+    m.Set("SetMulticastLoop", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+        auto self = Lode::ObjectWrap<lodeudp::UdpSocket>::Unwrap(vm2, 1);
+        if (!self) { vm2.RaiseError("udp SetMulticastLoop: invalid UdpSocket"); return Lode::Value(); }
+        return self->MethodSetMulticastLoop(vm2, args);
+    }));
+
     m.Set("LocalAddress", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodeudp::UdpSocket>::Unwrap(vm2, 1);
         if (!self)

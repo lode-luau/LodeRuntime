@@ -19,7 +19,7 @@ return {
             toml = "modules/toml",
             http = "modules/http",
             json = "modules/json",
-            socket = "modules/socket",
+            socket = "modules/tcp",
             websocket = "modules/websocket",
             tcp = "modules/tcp",
             udp = "modules/udp",
