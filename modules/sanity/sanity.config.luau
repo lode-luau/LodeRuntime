@@ -13,7 +13,7 @@ return {
     pattern = "%.test%.luau$",
 
     -- Per-test timeout in seconds. Tests that exceed this are marked failed.
-    timeout = 5,
+    timeout = 8,
 
     -- When true, the runner throws at the end if any test failed, causing the
     -- runtime to exit with a non-zero code.

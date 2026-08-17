@@ -224,6 +224,11 @@ namespace {
 
 bool HttpRequestContext::ParseHeaders()
 {
+    if (!raw.empty() && (raw[0] == '\0' || raw.rfind("PRI * HTTP/2.0", 0) == 0))
+    {
+        FinishError("protocol-error", "server requires HTTP/2, HTTP/1.1 client fallback unsupported");
+        return false;
+    }
     size_t lineEnd = raw.find("\r\n");
     if (lineEnd == std::string::npos || lineEnd == 0) { FinishError("malformed-response", "invalid status line"); return false; }
     std::string statusLine = raw.substr(0, lineEnd);

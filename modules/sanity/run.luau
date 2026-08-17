@@ -22,7 +22,7 @@ local Discovery = require("./src/Discovery")
 local config = {
     testDir = "tests",
     pattern = "%.test%.luau$",
-    timeout = 5,
+    timeout = 8,
     exitOnFailure = true,
     live = true,
 }

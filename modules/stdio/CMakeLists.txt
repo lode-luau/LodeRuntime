@@ -4,11 +4,17 @@ project(stdio LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_library(stdio SHARED src/stdio.cpp)
+add_library(stdio SHARED
+    src/Main.cpp
+    src/StdioManager.cpp
+    src/StdioStream.cpp
+    src/StdioHelpers.cpp
+)
 
+target_include_directories(stdio PUBLIC include)
+target_compile_definitions(stdio PRIVATE LODE_STDIO_BUILD NOMINMAX)
 target_link_libraries(stdio PRIVATE LodeCore)
 
-# Size Optimization Flags (Option C)
 if(MSVC)
     target_compile_options(stdio PRIVATE $<$<NOT:$<CONFIG:Debug>>:/O1> /GR- /GL)
     target_link_options(stdio PRIVATE $<$<NOT:$<CONFIG:Debug>>:/OPT:REF> $<$<NOT:$<CONFIG:Debug>>:/OPT:ICF> $<$<NOT:$<CONFIG:Debug>>:/LTCG>)
@@ -17,7 +23,6 @@ else()
     target_link_options(stdio PRIVATE -flto -Wl,--gc-sections)
 endif()
 
-# 1. Universal Platform Detection
 if(WIN32)
     set(TARGET_PLATFORM "windows")
     set(TARGET_LIB_NAME "stdio.dll")
@@ -47,7 +52,6 @@ else()
     set(TARGET_LIB_NAME "stdio.so")
 endif()
 
-# 2. Universal Architecture Detection
 if(EMSCRIPTEN)
     if(CMAKE_SIZEOF_VOID_P EQUAL 8)
         set(TARGET_ARCH "wasm64")
@@ -64,7 +68,6 @@ else()
     set(TARGET_ARCH "x86")
 endif()
 
-# 3. Dynamic Output Directory
 set(NATIVE_OUTPUT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/libs/${TARGET_PLATFORM}/${TARGET_ARCH}/$<CONFIG>")
 
 foreach(CONFIG_NAME ${CMAKE_CONFIGURATION_TYPES})

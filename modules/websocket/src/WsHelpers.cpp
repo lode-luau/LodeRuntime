@@ -78,30 +78,53 @@ void WsRng::Fill(uint8_t* dst, size_t n)
 ParsedWsUrl ParseWebSocketUrl(const std::string& raw)
 {
     ParsedWsUrl out;
-    std::string s = raw;
-    if (s.compare(0, 6, "wss://") == 0)
-    {
-        out.valid = false;
-        out.error = "tls";
-        return out;
-    }
-    std::string prefix = "ws://";
-    if (s.compare(0, prefix.size(), prefix) != 0)
+    if (raw.empty())
     {
         out.valid = false;
         out.error = "invalid-url";
         return out;
     }
-    s = s.substr(prefix.size());
+
+    std::string lowerRaw = raw;
+    for (char& c : lowerRaw)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+    if (lowerRaw.compare(0, 6, "wss://") == 0)
+    {
+        out.valid = false;
+        out.error = "tls";
+        return out;
+    }
+
+    std::string prefix = "ws://";
+    if (lowerRaw.compare(0, prefix.size(), prefix) != 0)
+    {
+        out.valid = false;
+        out.error = "invalid-url";
+        return out;
+    }
+
+    std::string s = raw.substr(prefix.size());
     if (s.empty())
     {
         out.valid = false;
         out.error = "invalid-url";
         return out;
     }
-    size_t slash = s.find('/');
-    std::string hostPort = s.substr(0, slash);
-    std::string path = slash == std::string::npos ? "/" : s.substr(slash);
+
+    size_t hostPortEnd = s.find_first_of("/?#");
+    std::string hostPort = hostPortEnd == std::string::npos ? s : s.substr(0, hostPortEnd);
+    std::string path = hostPortEnd == std::string::npos ? "/" : s.substr(hostPortEnd);
+
+    if (path.empty() || path[0] == '?' || path[0] == '#')
+        path = "/" + path;
+
+    size_t hashPos = path.find('#');
+    if (hashPos != std::string::npos)
+        path = path.substr(0, hashPos);
+    if (path.empty())
+        path = "/";
+
     std::string host;
     int port = 80;
     if (hostPort.empty())
@@ -110,6 +133,7 @@ ParsedWsUrl ParseWebSocketUrl(const std::string& raw)
         out.error = "invalid-url";
         return out;
     }
+
     if (hostPort[0] == '[')
     {
         size_t rbracket = hostPort.find(']');
@@ -129,6 +153,16 @@ ParsedWsUrl ParseWebSocketUrl(const std::string& raw)
                 return out;
             }
             std::string pstr = hostPort.substr(rbracket + 2);
+            if (pstr.empty()) { out.valid = false; out.error = "invalid-url"; return out; }
+            for (char c : pstr)
+            {
+                if (!std::isdigit(static_cast<unsigned char>(c)))
+                {
+                    out.valid = false;
+                    out.error = "invalid-url";
+                    return out;
+                }
+            }
             try { port = std::stoi(pstr); }
             catch (...) { out.valid = false; out.error = "invalid-url"; return out; }
             if (!IsValidPort(port, false)) { out.valid = false; out.error = "invalid-url"; return out; }
@@ -141,6 +175,16 @@ ParsedWsUrl ParseWebSocketUrl(const std::string& raw)
         {
             host = hostPort.substr(0, colon);
             std::string pstr = hostPort.substr(colon + 1);
+            if (pstr.empty()) { out.valid = false; out.error = "invalid-url"; return out; }
+            for (char c : pstr)
+            {
+                if (!std::isdigit(static_cast<unsigned char>(c)))
+                {
+                    out.valid = false;
+                    out.error = "invalid-url";
+                    return out;
+                }
+            }
             try { port = std::stoi(pstr); }
             catch (...) { out.valid = false; out.error = "invalid-url"; return out; }
             if (!IsValidPort(port, false)) { out.valid = false; out.error = "invalid-url"; return out; }
@@ -150,6 +194,14 @@ ParsedWsUrl ParseWebSocketUrl(const std::string& raw)
             host = hostPort;
         }
     }
+
+    if (host.empty())
+    {
+        out.valid = false;
+        out.error = "invalid-url";
+        return out;
+    }
+
     out.valid = true;
     out.host = host;
     out.port = port;

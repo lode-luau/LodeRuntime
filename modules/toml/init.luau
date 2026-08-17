@@ -16,87 +16,127 @@ local toml = {}
 
 -- serialization
 
-const function serializeValue(value: string | number): string
-	if typeof(value) == "string" then
-		value = string.gsub(value, "\\", "\\\\")
-		value = string.gsub(value, "\n", "\\n")
-		value = string.gsub(value, "\t", "\\t")
-		return '"' .. value .. '"'
-	end
-
-	if value == math.huge then
-		return "inf"
-	end
-
-	if value == -math.huge then
-		return "-inf"
-	end
-
-	if value ~= value then
-		return "nan"
-	end
-
-	return tostring(value)
-end
-
-const function quoteKey(key: string): string
+local function quoteKey(key: string): string
 	if not string.match(key, "^[%w_-]+$") then
-		return `"{key}"`
+		local escaped = string.gsub(key, "\\", "\\\\")
+		escaped = string.gsub(escaped, '"', '\\"')
+		return `"{escaped}"`
 	end
 
 	return key
 end
 
-const function hasNestedTables(tbl: { [unknown]: unknown }): boolean
+local function isArray(tbl: { [any]: any }): boolean
+	local count = 0
+	local maxIdx = 0
+	for k, _ in tbl do
+		if typeof(k) ~= "number" or k <= 0 or math.floor(k) ~= k then
+			return false
+		end
+		count += 1
+		if k > maxIdx then
+			maxIdx = k
+		end
+	end
+	return count == maxIdx
+end
+
+local function isArrayOfTables(tbl: { [any]: any }): boolean
+	if not isArray(tbl) or #tbl == 0 then
+		return false
+	end
 	for _, v in tbl do
-		if typeof(v) == "table" and next(v) ~= nil then
-			return true
+		if typeof(v) ~= "table" or isArray(v) then
+			return false
+		end
+	end
+	return true
+end
+
+local function serializeValue(value: any): string
+	local t = typeof(value)
+	if t == "string" then
+		local s = string.gsub(value, "\\", "\\\\")
+		s = string.gsub(s, '"', '\\"')
+		s = string.gsub(s, "\n", "\\n")
+		s = string.gsub(s, "\r", "\\r")
+		s = string.gsub(s, "\t", "\\t")
+		return '"' .. s .. '"'
+	elseif t == "boolean" then
+		return value and "true" or "false"
+	elseif t == "number" then
+		if value == math.huge then return "inf" end
+		if value == -math.huge then return "-inf" end
+		if value ~= value then return "nan" end
+		return tostring(value)
+	elseif t == "table" then
+		if isArray(value) then
+			local parts = {}
+			for _, item in value do
+				table.insert(parts, serializeValue(item))
+			end
+			return "[" .. table.concat(parts, ", ") .. "]"
+		else
+			local parts = {}
+			for k, v in value do
+				table.insert(parts, quoteKey(tostring(k)) .. " = " .. serializeValue(v))
+			end
+			return "{ " .. table.concat(parts, ", ") .. " }"
 		end
 	end
 
-	return false
+	return tostring(value)
 end
 
-const function tableToToml(tbl: { [any]: any }, parent: string?): string
+local function tableToToml(tbl: { [any]: any }, parent: string?): string
 	local result = ""
-	local subTables = {}
-	local hasDirectValues = false
+	local subTables: { [string]: any } = {}
+	local arrayTables: { [string]: any } = {}
+	local directValues: { [string]: any } = {}
 
 	for k, v in tbl do
-		if typeof(v) == "table" and next(v) ~= nil then
-			if #v > 0 then
-				for _, entry in v do
-					result ..= "\n[[" .. (parent and parent .. "." or "") .. quoteKey(k) .. "]]\n"
-					result ..= tableToToml(entry, nil)
-				end
+		local strKey = tostring(k)
+		if typeof(v) == "table" then
+			if isArrayOfTables(v) then
+				arrayTables[strKey] = v
+			elseif isArray(v) then
+				directValues[strKey] = v
 			else
-				subTables[k] = v
+				subTables[strKey] = v
 			end
 		else
-			hasDirectValues = true
-			result ..= quoteKey(k) .. " = " .. serializeValue(v) .. "\n"
+			directValues[strKey] = v
 		end
+	end
+
+	for k, v in directValues do
+		result ..= quoteKey(k) .. " = " .. serializeValue(v) .. "\n"
 	end
 
 	for k, v in subTables do
-		local key = parent and (parent .. "." .. quoteKey(k)) or quoteKey(k)
-
-		if hasNestedTables(v) == true then
-			result ..= tableToToml(v, key)
-			continue
+		local sectionKey = parent and (parent .. "." .. quoteKey(k)) or quoteKey(k)
+		if result ~= "" and string.sub(result, -1) ~= "\n" then
+			result ..= "\n"
 		end
+		result ..= "[" .. sectionKey .. "]\n"
+		result ..= tableToToml(v, sectionKey)
+	end
 
-		if hasDirectValues or parent then
-			result ..= "\n[" .. key .. "]\n"
+	for k, arr in arrayTables do
+		local sectionKey = parent and (parent .. "." .. quoteKey(k)) or quoteKey(k)
+		for _, entry in arr do
+			if result ~= "" and string.sub(result, -1) ~= "\n" then
+				result ..= "\n"
+			end
+			result ..= "[[" .. sectionKey .. "]]\n"
+			result ..= tableToToml(entry, sectionKey)
 		end
-
-		result ..= tableToToml(v, key)
 	end
 
 	return result
 end
 
-const function serialize(tbl: { [any]: any }): string
+local function serialize(tbl: { [any]: any }): string
 	return tableToToml(tbl, nil)
 end
 
@@ -1591,5 +1631,7 @@ end
 -- user-facing
 toml.serialize = serialize
 toml.deserialize = deserialize
+toml.encode = serialize
+toml.decode = deserialize
 
 return table.freeze(toml)
