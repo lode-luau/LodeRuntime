@@ -91,6 +91,9 @@ public:
 
     void AddModulePath(std::string_view path);
 
+    void SetCliArgs(const std::vector<std::string>& args);
+    [[nodiscard]] std::vector<std::string> GetCliArgs() const;
+
     void SetGlobal(const std::string& name, const Value& value);
     [[nodiscard]] Result<Value> GetGlobal(const std::string& name) const;
 

@@ -174,6 +174,10 @@ export type SysModule = {
     --- @return The spawned Process object.
     spawn: (command: string, options: SpawnOptions?) -> Process,
     Spawn: (command: string, options: SpawnOptions?) -> Process,
+
+    --- Returns the command-line arguments passed to the script as an array of strings.
+    Args: () -> { string },
+    GetArgs: () -> { string },
 }
 
 return {} :: SysModule
