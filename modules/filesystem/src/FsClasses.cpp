@@ -86,6 +86,12 @@ void BindClasses(Lode::State& vm, Lode::Exports& exports, std::shared_ptr<FsMana
         // Open file async and yield
         Lode::Coroutine coroutine = Lode::Coroutine(vm2.GetLuaState());
         
+        int openMode = 0644;
+        if (args.size() > 3 && args[3].IsNumber())
+        {
+            openMode = static_cast<int>(args[3].AsNumber());
+        }
+
         struct OpenCtx {
             std::shared_ptr<lodefs::FileHandle> h;
             Lode::Coroutine co;
@@ -98,7 +104,7 @@ void BindClasses(Lode::State& vm, Lode::Exports& exports, std::shared_ptr<FsMana
         ctx->L = vm2.GetLuaState();
         ctx->req.data = ctx;
         
-        int r = uv_fs_open(mgr->loop, &ctx->req, path.c_str(), flags, 0644, [](uv_fs_t* req) {
+        int r = uv_fs_open(mgr->loop, &ctx->req, path.c_str(), flags, openMode, [](uv_fs_t* req) {
             auto ctx = static_cast<OpenCtx*>(req->data);
             Lode::State vm(ctx->L);
             if (req->result < 0) {
