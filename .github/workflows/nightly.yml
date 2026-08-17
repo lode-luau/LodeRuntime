@@ -190,11 +190,8 @@ jobs:
 
                   if ($sourceDll) {
                       $libDirRelease = "$dst/libs/windows/x64/Release"
-                      $libDirFlat = "$dst/libs/windows/x64"
                       New-Item -ItemType Directory -Force -Path $libDirRelease | Out-Null
-                      New-Item -ItemType Directory -Force -Path $libDirFlat | Out-Null
                       Copy-Item $sourceDll "$libDirRelease/$name.dll" -Force
-                      Copy-Item $sourceDll "$libDirFlat/$name.dll" -Force
                   } else {
                       Write-Error "Native library for $name was not found at $libRelease, $libFlat, or $libBin"
                   }
