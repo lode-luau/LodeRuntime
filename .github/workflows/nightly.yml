@@ -174,11 +174,30 @@ jobs:
               # Native modules keep their config-matched DLL in the module's
               # own libs/<platform>/<arch>/<config> entry from lode.json; the
               # loader resolves the config-aware subdir per runtime build.
-              $nativeLib = "build-release/bin/Release/$name.dll"
-              if (Test-Path $nativeLib) {
-                  $libDir = "$dst/libs/windows/x64/Release"
-                  New-Item -ItemType Directory -Force -Path $libDir | Out-Null
-                  Copy-Item "$src/libs/windows/x64/Release/$name.dll" $libDir
+              if ($isNative) {
+                  $libRelease = "$src/libs/windows/x64/Release/$name.dll"
+                  $libFlat = "$src/libs/windows/x64/$name.dll"
+                  $libBin = "build-release/bin/Release/$name.dll"
+
+                  $sourceDll = $null
+                  if (Test-Path $libRelease) {
+                      $sourceDll = $libRelease
+                  } elseif (Test-Path $libFlat) {
+                      $sourceDll = $libFlat
+                  } elseif (Test-Path $libBin) {
+                      $sourceDll = $libBin
+                  }
+
+                  if ($sourceDll) {
+                      $libDirRelease = "$dst/libs/windows/x64/Release"
+                      $libDirFlat = "$dst/libs/windows/x64"
+                      New-Item -ItemType Directory -Force -Path $libDirRelease | Out-Null
+                      New-Item -ItemType Directory -Force -Path $libDirFlat | Out-Null
+                      Copy-Item $sourceDll "$libDirRelease/$name.dll" -Force
+                      Copy-Item $sourceDll "$libDirFlat/$name.dll" -Force
+                  } else {
+                      Write-Error "Native library for $name was not found at $libRelease, $libFlat, or $libBin"
+                  }
               }
               $shipped += $rel
           }
