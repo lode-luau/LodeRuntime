@@ -125,6 +125,26 @@ void TcpClient::StartTcpConnect(const struct sockaddr* addr)
 
 int TcpClient::BeginConnect()
 {
+    if (connectTimeoutMs > 0)
+    {
+        std::memset(&timer, 0, sizeof(timer));
+        timer.data = this;
+        int tr = uv_timer_init(loop, &timer);
+        if (tr == 0)
+        {
+            timerInited = true;
+            uv_timer_start(&timer, OnConnectTimeout, connectTimeoutMs, 0);
+        }
+    }
+
+    struct sockaddr_storage addr;
+    int namelen = 0;
+    if (MakeSockAddr(connectHost, connectPort, addr, namelen) == 0)
+    {
+        StartTcpConnect(reinterpret_cast<const struct sockaddr*>(&addr));
+        return 0;
+    }
+
     std::memset(&addrReq, 0, sizeof(addrReq));
     addrInited = true;
     addrReq.data = this;
@@ -139,17 +159,6 @@ int TcpClient::BeginConnect()
     {
         addrInited = false;
         return r;
-    }
-    if (connectTimeoutMs > 0)
-    {
-        std::memset(&timer, 0, sizeof(timer));
-        timer.data = this;
-        int tr = uv_timer_init(loop, &timer);
-        if (tr == 0)
-        {
-            timerInited = true;
-            uv_timer_start(&timer, OnConnectTimeout, connectTimeoutMs, 0);
-        }
     }
     return 0;
 }
@@ -217,7 +226,7 @@ Lode::Value TcpClient::MethodConnect(Lode::State& vm, const std::vector<Lode::Va
             vm.RaiseError("socket Connect: timeout must be a number or nil");
             return Lode::Value();
         }
-        auto ms = Lode::Numeric::ToMilliseconds(args[3].AsNumber(), 1.0, "timeout");
+        auto ms = Lode::Numeric::ToMilliseconds(args[3].AsNumber(), 1000.0, "timeout");
         if (ms.IsError())
         {
             vm.RaiseError(ms.GetError().ErrorMessage());

@@ -102,7 +102,7 @@ local function runTest(deps: any, suite: any, test: any, config: any, suiteName:
             end
         end
 
-        task.wait()
+        task.wait(0.005)
     end
 
     result.durationMs = math.floor((os.clock() - start) * 1000 + 0.5)
