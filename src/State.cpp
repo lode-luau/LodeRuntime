@@ -231,6 +231,42 @@ void State::AddModulePath(std::string_view path)
     UpdateModulePaths(L_, impl_->modulePaths);
 }
 
+void State::SetCliArgs(const std::vector<std::string>& args)
+{
+    if (!L_) return;
+    lua_createtable(L_, static_cast<int>(args.size()), 0);
+    for (size_t i = 0; i < args.size(); ++i)
+    {
+        lua_pushlstring(L_, args[i].data(), args[i].size());
+        lua_rawseti(L_, -2, static_cast<int>(i + 1));
+    }
+    lua_setfield(L_, LUA_REGISTRYINDEX, "_LODE_CLI_ARGS");
+}
+
+std::vector<std::string> State::GetCliArgs() const
+{
+    std::vector<std::string> result;
+    if (!L_) return result;
+    lua_getfield(L_, LUA_REGISTRYINDEX, "_LODE_CLI_ARGS");
+    if (lua_istable(L_, -1))
+    {
+        int len = lua_objlen(L_, -1);
+        for (int i = 1; i <= len; ++i)
+        {
+            lua_rawgeti(L_, -1, i);
+            if (lua_isstring(L_, -1))
+            {
+                size_t sz = 0;
+                const char* s = lua_tolstring(L_, -1, &sz);
+                result.emplace_back(s, sz);
+            }
+            lua_pop(L_, 1);
+        }
+    }
+    lua_pop(L_, 1);
+    return result;
+}
+
 void State::SetGlobal(const std::string& name, const Value& value)
 {
     if (!L_) return;

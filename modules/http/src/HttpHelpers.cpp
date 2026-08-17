@@ -292,6 +292,22 @@ bool ParseFetchOptions(Lode::State& vm, const Lode::Value& val, HttpRequestOptio
         }
     }
 
+    // 6. Streaming chunked upload
+    if (t.Has("chunked") || t.Has("chunkedUpload"))
+    {
+        auto c = t.Has("chunked") ? t.Get("chunked") : t.Get("chunkedUpload");
+        if (c.IsOk() && c.GetValue().IsBoolean())
+            opts.chunkedUpload = c.GetValue().AsBoolean();
+    }
+
+    // 7. Incremental response onData callback
+    if (t.Has("onData") || t.Has("onChunk"))
+    {
+        auto cb = t.Has("onData") ? t.Get("onData") : t.Get("onChunk");
+        if (cb.IsOk() && cb.GetValue().IsFunction())
+            opts.onData = cb.GetValue();
+    }
+
     return true;
 }
 

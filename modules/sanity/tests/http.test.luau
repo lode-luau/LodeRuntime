@@ -201,8 +201,46 @@ describe("http", function()
             expect(tostring(r.body)).toBe("Echo: /req3")
         end)
 
-        task.wait(0.2)
+        local deadline = os.clock() + 2
+        while count < 3 and os.clock() < deadline do
+            task.wait(0.05)
+        end
         expect(count).toBe(3)
+        server:Close()
+    end)
+
+    it("HttpServer accepts TLS options", function()
+        local server = http.Server.Create({ tls = true })
+        server:Listen(0, "127.0.0.1", { tls = true })
+        expect(server:IsListening()).toBe(true)
+        server:Close()
+    end)
+
+    it("http.fetch supports streaming chunked uploads and onData streaming", function()
+        local server = http.Server.Create()
+        server:Listen(0, "127.0.0.1")
+        local addr = server:LocalAddress()
+
+        local receivedBody = ""
+        server.RequestReceived:Connect(function(req, res)
+            receivedBody = req.body
+            res:SetStatus(200)
+            res:Send("Streaming Response Data")
+        end)
+
+        local chunksReceived = {}
+        local response = http.fetch(string.format("http://127.0.0.1:%d/stream", addr.port), {
+            method = "POST",
+            body = "Chunked Payload Data",
+            chunked = true,
+            onData = function(chunk)
+                table.insert(chunksReceived, chunk)
+            end,
+        })
+
+        expect(response.status).toBe(200)
+        expect(receivedBody).toBe("Chunked Payload Data")
+        expect(#chunksReceived > 0).toBe(true)
         server:Close()
     end)
 end)

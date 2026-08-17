@@ -3,6 +3,7 @@
 #pragma once
 
 #include "Http/HttpManager.hpp"
+#include "Http/HttpTls.hpp"
 #include "Lode/Signal.hpp"
 #include "Lode/State.hpp"
 #include "Lode/Value.hpp"
@@ -55,6 +56,13 @@ struct HttpServerConnection : std::enable_shared_from_this<HttpServerConnection>
     std::vector<std::pair<std::string, std::string>> requestHeaders;
     std::string body;
 
+#ifdef _WIN32
+    bool isTls = false;
+    bool tlsHandshaking = false;
+    std::unique_ptr<TlsContext> tls;
+    void SendRawBytes(const std::vector<uint8_t>& data);
+#endif
+
     std::shared_ptr<HttpServerConnection> selfGuard;
 
     void StartReading();
@@ -83,6 +91,7 @@ struct HttpServer : std::enable_shared_from_this<HttpServer>
     bool closing = false;
     bool closed = false;
     int backlog = 511;
+    bool isTls = false;
 
     std::string localHost;
     int localPort = 0;

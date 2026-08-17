@@ -102,6 +102,13 @@ describe("sys", function()
             expect(string.len(cwd) > 0).toBe(true)
         end)
 
+        it("returns command-line arguments as an array", function()
+            local args = sys.Args()
+            expect(type(args)).toBe("table")
+            local args2 = sys.GetArgs()
+            expect(type(args2)).toBe("table")
+        end)
+
         it("throws error for Chdir to invalid path", function()
             local ok, err = pcall(function()
                 sys.Chdir("/path/that/definitely/does/not/exist/lode123")

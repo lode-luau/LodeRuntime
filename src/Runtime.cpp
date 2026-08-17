@@ -124,6 +124,17 @@ int main(int argc, char* argv[])
 
     Lode::State vm = std::move(stateResult.GetValue());
 
+    std::vector<std::string> scriptArgs;
+    for (int i = 2; i < argc; ++i)
+    {
+#if defined(_WIN32)
+        scriptArgs.push_back(PathToUtf8(fs::path(argv[i])));
+#else
+        scriptArgs.push_back(std::string(argv[i]));
+#endif
+    }
+    vm.SetCliArgs(scriptArgs);
+
     fs::path absPath = fs::absolute(filePath);
     std::string absPathUtf8 = PathToUtf8(absPath);
     fs::path parentPath = absPath.parent_path();

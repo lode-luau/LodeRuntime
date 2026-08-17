@@ -47,6 +47,16 @@ export type Address = {
     port: number
 }
 
+--- Connection options for TcpSocket:Connect
+export type ConnectOptions = {
+    --- Connection timeout in milliseconds
+    timeout: number?,
+    --- Whether to perform TLS encryption over the TCP connection
+    tls: boolean?,
+    --- Alias for tls
+    ssl: boolean?,
+}
+
 --- Represents a TCP socket for sending and receiving data.
 export type TcpSocket = {
     -- Events
@@ -69,8 +79,8 @@ export type TcpSocket = {
         host: string,
         --- The port to connect to
         port: number,
-        --- Optional connection timeout in milliseconds
-        timeoutMs: number?
+        --- Optional connection timeout or options table
+        opts: (number | ConnectOptions)?
     ) -> (),
     
     --- Sends data over the connected socket.

@@ -219,20 +219,66 @@ Lode::Value TcpClient::MethodConnect(Lode::State& vm, const std::vector<Lode::Va
         return Lode::Value();
     }
     uint64_t timeoutMs = 0;
+    bool reqTls = false;
     if (args.size() > 3 && !args[3].IsNil())
     {
-        if (!args[3].IsNumber())
+        if (args[3].IsNumber())
+        {
+            auto ms = Lode::Numeric::ToMilliseconds(args[3].AsNumber(), 1000.0, "timeout");
+            if (ms.IsError())
+            {
+                vm.RaiseError(ms.GetError().ErrorMessage());
+                return Lode::Value();
+            }
+            timeoutMs = ms.GetValue();
+        }
+        else if (args[3].IsTable())
+        {
+            auto opts = args[3].AsTable();
+            auto t = opts.Get("timeout");
+            if (t.IsOk() && !t.GetValue().IsNil())
+            {
+                if (!t.GetValue().IsNumber())
+                {
+                    vm.RaiseError("socket Connect: timeout must be a number or nil");
+                    return Lode::Value();
+                }
+                auto ms = Lode::Numeric::ToMilliseconds(t.GetValue().AsNumber(), 1000.0, "timeout");
+                if (ms.IsError())
+                {
+                    vm.RaiseError(ms.GetError().ErrorMessage());
+                    return Lode::Value();
+                }
+                timeoutMs = ms.GetValue();
+            }
+            auto tlsOpt = opts.Get("tls");
+            if (tlsOpt.IsOk() && tlsOpt.GetValue().IsBoolean() && tlsOpt.GetValue().AsBoolean())
+                reqTls = true;
+            auto sslOpt = opts.Get("ssl");
+            if (sslOpt.IsOk() && sslOpt.GetValue().IsBoolean() && sslOpt.GetValue().AsBoolean())
+                reqTls = true;
+        }
+        else
         {
             vm.RaiseError("socket Connect: timeout must be a number or nil");
             return Lode::Value();
         }
-        auto ms = Lode::Numeric::ToMilliseconds(args[3].AsNumber(), 1000.0, "timeout");
-        if (ms.IsError())
+    }
+
+    if (reqTls)
+    {
+#ifdef _WIN32
+        isTls = true;
+        tls = std::make_unique<lodehttp::TlsContext>();
+        if (!tls->Init())
         {
-            vm.RaiseError(ms.GetError().ErrorMessage());
+            vm.RaiseError("socket Connect: tls: failed to acquire SSPI credentials");
             return Lode::Value();
         }
-        timeoutMs = ms.GetValue();
+#else
+        vm.RaiseError("socket Connect: tls: TLS is not supported on this platform");
+        return Lode::Value();
+#endif
     }
 
     connectHost = host;
@@ -252,10 +298,45 @@ Lode::Value TcpClient::MethodConnect(Lode::State& vm, const std::vector<Lode::Va
     return vm.YieldThread();
 }
 
+void TcpClient::SendRawTls(const std::vector<uint8_t>& data)
+{
+    if (closed || closing || data.empty())
+        return;
+    auto* wreq = new WriteRequest();
+    std::memset(&wreq->req, 0, sizeof(wreq->req));
+    wreq->req.data = this;
+    wreq->data.assign(data.begin(), data.end());
+    uv_buf_t buf;
+    buf.base = wreq->data.empty() ? const_cast<char*>("") : wreq->data.data();
+    buf.len = wreq->data.size();
+    int r = uv_write(&wreq->req, reinterpret_cast<uv_stream_t*>(&tcp), &buf, 1, OnWritten);
+    if (r != 0)
+    {
+        delete wreq;
+        FireError(std::string("write: ") + uv_strerror(r));
+    }
+}
+
 void TcpClient::SendNative(const char* data, size_t size)
 {
     if (closed || closing || !connected)
         return;
+
+#ifdef _WIN32
+    if (isTls && tls && !tlsHandshaking)
+    {
+        std::string encErr;
+        auto enc = tls->Encrypt(data, size, encErr);
+        if (!encErr.empty() || enc.empty())
+        {
+            FireError("tls: " + encErr);
+            return;
+        }
+        SendRawTls(enc);
+        return;
+    }
+#endif
+
     std::vector<char> vec;
     if (size > 0 && data)
         vec.assign(data, data + size);
@@ -536,6 +617,18 @@ void TcpClient::OnConnected(uv_connect_t* req, int status)
         uv_close(reinterpret_cast<uv_handle_t*>(&self->timer), OnHandleClosed);
         ++self->closeCount;
     }
+
+#ifdef _WIN32
+    if (self->isTls && self->tls)
+    {
+        self->tlsHandshaking = true;
+        auto clientHello = self->tls->StartHandshake(self->connectHost);
+        self->SendRawTls(clientHello);
+        self->StartReading();
+        return;
+    }
+#endif
+
     if (!self->connectResumed)
     {
         self->connectResumed = true;
@@ -573,6 +666,81 @@ void TcpClient::OnRead(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf)
     auto* self = static_cast<TcpClient*>(stream->data);
     if (nread > 0)
     {
+#ifdef _WIN32
+        if (self->isTls && self->tls)
+        {
+            if (self->tlsHandshaking)
+            {
+                std::vector<uint8_t> outSend;
+                std::string errOut;
+                auto result = self->tls->ProcessHandshakeData(
+                    reinterpret_cast<const uint8_t*>(buf->base), nread, outSend, errOut);
+                delete[] buf->base;
+
+                switch (result)
+                {
+                case lodehttp::TlsContext::HandshakeResult::NeedMoreData:
+                    return;
+
+                case lodehttp::TlsContext::HandshakeResult::DataToSend:
+                    self->SendRawTls(outSend);
+                    return;
+
+                case lodehttp::TlsContext::HandshakeResult::Complete:
+                {
+                    self->tlsHandshaking = false;
+                    self->tls->DrainPending();
+                    if (!self->connectResumed)
+                    {
+                        self->connectResumed = true;
+                        self->NotifyConnectOk();
+                    }
+                    if (!self->mgr->shuttingDown)
+                    {
+                        if (self->cppOnConnected)
+                            self->cppOnConnected();
+                        else
+                            self->connectedSig->Fire();
+                    }
+                    return;
+                }
+
+                case lodehttp::TlsContext::HandshakeResult::Error:
+                    if (self->connectPending)
+                        self->FailConnect("connect: tls: " + errOut);
+                    else
+                        self->FireError("tls: " + errOut);
+                    return;
+                }
+            }
+            else
+            {
+                std::string decErr;
+                auto decrypted = self->tls->Decrypt(
+                    reinterpret_cast<const uint8_t*>(buf->base), nread, decErr);
+                delete[] buf->base;
+
+                if (!decErr.empty())
+                {
+                    self->FireError("tls: " + decErr);
+                    return;
+                }
+                if (!decrypted.empty())
+                {
+                    if (self->cppOnMessage)
+                    {
+                        self->cppOnMessage(reinterpret_cast<const char*>(decrypted.data()), decrypted.size());
+                    }
+                    else if (!self->mgr->shuttingDown)
+                    {
+                        self->messageSig->Fire(Lode::Value(std::string(reinterpret_cast<const char*>(decrypted.data()), decrypted.size())));
+                    }
+                }
+                return;
+            }
+        }
+#endif
+
         if (self->cppOnMessage)
         {
             self->cppOnMessage(buf->base, nread);

@@ -189,6 +189,21 @@ void HttpRequestContext::BuildRequestText()
         head += "Host: " + url.authority + "\r\n";
     if (!hasConnection)
         head += "Connection: close\r\n";
+
+    if (opts.chunkedUpload)
+    {
+        head += "Transfer-Encoding: chunked\r\n\r\n";
+        if (!opts.body.empty())
+        {
+            char hexBuf[32];
+            std::snprintf(hexBuf, sizeof(hexBuf), "%zx\r\n", opts.body.size());
+            head += hexBuf + opts.body + "\r\n";
+        }
+        head += "0\r\n\r\n";
+        requestText = std::move(head);
+        return;
+    }
+
     if (!hasContentLength && !opts.body.empty())
         head += "Content-Length: " + std::to_string(opts.body.size()) + "\r\n";
 
@@ -343,7 +358,13 @@ void HttpRequestContext::TryParse()
             else if (bodyState == BodyState::ChunkData)
             {
                 if (raw.size() - chunkStart < static_cast<size_t>(chunkRemaining)) return;
-                result->body.append(raw.data() + chunkStart, static_cast<size_t>(chunkRemaining));
+                std::string chunk(raw.data() + chunkStart, static_cast<size_t>(chunkRemaining));
+                result->body.append(chunk);
+                if (opts.onData.IsFunction() && client && client->mainL)
+                {
+                    Lode::State vm(client->mainL);
+                    opts.onData.Call(vm, Lode::Value(chunk));
+                }
                 pos = chunkStart + static_cast<size_t>(chunkRemaining);
                 bodyState = BodyState::ChunkCrlf;
             }
@@ -371,6 +392,12 @@ void HttpRequestContext::TryParse()
         if (raw.size() >= bodyEnd)
         {
             raw.resize(bodyEnd);
+            if (opts.onData.IsFunction() && client && client->mainL)
+            {
+                Lode::State vm(client->mainL);
+                std::string b = raw.substr(headerEnd + 4);
+                opts.onData.Call(vm, Lode::Value(b));
+            }
             CompleteResponse();
         }
         return;

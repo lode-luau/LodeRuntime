@@ -527,7 +527,11 @@ void BindStaticMethods(Lode::State& vm, Lode::Exports& exports)
     exports.SetValue("RealPath", CreateAsyncMethod(vm, FsOp::Realpath, false));
     exports.SetValue("CreateSymlink", CreateAsyncMethod(vm, FsOp::CreateSymlink, false));
     exports.SetValue("ReadLink", CreateAsyncMethod(vm, FsOp::ReadLink, false));
-    exports.SetValue("SetPermissions", CreateAsyncMethod(vm, FsOp::SetPermissions, false));
+    auto setPerms = CreateAsyncMethod(vm, FsOp::SetPermissions, false);
+    exports.SetValue("SetPermissions", setPerms);
+    exports.SetValue("setPermissions", setPerms);
+    exports.SetValue("Chmod", setPerms);
+    exports.SetValue("chmod", setPerms);
     exports.SetValue("RemoveFile", CreateAsyncMethod(vm, FsOp::Rm, false));
     exports.SetValue("RemoveDirectory", CreateAsyncMethod(vm, FsOp::Rm, false));
 }

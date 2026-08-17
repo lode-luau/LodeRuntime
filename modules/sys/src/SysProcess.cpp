@@ -1273,6 +1273,15 @@ void BindSysProcess(Lode::State& vm, Lode::Table& exports, const std::shared_ptr
     }));
 
     exports.Set("Spawn", exports.Get("spawn").GetValue());
+
+    exports.Set("Args", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs) -> Lode::Value {
+        auto args = vm.GetCliArgs();
+        Lode::Table t = vm.CreateTable();
+        for (size_t i = 0; i < args.size(); ++i)
+            t.Set(static_cast<int>(i + 1), Lode::Value(args[i]));
+        return Lode::Value(t);
+    }));
+    exports.Set("GetArgs", exports.Get("Args").GetValue());
 }
 
 } // namespace lodesys

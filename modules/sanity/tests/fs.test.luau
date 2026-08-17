@@ -338,4 +338,24 @@ describe("fs", function()
         expect(tostring(err):find("invalid mode", 1, true) ~= nil).toBe(true)
         cleanup()
     end)
+
+    it("changes file permissions with SetPermissions and chmod", function()
+        cleanup()
+        fs.CreateDirectory(tmpRoot)
+        local filePath = path.join(tmpRoot, "perm.txt")
+        fs.WriteFile(filePath, "perm content")
+
+        local stBefore = fs.Stat(filePath)
+        expect(typeof(stBefore.mode)).toBe("number")
+        expect(stBefore.mode > 0).toBe(true)
+
+        fs.SetPermissions(filePath, 420) -- 0644
+        local stAfter = fs.Stat(filePath)
+        expect(stAfter.mode > 0).toBe(true)
+
+        fs.chmod(filePath, 493) -- 0755
+        local stChmod = fs.Stat(filePath)
+        expect(stChmod.mode > 0).toBe(true)
+        cleanup()
+    end)
 end)

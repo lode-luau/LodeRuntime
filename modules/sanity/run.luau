@@ -42,8 +42,24 @@ local testDir = path.join(selfDir, config.testDir)
 
 local files = Discovery.discover(testDir, config.pattern)
 
+local sys = require("@sys")
+local cliArgs = if sys and (sys :: any).Args then (sys :: any).Args() else {}
+if #cliArgs > 0 then
+    local filtered = {}
+    for _, file in ipairs(files) do
+        for _, arg in ipairs(cliArgs) do
+            local base = file:gsub("%.test%.luau$", ""):lower()
+            if base == arg:lower() or file:lower():find(arg:lower(), 1, true) ~= nil then
+                table.insert(filtered, file)
+                break
+            end
+        end
+    end
+    files = filtered
+end
+
 if #files == 0 then
-    Deps.stdio.print("No test files found in " .. testDir)
+    Deps.stdio.print("No matching test files found in " .. testDir)
     return
 end
 

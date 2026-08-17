@@ -235,6 +235,9 @@ export type FileSystemModule = {
 
     --- Replaces permission bits using a numeric mode such as 0o644.
     SetPermissions: (path: string, mode: number) -> (),
+    setPermissions: (path: string, mode: number) -> (),
+    Chmod: (path: string, mode: number) -> (),
+    chmod: (path: string, mode: number) -> (),
 
     --- Removes a file asynchronously.
     RemoveFile: (
