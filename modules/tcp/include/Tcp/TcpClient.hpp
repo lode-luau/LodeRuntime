@@ -4,6 +4,7 @@
 
 #include "TcpExport.hpp"
 #include "TcpManager.hpp"
+#include "Http/HttpTls.hpp"
 #include "Lode/Coroutine.hpp"
 #include "Lode/Signal.hpp"
 #include "Lode/State.hpp"
@@ -32,6 +33,10 @@ struct TCP_API TcpClient : std::enable_shared_from_this<TcpClient>
     bool timerInited = false;
     bool tcpClosed = false;
     bool timerClosed = false;
+
+    bool isTls = false;
+    bool tlsHandshaking = false;
+    std::unique_ptr<lodehttp::TlsContext> tls;
 
     bool connected = false;
     bool everConnected = false;
@@ -81,6 +86,7 @@ struct TCP_API TcpClient : std::enable_shared_from_this<TcpClient>
 
     int ConnectNative(const std::string& host, int port, uint64_t timeoutMs);
     void SendNative(const char* data, size_t size);
+    void SendRawTls(const std::vector<uint8_t>& data);
 
     Lode::Value MethodConnect(Lode::State& vm, const std::vector<Lode::Value>& args);
     Lode::Value MethodSend(Lode::State& vm, const std::vector<Lode::Value>& args);

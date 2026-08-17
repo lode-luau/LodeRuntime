@@ -11,11 +11,12 @@ add_library(tcp SHARED
     src/TcpServer.cpp
     src/TcpManager.cpp
     src/TcpHelpers.cpp
+    ../http/src/HttpTls.cpp
 )
 
-target_include_directories(tcp PUBLIC include)
+target_include_directories(tcp PUBLIC include PRIVATE ../http/include ../http/src)
 target_compile_definitions(tcp PRIVATE LODE_TCP_BUILD NOMINMAX)
-target_link_libraries(tcp PRIVATE LodeCore)
+target_link_libraries(tcp PRIVATE LodeCore $<$<PLATFORM_ID:Windows>:secur32 crypt32>)
 
 if(MSVC)
     target_compile_options(tcp PRIVATE $<$<NOT:$<CONFIG:Debug>>:/O1> /GR- /GL)
