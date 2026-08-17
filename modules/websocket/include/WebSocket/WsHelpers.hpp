@@ -61,6 +61,7 @@ struct ParsedWsUrl
     std::string connectHost;
     int port = 0;
     std::string path;
+    bool isSecure = false;
 };
 
 ParsedWsUrl ParseWebSocketUrl(const std::string& raw);

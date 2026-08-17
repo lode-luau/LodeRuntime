@@ -24,27 +24,11 @@ export type JSONValue =
 export type JsonModule = {
     --- Parses a JSON document into a Lua value. Raises a Luau error on invalid input.
     --- @return The parsed Lua value
-    parse: (
-        --- The JSON string to parse
-        text: string,
-        --- Optional maximum parsing depth
-        maxDepth: number?,
-        --- Optional maximum number of nodes
-        maxNodes: number?
-    ) -> JSONValue,
+    parse: (text: string, maxDepth: number?, maxNodes: number?) -> any,
     
     --- Serializes a Lua value into a JSON document. Raises a Luau error on unsupported values.
     --- @return The JSON string
-    stringify: (
-        --- The Lua value to serialize
-        value: JSONValue,
-        --- Optional boolean to enable pretty-printing
-        pretty: boolean?,
-        --- Optional maximum serialization depth
-        maxDepth: number?,
-        --- Optional maximum number of nodes
-        maxNodes: number?
-    ) -> string,
+    stringify: (value: any, pretty: boolean?, maxDepth: number?, maxNodes: number?) -> string,
 }
 
 export type ModuleMetaInfo = {

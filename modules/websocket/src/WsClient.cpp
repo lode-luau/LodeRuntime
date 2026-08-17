@@ -142,12 +142,22 @@ void WsClient::OnTcpConnected()
     UpdateAddresses();
     if (!serverSide)
     {
+#ifdef _WIN32
+        if (parsedUrl.isSecure && tls)
+        {
+            tlsHandshaking = true;
+            auto clientHello = tls->StartHandshake(parsedUrl.host);
+            SendRawTls(clientHello);
+            return;
+        }
+#endif
+
         uint8_t nonce[16];
         mgr->rng.Fill(nonce, sizeof(nonce));
         sentKey = ws::Base64Encode(nonce, sizeof(nonce));
 
         std::string hostHeader = parsedUrl.host;
-        if (parsedUrl.port != 80)
+        if (parsedUrl.port != (parsedUrl.isSecure ? 443 : 80))
             hostHeader += ":" + std::to_string(parsedUrl.port);
 
         std::string request = "GET " + parsedUrl.path + " HTTP/1.1\r\n"
@@ -182,6 +192,78 @@ void WsClient::OnTcpMessage(const char* data, size_t size)
 {
     if (closing || closed)
         return;
+
+#ifdef _WIN32
+    if (parsedUrl.isSecure && tls)
+    {
+        if (tlsHandshaking)
+        {
+            std::vector<uint8_t> outSend;
+            std::string errOut;
+            auto result = tls->ProcessHandshakeData(
+                reinterpret_cast<const uint8_t*>(data), size, outSend, errOut);
+
+            switch (result)
+            {
+            case lodehttp::TlsContext::HandshakeResult::NeedMoreData:
+                return;
+
+            case lodehttp::TlsContext::HandshakeResult::DataToSend:
+                SendRawTls(outSend);
+                return;
+
+            case lodehttp::TlsContext::HandshakeResult::Complete:
+            {
+                tlsHandshaking = false;
+                tls->DrainPending();
+
+                uint8_t nonce[16];
+                mgr->rng.Fill(nonce, sizeof(nonce));
+                sentKey = ws::Base64Encode(nonce, sizeof(nonce));
+
+                std::string hostHeader = parsedUrl.host;
+                if (parsedUrl.port != 443)
+                    hostHeader += ":" + std::to_string(parsedUrl.port);
+
+                std::string request = "GET " + parsedUrl.path + " HTTP/1.1\r\n"
+                                      "Host: " + hostHeader + "\r\n"
+                                      "Upgrade: websocket\r\n"
+                                      "Connection: Upgrade\r\n"
+                                      "Sec-WebSocket-Key: " + sentKey + "\r\n"
+                                      "Sec-WebSocket-Version: 13\r\n";
+                for (const auto& kv : requestHeaders)
+                    request += kv.first + ": " + kv.second + "\r\n";
+                request += "\r\n";
+
+                SendRaw(std::vector<char>(request.begin(), request.end()));
+                return;
+            }
+
+            case lodehttp::TlsContext::HandshakeResult::Error:
+                OnTcpError("tls: " + errOut);
+                return;
+            }
+        }
+        else
+        {
+            std::string decErr;
+            auto decrypted = tls->Decrypt(
+                reinterpret_cast<const uint8_t*>(data), size, decErr);
+            if (!decErr.empty())
+            {
+                OnTcpError("tls: " + decErr);
+                return;
+            }
+            if (!decrypted.empty())
+            {
+                recvBuf.insert(recvBuf.end(), decrypted.begin(), decrypted.end());
+                ProcessData();
+            }
+            return;
+        }
+    }
+#endif
+
     recvBuf.insert(recvBuf.end(), data, data + size);
     ProcessData();
 }
@@ -528,9 +610,23 @@ Lode::Value WsClient::MethodConnect(Lode::State& vm, const std::vector<Lode::Val
     ParsedWsUrl parsed = ParseWebSocketUrl(url);
     if (!parsed.valid)
     {
-        std::string kind = parsed.error == "tls" ? "tls" : "invalid-url";
-        vm.RaiseError("websocket Connect: " + kind + (parsed.error == "tls" ? ": wss:// is not supported yet" : ": invalid URL"));
+        vm.RaiseError("websocket Connect: invalid-url: " + parsed.error);
         return Lode::Value();
+    }
+
+    if (parsed.isSecure)
+    {
+#ifdef _WIN32
+        tls = std::make_unique<lodehttp::TlsContext>();
+        if (!tls->Init())
+        {
+            vm.RaiseError("websocket Connect: tls: failed to acquire SSPI credentials");
+            return Lode::Value();
+        }
+#else
+        vm.RaiseError("websocket Connect: tls: WSS is not supported on this platform");
+        return Lode::Value();
+#endif
     }
 
     uint64_t timeoutMs = 0;
@@ -610,8 +706,31 @@ Lode::Value WsClient::MethodConnect(Lode::State& vm, const std::vector<Lode::Val
 
 void WsClient::SendRaw(const std::vector<char>& data)
 {
+    if (!tcpClient || data.empty())
+        return;
+
+#ifdef _WIN32
+    if (parsedUrl.isSecure && tls && !tlsHandshaking)
+    {
+        std::string encErr;
+        auto enc = tls->Encrypt(data.data(), data.size(), encErr);
+        if (!encErr.empty() || enc.empty())
+        {
+            FireError("tls: " + encErr);
+            return;
+        }
+        tcpClient->SendNative(reinterpret_cast<const char*>(enc.data()), enc.size());
+        return;
+    }
+#endif
+
+    tcpClient->SendNative(data.data(), data.size());
+}
+
+void WsClient::SendRawTls(const std::vector<uint8_t>& data)
+{
     if (tcpClient && !data.empty())
-        tcpClient->SendNative(data.data(), data.size());
+        tcpClient->SendNative(reinterpret_cast<const char*>(data.data()), data.size());
 }
 
 void WsClient::SendFrame(uint8_t opcode, const std::vector<char>& payload)

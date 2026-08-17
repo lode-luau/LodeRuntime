@@ -89,15 +89,19 @@ ParsedWsUrl ParseWebSocketUrl(const std::string& raw)
     for (char& c : lowerRaw)
         c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
 
+    bool isSecure = false;
+    std::string prefix;
     if (lowerRaw.compare(0, 6, "wss://") == 0)
     {
-        out.valid = false;
-        out.error = "tls";
-        return out;
+        isSecure = true;
+        prefix = raw.substr(0, 6);
     }
-
-    std::string prefix = "ws://";
-    if (lowerRaw.compare(0, prefix.size(), prefix) != 0)
+    else if (lowerRaw.compare(0, 5, "ws://") == 0)
+    {
+        isSecure = false;
+        prefix = raw.substr(0, 5);
+    }
+    else
     {
         out.valid = false;
         out.error = "invalid-url";
@@ -126,7 +130,7 @@ ParsedWsUrl ParseWebSocketUrl(const std::string& raw)
         path = "/";
 
     std::string host;
-    int port = 80;
+    int port = isSecure ? 443 : 80;
     if (hostPort.empty())
     {
         out.valid = false;
@@ -206,6 +210,7 @@ ParsedWsUrl ParseWebSocketUrl(const std::string& raw)
     out.host = host;
     out.port = port;
     out.path = path;
+    out.isSecure = isSecure;
     out.connectHost = host;
     if (!host.empty() && host[0] == '[' && host.back() == ']')
         out.connectHost = host.substr(1, host.size() - 2);

@@ -6,6 +6,7 @@
 #include "WebSocketManager.hpp"
 #include "WsHelpers.hpp"
 #include "Tcp/TcpClient.hpp"
+#include "Http/HttpTls.hpp"
 #include "Lode/Coroutine.hpp"
 #include "Lode/Signal.hpp"
 #include "Lode/State.hpp"
@@ -25,6 +26,8 @@ struct WEBSOCKET_API WsClient : std::enable_shared_from_this<WsClient>
     uv_loop_t* loop = nullptr;
 
     std::shared_ptr<lodetcp::TcpClient> tcpClient;
+    std::unique_ptr<lodehttp::TlsContext> tls;
+    bool tlsHandshaking = false;
 
     uv_timer_t timer{};
     bool timerInited = false;
@@ -116,6 +119,7 @@ struct WEBSOCKET_API WsClient : std::enable_shared_from_this<WsClient>
     Lode::Value MethodRemoteAddress(Lode::State& vm);
 
     void SendRaw(const std::vector<char>& data);
+    void SendRawTls(const std::vector<uint8_t>& data);
     void SendFrame(uint8_t opcode, const std::vector<char>& payload);
 
     void CloseHandles();

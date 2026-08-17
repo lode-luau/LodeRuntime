@@ -15,16 +15,17 @@ add_library(websocket SHARED
     ../tcp/src/TcpServer.cpp
     ../tcp/src/TcpManager.cpp
     ../tcp/src/TcpHelpers.cpp
+    ../http/src/HttpTls.cpp
 )
 
-# websocket needs the tcp implementation, but there is no package manager and
+# websocket needs the tcp and tls implementations, but there is no package manager and
 # no shared module directory anymore (each module's DLL lives in its own
-# libs/<platform>/<arch>/<config>/). Embedding the tcp sources avoids a
-# runtime DLL dependency on tcp.dll, which the Windows loader could not
+# libs/<platform>/<arch>/<config>/). Embedding the tcp and tls sources avoids a
+# runtime DLL dependency on tcp.dll or http.dll, which the Windows loader could not
 # resolve from a separate module directory.
-target_include_directories(websocket PUBLIC include PRIVATE ../tcp/include ../tcp/src)
+target_include_directories(websocket PUBLIC include PRIVATE ../tcp/include ../tcp/src ../http/include ../http/src)
 target_compile_definitions(websocket PRIVATE WEBSOCKET_BUILD_SHARED NOMINMAX LODE_TCP_BUILD)
-target_link_libraries(websocket PRIVATE LodeCore)
+target_link_libraries(websocket PRIVATE LodeCore $<$<PLATFORM_ID:Windows>:secur32 crypt32>)
 
 if(MSVC)
     target_compile_options(websocket PRIVATE $<$<NOT:$<CONFIG:Debug>>:/O1> /GR- /GL)
