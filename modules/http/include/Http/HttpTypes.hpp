@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include "Lode/Value.hpp"
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -23,6 +24,8 @@ struct HttpRequestOptions
     uint64_t timeoutMs = 0;
     bool followRedirects = true;
     int64_t maxRedirects = 10;
+    bool chunkedUpload = false;
+    Lode::Value onData;
 };
 
 } // namespace lodehttp

@@ -57,6 +57,22 @@ export type FetchOptions = {
     timeout: number?,
     --- The maximum number of redirects to follow
     maxRedirects: number?,
+    --- Whether to upload the body using chunked transfer encoding
+    chunked: boolean?,
+    --- Alias for chunked
+    chunkedUpload: boolean?,
+    --- Callback invoked as response chunks/data arrive
+    onData: ((chunk: string) -> ())?,
+    --- Alias for onData
+    onChunk: ((chunk: string) -> ())?,
+}
+
+--- Options for configuring an HTTP/HTTPS server.
+export type ServerOptions = {
+    --- Whether to enable TLS/HTTPS
+    tls: boolean?,
+    --- Alias for tls
+    ssl: boolean?,
 }
 
 --- Represents an HTTP response body.
@@ -97,7 +113,9 @@ export type HttpServer = {
         --- The port to listen on
         port: number,
         --- Optional host to bind to
-        host: string?
+        host: string?,
+        --- Optional server options
+        opts: ServerOptions?
     ) -> (),
     
     --- Closes the server.
@@ -159,7 +177,7 @@ export type HttpModule = {
     --- The Server namespace
     Server: {
         --- Creates a new HTTP Server
-        Create: (self: any, opts: any?) -> HttpServer
+        Create: (self: any, opts: ServerOptions?) -> HttpServer
     },
     
     --- The Client namespace

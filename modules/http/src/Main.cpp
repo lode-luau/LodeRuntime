@@ -52,6 +52,19 @@ LODE_MODULE(vm)
         server->loop = mgr->loop;
         server->responseMethods = lodehttp::BuildResponseMethods(vm2);
         server->InitSignals(vm2);
+
+        for (const auto& a : args)
+        {
+            if (a.IsTable())
+            {
+                auto t = a.AsTable();
+                if (t.Has("tls") && t.Get("tls").GetValue().IsBoolean() && t.Get("tls").GetValue().AsBoolean())
+                    server->isTls = true;
+                if (t.Has("ssl") && t.Get("ssl").GetValue().IsBoolean() && t.Get("ssl").GetValue().AsBoolean())
+                    server->isTls = true;
+            }
+        }
+
         mgr->AddServer(server);
         server->selfGuard = server;
         return lodehttp::WrapServer(vm2, server, mgr->serverMethods);

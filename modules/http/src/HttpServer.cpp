@@ -175,6 +175,56 @@ void HttpServerConnection::OnRead(uv_stream_t* stream, ssize_t nread, const uv_b
 
     if (nread > 0)
     {
+#ifdef _WIN32
+        if (self->isTls && self->tls)
+        {
+            if (self->tlsHandshaking)
+            {
+                std::vector<uint8_t> outSend;
+                std::string errOut;
+                auto result = self->tls->ProcessHandshakeData(
+                    reinterpret_cast<const uint8_t*>(buf->base), nread, outSend, errOut);
+                if (buf->base) delete[] buf->base;
+
+                switch (result)
+                {
+                case TlsContext::HandshakeResult::NeedMoreData:
+                    return;
+                case TlsContext::HandshakeResult::DataToSend:
+                    self->SendRawBytes(outSend);
+                    return;
+                case TlsContext::HandshakeResult::Complete:
+                    self->tlsHandshaking = false;
+                    self->tls->DrainPending();
+                    return;
+                case TlsContext::HandshakeResult::Error:
+                    if (self->server) self->server->FireError("tls: " + errOut);
+                    self->Close();
+                    return;
+                }
+                return;
+            }
+            else
+            {
+                std::string decErr;
+                auto decrypted = self->tls->Decrypt(
+                    reinterpret_cast<const uint8_t*>(buf->base), nread, decErr);
+                if (buf->base) delete[] buf->base;
+
+                if (!decErr.empty())
+                {
+                    if (self->server) self->server->FireError("tls: " + decErr);
+                    self->Close();
+                    return;
+                }
+                if (!decrypted.empty())
+                {
+                    self->OnData(reinterpret_cast<const char*>(decrypted.data()), decrypted.size());
+                }
+                return;
+            }
+        }
+#endif
         self->OnData(buf->base, static_cast<size_t>(nread));
     }
     else if (nread < 0)
@@ -301,6 +351,49 @@ bool HttpServerConnection::TryParseRequest()
 
     if (headersParsed)
     {
+        bool isChunked = false;
+        for (const auto& h : requestHeaders)
+        {
+            if (ToLower(h.first) == "transfer-encoding" && ToLower(h.second).find("chunked") != std::string::npos)
+                isChunked = true;
+        }
+
+        if (isChunked)
+        {
+            size_t endChunk = rawBuffer.find("0\r\n\r\n", headerEndPos);
+            if (endChunk == std::string::npos)
+                endChunk = rawBuffer.find("0\n\n", headerEndPos);
+            if (endChunk == std::string::npos)
+                return false;
+
+            std::string parsedBody;
+            size_t cpos = headerEndPos;
+            while (cpos < endChunk)
+            {
+                size_t crlf = rawBuffer.find("\r\n", cpos);
+                size_t delim = 2;
+                if (crlf == std::string::npos)
+                {
+                    crlf = rawBuffer.find("\n", cpos);
+                    delim = 1;
+                }
+                if (crlf == std::string::npos) break;
+                std::string sizeStr = rawBuffer.substr(cpos, crlf - cpos);
+                if (sizeStr.empty()) break;
+                size_t chunkSize = 0;
+                try {
+                    chunkSize = std::stoul(sizeStr, nullptr, 16);
+                } catch (...) { break; }
+                if (chunkSize == 0) break;
+                cpos = crlf + delim;
+                if (cpos + chunkSize > rawBuffer.size()) break;
+                parsedBody.append(rawBuffer.data() + cpos, chunkSize);
+                cpos += chunkSize + delim;
+            }
+            body = parsedBody;
+            return true;
+        }
+
         size_t bodyBytesAvailable = rawBuffer.size() - headerEndPos;
         if (hasContentLength)
         {
@@ -352,9 +445,76 @@ void HttpServerConnection::DispatchRequest()
     server->requestSig->Fire({ Lode::Value(reqTable), resVal });
 }
 
+#ifdef _WIN32
+void HttpServerConnection::SendRawBytes(const std::vector<uint8_t>& data)
+{
+    if (clientClosed || !clientInited || data.empty()) return;
+
+    auto* wr = new WriteReq();
+    std::memset(&wr->req, 0, sizeof(wr->req));
+    wr->req.data = wr;
+    wr->conn = this;
+    wr->data.assign(reinterpret_cast<const char*>(data.data()), data.size());
+
+    uv_buf_t buf;
+    buf.base = wr->data.data();
+    buf.len = wr->data.size();
+
+    int r = uv_write(&wr->req, reinterpret_cast<uv_stream_t*>(&client), &buf, 1, [](uv_write_t* req, int) {
+        auto* wr = static_cast<WriteReq*>(req->data);
+        if (wr) delete wr;
+    });
+
+    if (r != 0)
+    {
+        delete wr;
+        Close();
+    }
+}
+#endif
+
 void HttpServerConnection::SendRawResponse(const std::string& raw)
 {
     if (clientClosed || !clientInited) return;
+
+#ifdef _WIN32
+    if (isTls && tls && !tlsHandshaking)
+    {
+        std::string encErr;
+        auto enc = tls->Encrypt(raw.data(), raw.size(), encErr);
+        if (!encErr.empty() || enc.empty())
+        {
+            if (server) server->FireError("tls: " + encErr);
+            Close();
+            return;
+        }
+        auto* wr = new WriteReq();
+        std::memset(&wr->req, 0, sizeof(wr->req));
+        wr->req.data = wr;
+        wr->conn = this;
+        wr->data.assign(reinterpret_cast<const char*>(enc.data()), enc.size());
+
+        uv_buf_t buf;
+        buf.base = wr->data.data();
+        buf.len = wr->data.size();
+
+        int r = uv_write(&wr->req, reinterpret_cast<uv_stream_t*>(&client), &buf, 1, [](uv_write_t* req, int) {
+            auto* wr = static_cast<WriteReq*>(req->data);
+            if (wr)
+            {
+                if (wr->conn)
+                    wr->conn->Close();
+                delete wr;
+            }
+        });
+        if (r != 0)
+        {
+            delete wr;
+            Close();
+        }
+        return;
+    }
+#endif
 
     auto* wr = new WriteReq();
     std::memset(&wr->req, 0, sizeof(wr->req));
@@ -508,6 +668,15 @@ Lode::Value HttpServer::MethodListen(Lode::State& vm, const std::vector<Lode::Va
     }
     std::string host = (args.size() > 2 && args[2].IsString()) ? args[2].AsString() : "0.0.0.0";
 
+    if (args.size() > 3 && args[3].IsTable())
+    {
+        auto opts = args[3].AsTable();
+        if (opts.Has("tls") && opts.Get("tls").GetValue().IsBoolean() && opts.Get("tls").GetValue().AsBoolean())
+            isTls = true;
+        if (opts.Has("ssl") && opts.Get("ssl").GetValue().IsBoolean() && opts.Get("ssl").GetValue().AsBoolean())
+            isTls = true;
+    }
+
     struct sockaddr_storage addr;
     int addrLen = 0;
     int r = MakeSockAddr(host, port, addr, addrLen);
@@ -592,6 +761,20 @@ void HttpServer::OnConnection(uv_stream_t* server, int status)
     conn->server = self;
     conn->clientInited = true;
     conn->client.data = conn.get();
+
+#ifdef _WIN32
+    conn->isTls = self->isTls;
+    if (conn->isTls)
+    {
+        conn->tls = std::make_unique<TlsContext>();
+        if (!conn->tls->Init())
+        {
+            self->FireError("tls: failed to acquire SSPI credentials");
+            return;
+        }
+        conn->tlsHandshaking = true;
+    }
+#endif
 
     uv_tcp_init(self->loop, &conn->client);
     if (uv_accept(server, reinterpret_cast<uv_stream_t*>(&conn->client)) == 0)
