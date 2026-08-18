@@ -41,6 +41,12 @@ lode_add_script_test(integration_native_require  native/native_require.luau)
 lode_add_script_test(integration_simd_bench      native/simd_bench.luau)
 lode_add_script_test(integration_config_mismatch native/config_mismatch.luau)
 
+# Exercises State destruction while filesystem resources are still active.
+# The script deliberately raises after opening them, so the runtime must run
+# module shutdown hooks without hanging or crashing.
+lode_add_script_test(regression_filesystem_shutdown diagnostics/filesystem_shutdown.luau)
+set_tests_properties(regression_filesystem_shutdown PROPERTIES WILL_FAIL TRUE TIMEOUT 10)
+
 # Diagnostics scripts are expected to fail (non-zero exit) with a specific,
 # well-known error category; WILL_FAIL flips the pass/fail interpretation.
 #
