@@ -156,7 +156,9 @@ void HttpRequestContext::BuildRequestText()
     // Função aux para comparar headers ignorando maiúsculas/minúsculas
     auto toLower = [](std::string s)
     {
-        std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+        std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
         return s;
     };
 
@@ -235,6 +237,20 @@ namespace {
         for (auto& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         return s;
     }
+    bool IsSameOrigin(const ParsedUrl& a, const ParsedUrl& b) {
+        return a.scheme == b.scheme && a.host == b.host && a.port == b.port;
+    }
+    bool IsSensitiveRedirectHeader(const std::string& name) {
+        std::string lower = ToLowerAsciiLocal(name);
+        return lower == "authorization" || lower == "proxy-authorization" || lower == "cookie";
+    }
+    void RemoveSensitiveRedirectHeaders(HttpRequestOptions& opts) {
+        opts.headers.erase(
+            std::remove_if(opts.headers.begin(), opts.headers.end(), [](const HeaderPair& header) {
+                return IsSensitiveRedirectHeader(header.name);
+            }),
+            opts.headers.end());
+    }
 }
 
 bool HttpRequestContext::ParseHeaders()
@@ -305,6 +321,18 @@ void HttpRequestContext::CompleteResponse()
         std::string next = ResolveRedirect(url.scheme + "://" + url.authority + url.path, location);
         if (!next.empty())
         {
+            ParsedUrl nextUrl = ParseUrl(next);
+            if (!nextUrl.valid)
+            {
+                FinishError("redirect", "invalid redirect URL: " + nextUrl.error);
+                return;
+            }
+            if (url.scheme == "https" && nextUrl.scheme == "http")
+            {
+                FinishError("redirect", "refusing HTTPS to HTTP downgrade");
+                return;
+            }
+
             ++redirectsDone;
             // Transfer the single logical completion to the next hop before
             // closing this context.  Intermediate contexts must never resume
@@ -316,6 +344,15 @@ void HttpRequestContext::CompleteResponse()
 
             auto newReq = std::make_shared<HttpRequestContext>(client);
             newReq->opts = opts;
+            if (!IsSameOrigin(url, nextUrl))
+                RemoveSensitiveRedirectHeaders(newReq->opts);
+
+            if (status == 303 || ((status == 301 || status == 302) && newReq->opts.method == "POST"))
+            {
+                newReq->opts.method = "GET";
+                newReq->opts.body.clear();
+                newReq->opts.chunkedUpload = false;
+            }
             newReq->redirectsDone = redirectsDone;
             newReq->taskCtx = redirectTask;
             newReq->isAsync = redirectAsync;

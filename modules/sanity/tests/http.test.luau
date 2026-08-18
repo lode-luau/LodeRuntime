@@ -243,6 +243,52 @@ describe("http", function()
         server:Close()
     end)
 
+    it("http.fetch strips credentials and applies 303 semantics across origins", function()
+        local redirector = http.Server.Create()
+        local destination = http.Server.Create()
+        redirector:Listen(0, "127.0.0.1")
+        destination:Listen(0, "127.0.0.1")
+        local redirectAddr = redirector:LocalAddress()
+        local destinationAddr = destination:LocalAddress()
+
+        local receivedMethod = ""
+        local receivedBody = ""
+        local receivedAuthorization: any = nil
+        local receivedCookie: any = nil
+
+        destination.RequestReceived:Connect(function(req, res)
+            receivedMethod = req.method
+            receivedBody = req.body
+            receivedAuthorization = req.headers["authorization"]
+            receivedCookie = req.headers["cookie"]
+            res:SetStatus(200)
+            res:Send("safe")
+        end)
+
+        redirector.RequestReceived:Connect(function(_, res)
+            res:SetStatus(303)
+            res:SetHeader("Location", string.format("http://127.0.0.1:%d/final", destinationAddr.port))
+            res:Send("")
+        end)
+
+        local response = http.fetch(string.format("http://127.0.0.1:%d/start", redirectAddr.port), {
+            method = "POST",
+            body = "secret body",
+            headers = {
+                Authorization = "Bearer secret",
+                Cookie = "session=secret",
+            },
+        })
+
+        expect(response.status).toBe(200)
+        expect(receivedMethod).toBe("GET")
+        expect(receivedBody).toBe("")
+        expect(receivedAuthorization).toBe(nil)
+        expect(receivedCookie).toBe(nil)
+        redirector:Close()
+        destination:Close()
+    end)
+
     it("HttpServer accepts TLS options", function()
         local server = http.Server.Create({ tls = true })
         server:Listen(0, "127.0.0.1", { tls = true })
