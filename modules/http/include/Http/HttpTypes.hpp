@@ -25,6 +25,7 @@ struct HttpRequestOptions
     bool followRedirects = true;
     int64_t maxRedirects = 10;
     bool chunkedUpload = false;
+    bool keepAlive = true;
     Lode::Value onData;
 };
 

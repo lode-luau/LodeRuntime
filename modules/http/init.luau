@@ -65,6 +65,18 @@ export type FetchOptions = {
     onData: ((chunk: string) -> ())?,
     --- Alias for onData
     onChunk: ((chunk: string) -> ())?,
+    --- Whether a reusable HttpClient may retain the connection (default true)
+    keepAlive: boolean?,
+}
+
+--- Options for the bounded HttpClient keep-alive pool.
+export type ClientOptions = {
+    --- Maximum number of idle connections retained by this client (default 4)
+    maxIdleConnections: number?,
+    --- Maximum requests served by one connection (default 100)
+    maxConnectionUses: number?,
+    --- Idle connection lifetime in milliseconds (default 30000)
+    idleTimeout: number?,
 }
 
 --- Options for configuring an HTTP/HTTPS server.
@@ -183,7 +195,7 @@ export type HttpModule = {
     --- The Client namespace
     HttpClient: {
         --- Creates a new HTTP Client
-        Create: (self: any, opts: any?) -> HttpClient
+        Create: (self: any, opts: ClientOptions?) -> HttpClient
     },
     
     --- The Status Codes enum

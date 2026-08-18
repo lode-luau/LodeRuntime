@@ -210,6 +210,40 @@ describe("http", function()
         server:Close()
     end)
 
+    it("HttpClient reuses keep-alive connections and honors server close", function()
+        local server = tcp.Server:Create()
+        local accepted = 0
+        local requests = 0
+        server.ClientConnected:Connect(function(socket)
+            accepted += 1
+            socket.MessageReceived:Connect(function(message)
+                if message:find("\r\n\r\n", 1, true) == nil then
+                    return
+                end
+                requests += 1
+                local connection = requests == 2 and "close" or "keep-alive"
+                socket:Send("HTTP/1.1 200 OK\r\nContent-Length: 1\r\nConnection: " .. connection .. "\r\n\r\n" .. tostring(requests))
+            end)
+        end)
+        server:Listen(0, "127.0.0.1")
+        local address = server:LocalAddress()
+        local client = http.HttpClient:Create({
+            maxIdleConnections = 1,
+            maxConnectionUses = 10,
+            idleTimeout = 1000,
+        })
+        local url = "http://127.0.0.1:" .. tostring(address.port) .. "/"
+
+        local first = client:Request(url)
+        local second = client:Request(url)
+        expect(tostring(first.body)).toBe("1")
+        expect(tostring(second.body)).toBe("2")
+        expect(accepted).toBe(1)
+
+        client:Close()
+        server:Close()
+    end)
+
     it("http.fetch completes a redirect chain exactly once", function()
         local server = http.Server.Create()
         server:Listen(0, "127.0.0.1")

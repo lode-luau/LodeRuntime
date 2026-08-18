@@ -84,18 +84,26 @@ void HttpRequestContext::OnAllClosed()
     if (client)
     {
         client->RemoveRequest(shared_from_this());
+        client->RemoveIdleRequest(shared_from_this());
     }
+    DeliverResult();
+    selfGuard.reset();
+}
+
+void HttpRequestContext::DeliverResult()
+{
     if (taskCtx.IsValid())
     {
+        Lode::Coroutine completion = taskCtx;
+        taskCtx = Lode::Coroutine();
         if (!result->errorKind.empty())
-            taskCtx.ResumeError(result->errorKind + ": " + result->errorMessage);
+            completion.ResumeError(result->errorKind + ": " + result->errorMessage);
         else
         {
             Lode::State vm(client->mainL);
             Lode::Table resTable = client ? client->BuildResponseTable(vm, result) : vm.CreateTable();
-            taskCtx.Resume({ Lode::Value(resTable) });
+            completion.Resume({ Lode::Value(resTable) });
         }
-        taskCtx = Lode::Coroutine();
     }
     else if (isAsync && client)
     {
@@ -104,7 +112,7 @@ void HttpRequestContext::OnAllClosed()
         else
             client->FireResponse(result);
     }
-    selfGuard.reset();
+    isAsync = false;
 }
 
 void HttpRequestContext::OnHandleClosed(uv_handle_t* handle)
@@ -135,7 +143,70 @@ void HttpRequestContext::FinishSuccess()
     if (bodyMode != BodyMode::Chunked)
         result->body = raw.substr(headerEnd + 4);
     result->finalUrl = url.scheme + "://" + url.authority + url.path;
+    if (CanReuseConnection())
+    {
+        if (reading)
+        {
+            uv_read_stop(reinterpret_cast<uv_stream_t*>(&tcp));
+            reading = false;
+        }
+        if (timerInited && !timerClosed)
+        {
+            uv_timer_stop(&timer);
+            timer.data = this;
+            uv_timer_start(&timer, OnTimeout, client->idleTimeoutMs, 0);
+        }
+        idle = true;
+        ++reuseCount;
+        client->RemoveRequest(shared_from_this());
+        client->AddIdleRequest(shared_from_this());
+        DeliverResult();
+        return;
+    }
+    DeliverResult();
     CloseHandles();
+}
+
+bool HttpRequestContext::CanReuseConnection() const
+{
+    if (!client || client->closed || client->maxIdleConnections == 0 ||
+        !opts.keepAlive || !tcpInited || tcpClosed)
+        return false;
+    if (bodyMode != BodyMode::ContentLength && bodyMode != BodyMode::Chunked)
+        return false;
+    std::string connection = HeaderValue("connection");
+    std::transform(connection.begin(), connection.end(), connection.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    if (connection == "close")
+        return false;
+    return reuseCount + 1 < client->maxConnectionUses;
+}
+
+void HttpRequestContext::PrepareForReuse()
+{
+    idle = false;
+    connectionReady = true;
+    requestComplete = false;
+    closed = false;
+    result = std::make_shared<HttpResponseData>();
+    opts = HttpRequestOptions();
+    requestText.clear();
+    raw.clear();
+    headerEnd = std::string::npos;
+    status = 0;
+    statusText.clear();
+    version.clear();
+    headers.clear();
+    bodyMode = BodyMode::None;
+    bodyState = BodyState::Idle;
+    pos = 0;
+    chunkStart = 0;
+    chunkRemaining = 0;
+    contentLength = 0;
+    redirectsDone = 0;
+    taskCtx = Lode::Coroutine();
+    isAsync = false;
 }
 
 void HttpRequestContext::BuildRequestText()
@@ -190,7 +261,7 @@ void HttpRequestContext::BuildRequestText()
     if (!hasHost)
         head += "Host: " + url.authority + "\r\n";
     if (!hasConnection)
-        head += "Connection: close\r\n";
+        head += opts.keepAlive ? "Connection: keep-alive\r\n" : "Connection: close\r\n";
 
     if (opts.chunkedUpload)
     {
@@ -516,7 +587,7 @@ std::string HttpRequestContext::Begin(const std::string& targetUrl)
     }
 
 #if defined(_WIN32) || defined(LODE_HAS_OPENSSL_TLS)
-    if (url.scheme == "https")
+    if (!connectionReady && url.scheme == "https")
     {
         tls = std::make_unique<TlsContext>();
         if (!tls->Init())
@@ -534,6 +605,29 @@ std::string HttpRequestContext::Begin(const std::string& targetUrl)
 #endif
 
     loop = client->loop;
+    if (timerInited && !timerClosed)
+    {
+        uv_timer_stop(&timer);
+        if (opts.timeoutMs > 0)
+            uv_timer_start(&timer, OnTimeout, opts.timeoutMs, 0);
+    }
+    else
+    {
+        timerInited = true;
+        timer.data = this;
+        uv_timer_init(loop, &timer);
+        if (opts.timeoutMs > 0)
+            uv_timer_start(&timer, OnTimeout, opts.timeoutMs, 0);
+    }
+
+    if (connectionReady)
+    {
+        BuildRequestText();
+        connReq.data = this;
+        OnConnected(&connReq, 0);
+        return "";
+    }
+
     addrInited = true;
     addrReq.data = this;
     struct addrinfo hints;
@@ -549,7 +643,7 @@ std::string HttpRequestContext::Begin(const std::string& targetUrl)
         return "dns: " + std::string(uv_strerror(r));
     }
 
-    if (opts.timeoutMs > 0)
+    if (opts.timeoutMs > 0 && !timerInited)
     {
         timerInited = true;
         timer.data = this;
@@ -610,7 +704,7 @@ void HttpRequestContext::OnConnected(uv_connect_t* req, int status)
     }
 
 #if defined(_WIN32) || defined(LODE_HAS_OPENSSL_TLS)
-    if (self->tls)
+    if (self->tls && !self->connectionReady)
     {
         // Start TLS handshake: generate ClientHello and send it.
         self->tlsWriteBuffer = self->tls->StartHandshake(self->url.host);
@@ -623,6 +717,21 @@ void HttpRequestContext::OnConnected(uv_connect_t* req, int status)
         self->writeReq.data  = self;
         self->writeBuf.base  = reinterpret_cast<char*>(self->tlsWriteBuffer.data());
         self->writeBuf.len   = static_cast<decltype(self->writeBuf.len)>(self->tlsWriteBuffer.size());
+        uv_write(&self->writeReq, reinterpret_cast<uv_stream_t*>(&self->tcp), &self->writeBuf, 1, OnWritten);
+        return;
+    }
+    if (self->tls)
+    {
+        std::string error;
+        self->tlsWriteBuffer = self->tls->Encrypt(self->requestText.data(), self->requestText.size(), error);
+        if (!error.empty() || self->tlsWriteBuffer.empty())
+        {
+            self->FinishError("tls", error.empty() ? "failed to encrypt request" : error);
+            return;
+        }
+        self->writeReq.data = self;
+        self->writeBuf.base = reinterpret_cast<char*>(self->tlsWriteBuffer.data());
+        self->writeBuf.len = static_cast<decltype(self->writeBuf.len)>(self->tlsWriteBuffer.size());
         uv_write(&self->writeReq, reinterpret_cast<uv_stream_t*>(&self->tcp), &self->writeBuf, 1, OnWritten);
         return;
     }
@@ -650,6 +759,14 @@ void HttpRequestContext::OnWritten(uv_write_t* req, int status)
 void HttpRequestContext::OnTimeout(uv_timer_t* timer)
 {
     auto* self = static_cast<HttpRequestContext*>(timer->data);
+    if (self->idle)
+    {
+        self->idle = false;
+        if (self->client)
+            self->client->RemoveIdleRequest(self->shared_from_this());
+        self->CloseHandles();
+        return;
+    }
     if (self->requestComplete) return;
     self->FinishError("timeout", "request timed out");
 }
@@ -870,6 +987,46 @@ void HttpClient::RemoveRequest(const std::shared_ptr<HttpRequestContext>& req)
         activeRequests.erase(it);
 }
 
+void HttpClient::RemoveIdleRequest(const std::shared_ptr<HttpRequestContext>& req)
+{
+    auto it = std::find(idleRequests.begin(), idleRequests.end(), req);
+    if (it != idleRequests.end())
+        idleRequests.erase(it);
+}
+
+void HttpClient::AddIdleRequest(const std::shared_ptr<HttpRequestContext>& req)
+{
+    while (idleRequests.size() >= maxIdleConnections && !idleRequests.empty())
+    {
+        auto oldest = idleRequests.front();
+        idleRequests.erase(idleRequests.begin());
+        oldest->idle = false;
+        oldest->CloseHandles();
+    }
+    idleRequests.push_back(req);
+}
+
+std::shared_ptr<HttpRequestContext> HttpClient::AcquireRequest(const std::string& targetUrl)
+{
+    ParsedUrl target = ParseUrl(targetUrl);
+    if (target.valid)
+    {
+        auto it = std::find_if(idleRequests.begin(), idleRequests.end(), [&target](const auto& req) {
+            return req->url.scheme == target.scheme && req->url.host == target.host && req->url.port == target.port;
+        });
+        if (it != idleRequests.end())
+        {
+            auto req = *it;
+            idleRequests.erase(it);
+            req->PrepareForReuse();
+            return req;
+        }
+    }
+    auto req = std::make_shared<HttpRequestContext>(shared_from_this());
+    req->selfGuard = req;
+    return req;
+}
+
 void HttpClient::RequestClose()
 {
     if (closed) return;
@@ -878,6 +1035,13 @@ void HttpClient::RequestClose()
     for (auto& req : copy)
     {
         req->FinishError("aborted", "client closed");
+    }
+    auto idleCopy = idleRequests;
+    idleRequests.clear();
+    for (auto& req : idleCopy)
+    {
+        req->idle = false;
+        req->CloseHandles();
     }
     mgr->RemoveClient(shared_from_this());
 }
@@ -894,16 +1058,16 @@ Lode::Value HttpClient::MethodRequestAsync(Lode::State& vm, const std::vector<Lo
     if (args.empty() || !args[0].IsString()) { vm.RaiseError("Expected url as string"); return Lode::Value(); }
     
     std::string url = args[0].AsString();
-    auto req = std::make_shared<HttpRequestContext>(shared_from_this());
+    auto req = AcquireRequest(url);
     req->isAsync = true;
-    req->selfGuard = req;
 
     if (args.size() > 1)
     {
         if (!ParseFetchOptions(vm, args[1], req->opts))
         {
             req->taskCtx = Lode::Coroutine();
-            activeRequests.pop_back();
+            req->dnsDone = true;
+            req->CloseHandles();
             return Lode::Value();
         }
     }
@@ -927,16 +1091,16 @@ Lode::Value HttpClient::MethodRequest(Lode::State& vm, const std::vector<Lode::V
     if (args.empty() || !args[0].IsString()) { vm.RaiseError("Expected url as string"); return Lode::Value(); }
 
     std::string url = args[0].AsString();
-    auto req = std::make_shared<HttpRequestContext>(shared_from_this());
+    auto req = AcquireRequest(url);
     req->isAsync = false;
-    req->selfGuard = req;
 
     if (args.size() > 1)
     {
         if (!ParseFetchOptions(vm, args[1], req->opts))
         {
             req->taskCtx = Lode::Coroutine();
-            activeRequests.pop_back();
+            req->dnsDone = true;
+            req->CloseHandles();
             return Lode::Value();
         }
     }

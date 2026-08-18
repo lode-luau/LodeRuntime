@@ -23,7 +23,7 @@ LODE_MODULE(vm)
     mgr->serverMethods = lodehttp::BuildServerMethods(vm, mgr);
 
     Lode::Table httpClientClass = vm.CreateTable();
-    httpClientClass.Set("Create", vm.CreateFunction([mgr](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    httpClientClass.Set("Create", vm.CreateFunction([mgr](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
         if (mgr->shuttingDown)
         {
             vm2.RaiseError("http: runtime is shutting down");
@@ -33,6 +33,40 @@ LODE_MODULE(vm)
         client->mgr = mgr;
         client->mainL = mgr->mainL;
         client->loop = mgr->loop;
+        if (!args.empty() && !args[0].IsNil())
+        {
+            if (!args[0].IsTable())
+            {
+                vm2.RaiseError("HttpClient.Create options must be a table");
+                return Lode::Value();
+            }
+            auto options = args[0].AsTable();
+            auto readSize = [&](const char* key, size_t& output, size_t maximum) -> bool {
+                if (!options.Has(key)) return true;
+                auto value = options.Get(key);
+                if (!value.IsOk() || !value.GetValue().IsNumber())
+                {
+                    vm2.RaiseError(std::string("HttpClient.Create option '") + key + "' must be a number");
+                    return false;
+                }
+                auto converted = Lode::Numeric::ToSize(value.GetValue().AsNumber(), key);
+                if (converted.IsError() || converted.GetValue() > maximum)
+                {
+                    vm2.RaiseError(std::string("HttpClient.Create option '") + key + "' is out of range");
+                    return false;
+                }
+                output = converted.GetValue();
+                return true;
+            };
+            size_t idleTimeout = static_cast<size_t>(client->idleTimeoutMs);
+            if (!readSize("maxIdleConnections", client->maxIdleConnections, 64) ||
+                !readSize("maxConnectionUses", client->maxConnectionUses, 1000000) ||
+                !readSize("idleTimeout", idleTimeout, 3600000))
+                return Lode::Value();
+            client->idleTimeoutMs = static_cast<uint64_t>(idleTimeout);
+            if (client->maxConnectionUses == 0)
+                client->maxConnectionUses = 1;
+        }
         client->InitSignals(vm2);
         mgr->AddClient(client);
         client->selfGuard = client;
@@ -175,6 +209,8 @@ LODE_MODULE(vm)
                 return Lode::Value();
             }
         }
+        // One-shot fetch clients cannot share a connection with a later call.
+        req->opts.keepAlive = false;
         std::string err = req->Begin(url);
         if (!err.empty())
         {
