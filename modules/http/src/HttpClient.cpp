@@ -515,14 +515,14 @@ std::string HttpRequestContext::Begin(const std::string& targetUrl)
         return "invalid-url: " + url.error;
     }
 
-#ifdef _WIN32
+#if defined(_WIN32) || defined(LODE_HAS_OPENSSL_TLS)
     if (url.scheme == "https")
     {
         tls = std::make_unique<TlsContext>();
         if (!tls->Init())
         {
             dnsDone = true;
-            return "tls: failed to acquire SSPI credentials";
+            return "tls: failed to initialize TLS credentials";
         }
     }
 #else
@@ -583,7 +583,7 @@ void HttpRequestContext::OnResolved(uv_getaddrinfo_t* req, int status, struct ad
 
     // Only pre-build the plain-text request if NOT using TLS.
     // For HTTPS, BuildRequestText() is called after the handshake completes.
-#ifdef _WIN32
+#if defined(_WIN32) || defined(LODE_HAS_OPENSSL_TLS)
     if (!self->tls)
         self->BuildRequestText();
 #else
@@ -609,7 +609,7 @@ void HttpRequestContext::OnConnected(uv_connect_t* req, int status)
         return;
     }
 
-#ifdef _WIN32
+#if defined(_WIN32) || defined(LODE_HAS_OPENSSL_TLS)
     if (self->tls)
     {
         // Start TLS handshake: generate ClientHello and send it.
@@ -666,7 +666,7 @@ void HttpRequestContext::OnRead(uv_stream_t* stream, ssize_t nread, const uv_buf
     auto* self = static_cast<HttpRequestContext*>(stream->data);
     if (nread > 0)
     {
-#ifdef _WIN32
+#if defined(_WIN32) || defined(LODE_HAS_OPENSSL_TLS)
         if (self->tls)
         {
             if (self->tlsHandshaking)

@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#ifdef _WIN32
+#if defined(_WIN32) || defined(LODE_HAS_OPENSSL_TLS)
 
+#ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -14,6 +15,7 @@
 #include <windows.h>
 #include <schannel.h>
 #include <security.h>
+#endif
 #include <string>
 #include <vector>
 #include <cstdint>
@@ -91,6 +93,7 @@ public:
     void Shutdown();
 
 private:
+#ifdef _WIN32
     CredHandle cred_{};
     CtxtHandle ctx_{};
     SecPkgContext_StreamSizes sizes_{};
@@ -107,8 +110,13 @@ private:
         ISC_REQ_EXTENDED_ERROR   |
         ISC_REQ_ALLOCATE_MEMORY  |
         ISC_REQ_STREAM;
+#else
+    struct Impl;
+    Impl* impl_ = nullptr;
+    bool handshakeDone_ = false;
+#endif
 };
 
 } // namespace lodehttp
 
-#endif // _WIN32
+#endif // _WIN32 || LODE_HAS_OPENSSL_TLS

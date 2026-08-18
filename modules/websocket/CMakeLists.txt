@@ -26,6 +26,11 @@ add_library(websocket SHARED
 target_include_directories(websocket PUBLIC include PRIVATE ../tcp/include ../tcp/src ../http/include ../http/src)
 target_compile_definitions(websocket PRIVATE WEBSOCKET_BUILD_SHARED NOMINMAX LODE_TCP_BUILD)
 target_link_libraries(websocket PRIVATE LodeCore $<$<PLATFORM_ID:Windows>:secur32 crypt32>)
+if(NOT WIN32 AND NOT EMSCRIPTEN)
+    find_package(OpenSSL REQUIRED)
+    target_compile_definitions(websocket PRIVATE LODE_HAS_OPENSSL_TLS)
+    target_link_libraries(websocket PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+endif()
 
 if(MSVC)
     target_compile_options(websocket PRIVATE $<$<NOT:$<CONFIG:Debug>>:/O1> /GR- /GL)

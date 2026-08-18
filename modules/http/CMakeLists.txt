@@ -17,6 +17,10 @@ target_link_libraries(http PRIVATE LodeCore)
 
 if(WIN32)
     target_link_libraries(http PRIVATE Secur32)
+elseif(NOT EMSCRIPTEN)
+    find_package(OpenSSL REQUIRED)
+    target_compile_definitions(http PRIVATE LODE_HAS_OPENSSL_TLS)
+    target_link_libraries(http PRIVATE OpenSSL::SSL OpenSSL::Crypto)
 endif()
 
 target_include_directories(http PUBLIC

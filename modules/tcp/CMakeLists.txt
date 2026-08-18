@@ -17,6 +17,11 @@ add_library(tcp SHARED
 target_include_directories(tcp PUBLIC include PRIVATE ../http/include ../http/src)
 target_compile_definitions(tcp PRIVATE LODE_TCP_BUILD NOMINMAX)
 target_link_libraries(tcp PRIVATE LodeCore $<$<PLATFORM_ID:Windows>:secur32 crypt32>)
+if(NOT WIN32 AND NOT EMSCRIPTEN)
+    find_package(OpenSSL REQUIRED)
+    target_compile_definitions(tcp PRIVATE LODE_HAS_OPENSSL_TLS)
+    target_link_libraries(tcp PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+endif()
 
 if(MSVC)
     target_compile_options(tcp PRIVATE $<$<NOT:$<CONFIG:Debug>>:/O1> /GR- /GL)
