@@ -9,6 +9,7 @@ local expect = sanity.expect
 
 local task = require("../../../modules/task")
 local http = require("../../http")
+local tcp = require("../../tcp")
 
 describe("http", function()
     it("exposes common status codes as numbers", function()
@@ -287,6 +288,33 @@ describe("http", function()
         expect(receivedCookie).toBe(nil)
         redirector:Close()
         destination:Close()
+    end)
+
+    it("http.fetch rejects ambiguous response framing", function()
+        local function fetchRaw(responseText: string): (boolean, string)
+            local server = tcp.Server:Create()
+            server.ClientConnected:Connect(function(client)
+                client.MessageReceived:Once(function()
+                    client:Send(responseText)
+                    client:Close()
+                end)
+            end)
+            server:Listen(0, "127.0.0.1")
+            local addr = server:LocalAddress()
+            local ok, err = pcall(function()
+                http.fetch(string.format("http://127.0.0.1:%d/", addr.port))
+            end)
+            server:Close()
+            return ok, tostring(err)
+        end
+
+        local ok, err = fetchRaw("HTTP/1.1 200 OK\r\nContent-Length: 3\r\nContent-Length: 20\r\n\r\nabc")
+        expect(ok).toBe(false)
+        expect(err:find("conflicting content%-length") ~= nil).toBe(true)
+
+        ok, err = fetchRaw("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nContent-Length: 3\r\n\r\n0\r\n\r\n")
+        expect(ok).toBe(false)
+        expect(err:find("transfer%-encoding conflicts") ~= nil).toBe(true)
     end)
 
     it("HttpServer accepts TLS options", function()

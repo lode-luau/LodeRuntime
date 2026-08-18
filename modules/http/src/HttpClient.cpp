@@ -289,24 +289,70 @@ bool HttpRequestContext::ParseHeaders()
         p = e + 2;
     }
 
-    std::string transferEncoding = ToLowerAsciiLocal(HeaderValue("transfer-encoding"));
-    if (transferEncoding.find("chunked") != std::string::npos)
+    std::vector<std::string> transferEncodings;
+    std::vector<std::string> contentLengths;
+    for (const auto& header : headers)
     {
+        if (header.name == "transfer-encoding")
+            transferEncodings.push_back(ToLowerAsciiLocal(header.value));
+        else if (header.name == "content-length")
+            contentLengths.push_back(header.value);
+    }
+
+    if (!transferEncodings.empty() && !contentLengths.empty())
+    {
+        FinishError("malformed-response", "transfer-encoding conflicts with content-length");
+        return false;
+    }
+
+    if (!transferEncodings.empty())
+    {
+        std::string combined;
+        for (const auto& value : transferEncodings)
+        {
+            if (!combined.empty()) combined += ',';
+            combined += value;
+        }
+        size_t lastComma = combined.rfind(',');
+        std::string finalCoding = Trim(lastComma == std::string::npos ? combined : combined.substr(lastComma + 1));
+        if (finalCoding != "chunked")
+        {
+            FinishError("malformed-response", "unsupported transfer-encoding");
+            return false;
+        }
         bodyMode = BodyMode::Chunked;
         bodyState = BodyState::SizeLine;
     }
-    else
+    else if (!contentLengths.empty())
     {
-        std::string cl = HeaderValue("content-length");
-        if (!cl.empty())
+        bool haveLength = false;
+        int64_t expectedLength = 0;
+        for (const std::string& field : contentLengths)
         {
-            if (cl.find(',') != std::string::npos || !ParseInt64Local(cl, contentLength) || contentLength < 0)
+            size_t start = 0;
+            while (start <= field.size())
             {
-                FinishError("malformed-response", "invalid content-length");
-                return false;
+                size_t comma = field.find(',', start);
+                std::string value = Trim(field.substr(start, comma == std::string::npos ? std::string::npos : comma - start));
+                int64_t parsed = 0;
+                if (!ParseInt64Local(value, parsed) || parsed < 0)
+                {
+                    FinishError("malformed-response", "invalid content-length");
+                    return false;
+                }
+                if (haveLength && parsed != expectedLength)
+                {
+                    FinishError("malformed-response", "conflicting content-length values");
+                    return false;
+                }
+                expectedLength = parsed;
+                haveLength = true;
+                if (comma == std::string::npos) break;
+                start = comma + 1;
             }
-            bodyMode = BodyMode::ContentLength;
         }
+        contentLength = expectedLength;
+        bodyMode = BodyMode::ContentLength;
     }
     return true;
 }
