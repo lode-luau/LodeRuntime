@@ -284,6 +284,31 @@ describe("fs", function()
         cleanup()
     end)
 
+    it("rejects invalid File read sizes before allocation", function()
+        cleanup()
+        fs.CreateDirectory(tmpRoot)
+        local filePath = path.join(tmpRoot, "read-size.txt")
+        fs.WriteFile(filePath, "data")
+        local file = fs.File:Open(filePath, "r")
+
+        for _, invalid in { -1, 1.5, math.huge, 128 * 1024 * 1024 } do
+            local ok, err = pcall(function()
+                file:Read(invalid)
+            end)
+            expect(ok).toBe(false)
+            expect(tostring(err):find("read size", 1, true) ~= nil).toBe(true)
+
+            ok, err = pcall(function()
+                file:ReadBuffer(invalid)
+            end)
+            expect(ok).toBe(false)
+            expect(tostring(err):find("read size", 1, true) ~= nil).toBe(true)
+        end
+
+        file:Close()
+        cleanup()
+    end)
+
     it("reads a file through a ReadStream", function()
         cleanup()
         fs.CreateDirectory(tmpRoot)
