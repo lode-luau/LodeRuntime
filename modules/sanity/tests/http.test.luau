@@ -244,6 +244,119 @@ describe("http", function()
         server:Close()
     end)
 
+    it("HttpClient disables reuse per request and at the configured use limit", function()
+        local function runCase(clientOptions: any, requestOptions: any): number
+            local server = tcp.Server:Create()
+            local accepted = 0
+            server.ClientConnected:Connect(function(socket)
+                accepted += 1
+                socket.MessageReceived:Connect(function(message)
+                    if message:find("\r\n\r\n", 1, true) ~= nil then
+                        socket:Send("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: keep-alive\r\n\r\nok")
+                    end
+                end)
+            end)
+            server:Listen(0, "127.0.0.1")
+            local address = server:LocalAddress()
+            local client = http.HttpClient:Create(clientOptions)
+            local url = "http://127.0.0.1:" .. tostring(address.port) .. "/"
+            expect(client:Request(url, requestOptions).status).toBe(200)
+            expect(client:Request(url, requestOptions).status).toBe(200)
+            client:Close()
+            server:Close()
+            return accepted
+        end
+
+        expect(runCase({}, { keepAlive = false })).toBe(2)
+        expect(runCase({ maxConnectionUses = 1 }, nil)).toBe(2)
+    end)
+
+    it("HttpClient expires idle connections", function()
+        local server = tcp.Server:Create()
+        local accepted = 0
+        server.ClientConnected:Connect(function(socket)
+            accepted += 1
+            socket.MessageReceived:Connect(function(message)
+                if message:find("\r\n\r\n", 1, true) ~= nil then
+                    socket:Send("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: keep-alive\r\n\r\nok")
+                end
+            end)
+        end)
+        server:Listen(0, "127.0.0.1")
+        local address = server:LocalAddress()
+        local client = http.HttpClient:Create({ idleTimeout = 20 })
+        local url = "http://127.0.0.1:" .. tostring(address.port) .. "/"
+        expect(client:Request(url).status).toBe(200)
+        task.wait(0.05)
+        expect(client:Request(url).status).toBe(200)
+        expect(accepted).toBe(2)
+        client:Close()
+        server:Close()
+    end)
+
+    it("HttpClient evicts the least recently used idle origin at the pool limit", function()
+        local function makeServer()
+            local server = tcp.Server:Create()
+            local accepted = 0
+            server.ClientConnected:Connect(function(socket)
+                accepted += 1
+                socket.MessageReceived:Connect(function(message)
+                    if message:find("\r\n\r\n", 1, true) ~= nil then
+                        socket:Send("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: keep-alive\r\n\r\nok")
+                    end
+                end)
+            end)
+            server:Listen(0, "127.0.0.1")
+            return server, function() return accepted end
+        end
+
+        local first, firstAccepted = makeServer()
+        local second, secondAccepted = makeServer()
+        local client = http.HttpClient:Create({ maxIdleConnections = 1 })
+        local firstUrl = "http://127.0.0.1:" .. tostring(first:LocalAddress().port) .. "/"
+        local secondUrl = "http://127.0.0.1:" .. tostring(second:LocalAddress().port) .. "/"
+        expect(client:Request(firstUrl).status).toBe(200)
+        expect(client:Request(secondUrl).status).toBe(200)
+        expect(client:Request(firstUrl).status).toBe(200)
+        expect(firstAccepted()).toBe(2)
+        expect(secondAccepted()).toBe(1)
+        client:Close()
+        first:Close()
+        second:Close()
+    end)
+
+    it("HttpClient discards malformed connections before another request", function()
+        local server = tcp.Server:Create()
+        local accepted = 0
+        local requests = 0
+        server.ClientConnected:Connect(function(socket)
+            accepted += 1
+            socket.MessageReceived:Connect(function(message)
+                if message:find("\r\n\r\n", 1, true) == nil then
+                    return
+                end
+                requests += 1
+                if requests == 1 then
+                    socket:Send("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nContent-Length: 3\r\n\r\nok")
+                else
+                    socket:Send("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+                end
+            end)
+        end)
+        server:Listen(0, "127.0.0.1")
+        local address = server:LocalAddress()
+        local client = http.HttpClient:Create()
+        local url = "http://127.0.0.1:" .. tostring(address.port) .. "/"
+        local ok = pcall(function()
+            client:Request(url)
+        end)
+        expect(ok).toBe(false)
+        expect(client:Request(url).status).toBe(200)
+        expect(accepted).toBe(2)
+        client:Close()
+        server:Close()
+    end)
+
     it("http.fetch completes a redirect chain exactly once", function()
         local server = http.Server.Create()
         server:Listen(0, "127.0.0.1")

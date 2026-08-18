@@ -33,14 +33,19 @@ LODE_MODULE(vm)
         client->mgr = mgr;
         client->mainL = mgr->mainL;
         client->loop = mgr->loop;
-        if (!args.empty() && !args[0].IsNil())
+        const Lode::Value* clientOptions = nullptr;
+        if (args.size() > 1)
+            clientOptions = &args[1];
+        else if (!args.empty())
+            clientOptions = &args[0];
+        if (clientOptions && !clientOptions->IsNil())
         {
-            if (!args[0].IsTable())
+            if (!clientOptions->IsTable())
             {
                 vm2.RaiseError("HttpClient.Create options must be a table");
                 return Lode::Value();
             }
-            auto options = args[0].AsTable();
+            auto options = clientOptions->AsTable();
             auto readSize = [&](const char* key, size_t& output, size_t maximum) -> bool {
                 if (!options.Has(key)) return true;
                 auto value = options.Get(key);
