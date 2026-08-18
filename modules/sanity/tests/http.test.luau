@@ -209,6 +209,40 @@ describe("http", function()
         server:Close()
     end)
 
+    it("http.fetch completes a redirect chain exactly once", function()
+        local server = http.Server.Create()
+        server:Listen(0, "127.0.0.1")
+        local addr = server:LocalAddress()
+        local baseUrl = string.format("http://127.0.0.1:%d", addr.port)
+        local requests = 0
+
+        server.RequestReceived:Connect(function(req, res)
+            requests += 1
+            if req.path == "/start" then
+                res:SetStatus(302)
+                res:SetHeader("Location", "/middle")
+                res:Send("")
+            elseif req.path == "/middle" then
+                res:SetStatus(307)
+                res:SetHeader("Location", "/final")
+                res:Send("")
+            else
+                res:SetStatus(200)
+                res:Send("redirect complete")
+            end
+        end)
+
+        local resumes = 0
+        local response = http.fetch(baseUrl .. "/start")
+        resumes += 1
+
+        expect(resumes).toBe(1)
+        expect(requests).toBe(3)
+        expect(response.status).toBe(200)
+        expect(tostring(response.body)).toBe("redirect complete")
+        server:Close()
+    end)
+
     it("HttpServer accepts TLS options", function()
         local server = http.Server.Create({ tls = true })
         server:Listen(0, "127.0.0.1", { tls = true })

@@ -306,16 +306,26 @@ void HttpRequestContext::CompleteResponse()
         if (!next.empty())
         {
             ++redirectsDone;
-            // Create a new request based on the redirect
-            CloseHandles();
+            // Transfer the single logical completion to the next hop before
+            // closing this context.  Intermediate contexts must never resume
+            // the waiter or publish an async event.
+            Lode::Coroutine redirectTask = taskCtx;
+            taskCtx = Lode::Coroutine();
+            bool redirectAsync = isAsync;
+            isAsync = false;
+
             auto newReq = std::make_shared<HttpRequestContext>(client);
             newReq->opts = opts;
             newReq->redirectsDone = redirectsDone;
-            newReq->taskCtx = taskCtx;
-            newReq->isAsync = isAsync;
+            newReq->taskCtx = redirectTask;
+            newReq->isAsync = redirectAsync;
             newReq->selfGuard = newReq;
             client->activeRequests.push_back(newReq);
-            newReq->Begin(next);
+
+            CloseHandles();
+            std::string err = newReq->Begin(next);
+            if (!err.empty())
+                newReq->FinishError("redirect", err);
             return;
         }
     }
