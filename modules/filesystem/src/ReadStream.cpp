@@ -51,6 +51,12 @@ void ReadStream::CheckClosed()
 void ReadStream::OnRead(uv_fs_t* req)
 {
     ReadStream* self = static_cast<ReadStream*>(req->data);
+
+    if (self->mgr->shuttingDown) {
+        uv_fs_req_cleanup(req);
+        self->RequestClose();
+        return;
+    }
     
     if (self->closing || self->closed) {
         uv_fs_req_cleanup(req);
@@ -95,7 +101,7 @@ void ReadStream::OnRead(uv_fs_t* req)
 
 void ReadStream::ContinueRead()
 {
-    if (closing || closed) return;
+    if (closing || closed || mgr->shuttingDown) return;
     
     uv_buf_t iov = uv_buf_init(buffer, sizeof(buffer));
     int r = uv_fs_read(mgr->loop, &readReq, fd, &iov, 1, offset, OnRead);

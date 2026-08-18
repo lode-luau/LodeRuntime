@@ -117,6 +117,7 @@ Lode::Value FileHandle::MethodRead(Lode::State& vm, const std::vector<Lode::Valu
     
     int r = uv_fs_read(mgr->loop, &ctx->req, fd, &iov, 1, -1, [](uv_fs_t* req) {
         auto ctx = static_cast<FileHandleCtx*>(req->data);
+        if (ctx->handle->mgr->shuttingDown) { delete ctx; return; }
         Lode::State vm(ctx->L);
         if (req->result < 0) {
             auto err = uv_strerror(req->result);
@@ -165,6 +166,7 @@ Lode::Value FileHandle::MethodReadBuffer(Lode::State& vm, const std::vector<Lode
     
     int r = uv_fs_read(mgr->loop, &ctx->req, fd, &iov, 1, -1, [](uv_fs_t* req) {
         auto ctx = static_cast<FileHandleCtx*>(req->data);
+        if (ctx->handle->mgr->shuttingDown) { delete ctx; return; }
         Lode::State vm(ctx->L);
         if (req->result < 0) {
             auto err = uv_strerror(req->result);
@@ -224,6 +226,7 @@ Lode::Value FileHandle::MethodWrite(Lode::State& vm, const std::vector<Lode::Val
     
     int r = uv_fs_write(mgr->loop, &ctx->req, fd, &iov, 1, -1, [](uv_fs_t* req) {
         auto ctx = static_cast<FileHandleCtx*>(req->data);
+        if (ctx->handle->mgr->shuttingDown) { delete ctx; return; }
         Lode::State vm(ctx->L);
         if (req->result < 0) {
             auto err = uv_strerror(req->result);
@@ -281,6 +284,7 @@ Lode::Value FileHandle::MethodStat(Lode::State& vm, const std::vector<Lode::Valu
     
     int r = uv_fs_fstat(mgr->loop, &ctx->req, fd, [](uv_fs_t* req) {
         auto ctx = static_cast<FileHandleCtx*>(req->data);
+        if (ctx->handle->mgr->shuttingDown) { delete ctx; return; }
         Lode::State vm(ctx->L);
         if (req->result < 0) {
             auto err = uv_strerror(req->result);
@@ -328,6 +332,7 @@ Lode::Value FileHandle::MethodSync(Lode::State& vm, const std::vector<Lode::Valu
     
     int r = uv_fs_fsync(mgr->loop, &ctx->req, fd, [](uv_fs_t* req) {
         auto ctx = static_cast<FileHandleCtx*>(req->data);
+        if (ctx->handle->mgr->shuttingDown) { delete ctx; return; }
         Lode::State vm(ctx->L);
         if (req->result < 0) {
             auto err = uv_strerror(req->result);
