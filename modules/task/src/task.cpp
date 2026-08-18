@@ -39,8 +39,8 @@ LODE_MODULE(vm)
         }
         Lode::Value fnOrCo = args[0];
         std::vector<Lode::Value> passArgs(args.begin() + 1, args.end());
-        Lode::Task::Defer(vm, fnOrCo, passArgs);
-        return Lode::Value();
+        Lode::Coroutine co = Lode::Task::Defer(vm, fnOrCo, passArgs);
+        return Lode::Value(co);
     }));
 
     // task.delay(delaySeconds, fnOrCo, ...) -> executes after delaySeconds
@@ -52,8 +52,8 @@ LODE_MODULE(vm)
         double delaySeconds = args[0].IsNumber() ? args[0].AsNumber() : 0.0;
         Lode::Value fnOrCo = args[1];
         std::vector<Lode::Value> passArgs(args.begin() + 2, args.end());
-        Lode::Task::Delay(vm, delaySeconds, fnOrCo, passArgs);
-        return Lode::Value();
+        Lode::Coroutine co = Lode::Task::Delay(vm, delaySeconds, fnOrCo, passArgs);
+        return Lode::Value(co);
     }));
 
     // task.cancel(target) -> cancels a scheduled task timer or coroutine

@@ -42,10 +42,10 @@ public:
     static Coroutine Spawn(State& vm, const Value& fnOrCo, const std::vector<Value>& args = {});
 
     /** @brief Defers a function or coroutine execution to the next event loop tick. */
-    static void Defer(State& vm, const Value& fnOrCo, const std::vector<Value>& args = {});
+    static Coroutine Defer(State& vm, const Value& fnOrCo, const std::vector<Value>& args = {});
 
     /** @brief Executes a function or coroutine after a specific delay in seconds. */
-    static void Delay(State& vm, double seconds, const Value& fnOrCo, const std::vector<Value>& args = {});
+    static Coroutine Delay(State& vm, double seconds, const Value& fnOrCo, const std::vector<Value>& args = {});
 
     /** @brief Cancels a scheduled task or coroutine. */
     static void Cancel(State& vm, const Value& target);
