@@ -3,12 +3,44 @@
 #include "FileSystem/FileHandle.hpp"
 #include "Lode/Task.hpp"
 #include "Lode/Coroutine.hpp"
+#include "Lode/Numeric.hpp"
 #include "Lode/ObjectWrap.hpp"
 #include <cstring>
 #include <iostream>
 
 namespace lodefs
 {
+
+namespace
+{
+constexpr size_t kMaxReadSize = 64ull * 1024 * 1024;
+
+bool ParseReadSize(Lode::State& vm, const std::vector<Lode::Value>& args, size_t& sizeOut)
+{
+    sizeOut = 65536;
+    if (args.size() <= 1)
+        return true;
+    if (!args[1].IsNumber())
+    {
+        vm.RaiseError("fs File: read size must be a number or nil");
+        return false;
+    }
+
+    auto size = Lode::Numeric::ToSize(args[1].AsNumber(), "read size");
+    if (size.IsError())
+    {
+        vm.RaiseError(size.GetError().ErrorMessage());
+        return false;
+    }
+    if (size.GetValue() > kMaxReadSize)
+    {
+        vm.RaiseError("fs File: read size exceeds the 64 MiB per-call limit");
+        return false;
+    }
+    sizeOut = size.GetValue();
+    return true;
+}
+} // namespace
 
 void FileHandle::RequestClose()
 {
@@ -69,10 +101,8 @@ Lode::Value FileHandle::MethodRead(Lode::State& vm, const std::vector<Lode::Valu
         return Lode::Value();
     }
     
-    size_t sizeToRead = 65536; // Default to 64k if not provided
-    if (args.size() > 1 && args[1].IsNumber()) {
-        sizeToRead = static_cast<size_t>(args[1].AsNumber());
-    }
+    size_t sizeToRead = 0;
+    if (!ParseReadSize(vm, args, sizeToRead)) return Lode::Value();
     
     auto ctx = new FileHandleCtx();
     ctx->handle = shared_from_this();
@@ -87,6 +117,7 @@ Lode::Value FileHandle::MethodRead(Lode::State& vm, const std::vector<Lode::Valu
     
     int r = uv_fs_read(mgr->loop, &ctx->req, fd, &iov, 1, -1, [](uv_fs_t* req) {
         auto ctx = static_cast<FileHandleCtx*>(req->data);
+        if (ctx->handle->mgr->shuttingDown) { delete ctx; return; }
         Lode::State vm(ctx->L);
         if (req->result < 0) {
             auto err = uv_strerror(req->result);
@@ -119,10 +150,8 @@ Lode::Value FileHandle::MethodReadBuffer(Lode::State& vm, const std::vector<Lode
         return Lode::Value();
     }
     
-    size_t sizeToRead = 65536; 
-    if (args.size() > 1 && args[1].IsNumber()) {
-        sizeToRead = static_cast<size_t>(args[1].AsNumber());
-    }
+    size_t sizeToRead = 0;
+    if (!ParseReadSize(vm, args, sizeToRead)) return Lode::Value();
     
     auto ctx = new FileHandleCtx();
     ctx->handle = shared_from_this();
@@ -137,6 +166,7 @@ Lode::Value FileHandle::MethodReadBuffer(Lode::State& vm, const std::vector<Lode
     
     int r = uv_fs_read(mgr->loop, &ctx->req, fd, &iov, 1, -1, [](uv_fs_t* req) {
         auto ctx = static_cast<FileHandleCtx*>(req->data);
+        if (ctx->handle->mgr->shuttingDown) { delete ctx; return; }
         Lode::State vm(ctx->L);
         if (req->result < 0) {
             auto err = uv_strerror(req->result);
@@ -196,6 +226,7 @@ Lode::Value FileHandle::MethodWrite(Lode::State& vm, const std::vector<Lode::Val
     
     int r = uv_fs_write(mgr->loop, &ctx->req, fd, &iov, 1, -1, [](uv_fs_t* req) {
         auto ctx = static_cast<FileHandleCtx*>(req->data);
+        if (ctx->handle->mgr->shuttingDown) { delete ctx; return; }
         Lode::State vm(ctx->L);
         if (req->result < 0) {
             auto err = uv_strerror(req->result);
@@ -253,6 +284,7 @@ Lode::Value FileHandle::MethodStat(Lode::State& vm, const std::vector<Lode::Valu
     
     int r = uv_fs_fstat(mgr->loop, &ctx->req, fd, [](uv_fs_t* req) {
         auto ctx = static_cast<FileHandleCtx*>(req->data);
+        if (ctx->handle->mgr->shuttingDown) { delete ctx; return; }
         Lode::State vm(ctx->L);
         if (req->result < 0) {
             auto err = uv_strerror(req->result);
@@ -300,6 +332,7 @@ Lode::Value FileHandle::MethodSync(Lode::State& vm, const std::vector<Lode::Valu
     
     int r = uv_fs_fsync(mgr->loop, &ctx->req, fd, [](uv_fs_t* req) {
         auto ctx = static_cast<FileHandleCtx*>(req->data);
+        if (ctx->handle->mgr->shuttingDown) { delete ctx; return; }
         Lode::State vm(ctx->L);
         if (req->result < 0) {
             auto err = uv_strerror(req->result);

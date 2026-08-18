@@ -37,14 +37,16 @@ export type TaskModule = {
     ) -> thread,
     
     --- Defers execution of a function or coroutine until the next engine tick.
+    --- @return The running thread.
     defer: (
         --- The function or thread to execute.
         fnOrCo: Executable,
         --- Additional arguments to pass.
         ...any
-    ) -> (),
+    ) -> thread,
     
     --- Delays execution of a function or coroutine by a specified number of seconds.
+    --- @return The running thread.
     delay: (
         --- The delay in seconds.
         delaySeconds: number,
@@ -52,7 +54,7 @@ export type TaskModule = {
         fnOrCo: Executable,
         --- Additional arguments to pass.
         ...any
-    ) -> (),
+    ) -> thread,
     
     --- Cancels a scheduled task or running thread.
     cancel: (

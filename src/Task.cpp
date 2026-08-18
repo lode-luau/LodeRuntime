@@ -113,7 +113,7 @@ static void OnTimerFired(uv_timer_t* handle)
     {
         try
         {
-            auto res = data->coroutine.Resume();
+            auto res = data->coroutine.Resume(data->args);
             if (res.IsError())
             {
                 if (data->ctx && data->ctx->mainThread &&
@@ -124,17 +124,17 @@ static void OnTimerFired(uv_timer_t* handle)
                 }
                 else
                 {
-                    EmitTaskError("Unhandled exception in Wait timer: " + res.GetError().ErrorMessage());
+                    EmitTaskError("Unhandled exception in task timer: " + res.GetError().ErrorMessage());
                 }
             }
         }
         catch (const std::exception& e)
         {
-            EmitTaskError(std::string("Unhandled C++ exception in Wait timer: ") + e.what());
+            EmitTaskError(std::string("Unhandled C++ exception in task timer: ") + e.what());
         }
         catch (...)
         {
-            EmitTaskError("Unhandled unknown C++ exception in Wait timer");
+            EmitTaskError("Unhandled unknown C++ exception in task timer");
         }
     }
     else if (data->L)
@@ -179,8 +179,9 @@ static bool StartTimer(State& vm, TaskContext* ctx, const char* label, TimerData
     int initStatus = loop ? uv_timer_init(loop, &data->handle) : UV_EINVAL;
     if (initStatus != 0)
     {
-        delete data;
-        vm.RaiseError(std::string("Failed to initialize ") + label + " timer: " + uv_strerror(initStatus));
+        SafeDestroyTimer(data);
+        vm.RaiseError(std::string("Lode::Task::") + label + ": failed to initialize timer handle (" +
+                      uv_strerror(initStatus) + ")");
         return false;
     }
 
@@ -350,14 +351,46 @@ Coroutine Task::Spawn(State& vm, const Value& fnOrCo, const std::vector<Value>& 
     return co;
 }
 
-void Task::Defer(State& vm, const Value& fnOrCo, const std::vector<Value>& args)
+Coroutine Task::Defer(State& vm, const Value& fnOrCo, const std::vector<Value>& args)
 {
-    SetTimeout(vm, fnOrCo, 0, args);
+    TaskContext* ctx = GetOrCreateContext(vm.GetMainThread());
+    if (!ctx) return Coroutine();
+
+    int id = ctx->nextTimerId++;
+    auto* timerData = new TimerData();
+    timerData->timerId = id;
+    timerData->L = vm.GetMainThread();
+    timerData->ctx = ctx;
+    timerData->coroutine = MakeTaskCoroutine(vm, fnOrCo);
+    timerData->recurring = false;
+    timerData->args = args;
+
+    if (!StartTimer(vm, ctx, "defer", timerData, 0, 1.0, "defer delay", false))
+    {
+        return Coroutine();
+    }
+    return timerData->coroutine;
 }
 
-void Task::Delay(State& vm, double seconds, const Value& fnOrCo, const std::vector<Value>& args)
+Coroutine Task::Delay(State& vm, double seconds, const Value& fnOrCo, const std::vector<Value>& args)
 {
-    SetTimeout(vm, fnOrCo, seconds * 1000.0, args);
+    TaskContext* ctx = GetOrCreateContext(vm.GetMainThread());
+    if (!ctx) return Coroutine();
+
+    int id = ctx->nextTimerId++;
+    auto* timerData = new TimerData();
+    timerData->timerId = id;
+    timerData->L = vm.GetMainThread();
+    timerData->ctx = ctx;
+    timerData->coroutine = MakeTaskCoroutine(vm, fnOrCo);
+    timerData->recurring = false;
+    timerData->args = args;
+
+    if (!StartTimer(vm, ctx, "delay", timerData, seconds, 1000.0, "delay duration", false))
+    {
+        return Coroutine();
+    }
+    return timerData->coroutine;
 }
 
 void Task::Cancel(State& vm, const Value& target)

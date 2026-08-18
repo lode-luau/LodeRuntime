@@ -10,7 +10,7 @@
 #include "Lode/State.hpp"
 #include "Lode/Value.hpp"
 #include "uv.h"
-#ifdef _WIN32
+#if defined(_WIN32) || defined(LODE_HAS_OPENSSL_TLS)
 #include "Http/HttpTls.hpp"
 #endif
 #include <functional>
@@ -59,6 +59,9 @@ struct HttpRequestContext : std::enable_shared_from_this<HttpRequestContext>
     bool closed = false;
     bool reading = false;
     bool requestComplete = false;
+    bool idle = false;
+    bool connectionReady = false;
+    size_t reuseCount = 0;
     int closeCount = 0;
 
     std::string requestText;
@@ -79,8 +82,8 @@ struct HttpRequestContext : std::enable_shared_from_this<HttpRequestContext>
     Lode::Coroutine taskCtx;
     bool isAsync = false;
 
-    // TLS (HTTPS) state — Windows SChannel only.
-#ifdef _WIN32
+    // TLS (HTTPS) state — SChannel on Windows, OpenSSL elsewhere.
+#if defined(_WIN32) || defined(LODE_HAS_OPENSSL_TLS)
     std::unique_ptr<TlsContext> tls;
     bool tlsHandshaking = false;
     std::vector<uint8_t> tlsWriteBuffer;
@@ -100,6 +103,9 @@ struct HttpRequestContext : std::enable_shared_from_this<HttpRequestContext>
     void CloseHandles();
     void CheckAllClosed();
     void OnAllClosed();
+    void DeliverResult();
+    void PrepareForReuse();
+    bool CanReuseConnection() const;
     void BuildRequestText();
     bool ParseHeaders();
     std::string HeaderValue(const std::string& name) const;
@@ -127,6 +133,10 @@ struct HttpClient : std::enable_shared_from_this<HttpClient>
 
     std::shared_ptr<HttpClient> selfGuard;
     std::vector<std::shared_ptr<HttpRequestContext>> activeRequests;
+    std::vector<std::shared_ptr<HttpRequestContext>> idleRequests;
+    size_t maxIdleConnections = 4;
+    size_t maxConnectionUses = 100;
+    uint64_t idleTimeoutMs = 30000;
 
     void InitSignals(Lode::State& vm);
     void FireError(const std::string& message);
@@ -139,6 +149,9 @@ struct HttpClient : std::enable_shared_from_this<HttpClient>
 
     void RequestClose();
     void RemoveRequest(const std::shared_ptr<HttpRequestContext>& req);
+    void RemoveIdleRequest(const std::shared_ptr<HttpRequestContext>& req);
+    void AddIdleRequest(const std::shared_ptr<HttpRequestContext>& req);
+    std::shared_ptr<HttpRequestContext> AcquireRequest(const std::string& targetUrl);
 };
 
 Lode::Value WrapClient(Lode::State& vm, const std::shared_ptr<HttpClient>& client, const Lode::Table& methods);

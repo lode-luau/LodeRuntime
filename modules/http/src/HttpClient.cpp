@@ -84,18 +84,26 @@ void HttpRequestContext::OnAllClosed()
     if (client)
     {
         client->RemoveRequest(shared_from_this());
+        client->RemoveIdleRequest(shared_from_this());
     }
+    DeliverResult();
+    selfGuard.reset();
+}
+
+void HttpRequestContext::DeliverResult()
+{
     if (taskCtx.IsValid())
     {
+        Lode::Coroutine completion = taskCtx;
+        taskCtx = Lode::Coroutine();
         if (!result->errorKind.empty())
-            taskCtx.ResumeError(result->errorKind + ": " + result->errorMessage);
+            completion.ResumeError(result->errorKind + ": " + result->errorMessage);
         else
         {
             Lode::State vm(client->mainL);
             Lode::Table resTable = client ? client->BuildResponseTable(vm, result) : vm.CreateTable();
-            taskCtx.Resume({ Lode::Value(resTable) });
+            completion.Resume({ Lode::Value(resTable) });
         }
-        taskCtx = Lode::Coroutine();
     }
     else if (isAsync && client)
     {
@@ -104,7 +112,7 @@ void HttpRequestContext::OnAllClosed()
         else
             client->FireResponse(result);
     }
-    selfGuard.reset();
+    isAsync = false;
 }
 
 void HttpRequestContext::OnHandleClosed(uv_handle_t* handle)
@@ -135,7 +143,70 @@ void HttpRequestContext::FinishSuccess()
     if (bodyMode != BodyMode::Chunked)
         result->body = raw.substr(headerEnd + 4);
     result->finalUrl = url.scheme + "://" + url.authority + url.path;
+    if (CanReuseConnection())
+    {
+        if (reading)
+        {
+            uv_read_stop(reinterpret_cast<uv_stream_t*>(&tcp));
+            reading = false;
+        }
+        if (timerInited && !timerClosed)
+        {
+            uv_timer_stop(&timer);
+            timer.data = this;
+            uv_timer_start(&timer, OnTimeout, client->idleTimeoutMs, 0);
+        }
+        idle = true;
+        ++reuseCount;
+        client->RemoveRequest(shared_from_this());
+        client->AddIdleRequest(shared_from_this());
+        DeliverResult();
+        return;
+    }
+    DeliverResult();
     CloseHandles();
+}
+
+bool HttpRequestContext::CanReuseConnection() const
+{
+    if (!client || client->closed || client->maxIdleConnections == 0 ||
+        !opts.keepAlive || !tcpInited || tcpClosed)
+        return false;
+    if (bodyMode != BodyMode::ContentLength && bodyMode != BodyMode::Chunked)
+        return false;
+    std::string connection = HeaderValue("connection");
+    std::transform(connection.begin(), connection.end(), connection.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    if (connection == "close")
+        return false;
+    return reuseCount + 1 < client->maxConnectionUses;
+}
+
+void HttpRequestContext::PrepareForReuse()
+{
+    idle = false;
+    connectionReady = true;
+    requestComplete = false;
+    closed = false;
+    result = std::make_shared<HttpResponseData>();
+    opts = HttpRequestOptions();
+    requestText.clear();
+    raw.clear();
+    headerEnd = std::string::npos;
+    status = 0;
+    statusText.clear();
+    version.clear();
+    headers.clear();
+    bodyMode = BodyMode::None;
+    bodyState = BodyState::Idle;
+    pos = 0;
+    chunkStart = 0;
+    chunkRemaining = 0;
+    contentLength = 0;
+    redirectsDone = 0;
+    taskCtx = Lode::Coroutine();
+    isAsync = false;
 }
 
 void HttpRequestContext::BuildRequestText()
@@ -156,7 +227,9 @@ void HttpRequestContext::BuildRequestText()
     // Função aux para comparar headers ignorando maiúsculas/minúsculas
     auto toLower = [](std::string s)
     {
-        std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+        std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
         return s;
     };
 
@@ -188,7 +261,7 @@ void HttpRequestContext::BuildRequestText()
     if (!hasHost)
         head += "Host: " + url.authority + "\r\n";
     if (!hasConnection)
-        head += "Connection: close\r\n";
+        head += opts.keepAlive ? "Connection: keep-alive\r\n" : "Connection: close\r\n";
 
     if (opts.chunkedUpload)
     {
@@ -235,6 +308,20 @@ namespace {
         for (auto& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         return s;
     }
+    bool IsSameOrigin(const ParsedUrl& a, const ParsedUrl& b) {
+        return a.scheme == b.scheme && a.host == b.host && a.port == b.port;
+    }
+    bool IsSensitiveRedirectHeader(const std::string& name) {
+        std::string lower = ToLowerAsciiLocal(name);
+        return lower == "authorization" || lower == "proxy-authorization" || lower == "cookie";
+    }
+    void RemoveSensitiveRedirectHeaders(HttpRequestOptions& opts) {
+        opts.headers.erase(
+            std::remove_if(opts.headers.begin(), opts.headers.end(), [](const HeaderPair& header) {
+                return IsSensitiveRedirectHeader(header.name);
+            }),
+            opts.headers.end());
+    }
 }
 
 bool HttpRequestContext::ParseHeaders()
@@ -273,24 +360,70 @@ bool HttpRequestContext::ParseHeaders()
         p = e + 2;
     }
 
-    std::string transferEncoding = ToLowerAsciiLocal(HeaderValue("transfer-encoding"));
-    if (transferEncoding.find("chunked") != std::string::npos)
+    std::vector<std::string> transferEncodings;
+    std::vector<std::string> contentLengths;
+    for (const auto& header : headers)
     {
+        if (header.name == "transfer-encoding")
+            transferEncodings.push_back(ToLowerAsciiLocal(header.value));
+        else if (header.name == "content-length")
+            contentLengths.push_back(header.value);
+    }
+
+    if (!transferEncodings.empty() && !contentLengths.empty())
+    {
+        FinishError("malformed-response", "transfer-encoding conflicts with content-length");
+        return false;
+    }
+
+    if (!transferEncodings.empty())
+    {
+        std::string combined;
+        for (const auto& value : transferEncodings)
+        {
+            if (!combined.empty()) combined += ',';
+            combined += value;
+        }
+        size_t lastComma = combined.rfind(',');
+        std::string finalCoding = Trim(lastComma == std::string::npos ? combined : combined.substr(lastComma + 1));
+        if (finalCoding != "chunked")
+        {
+            FinishError("malformed-response", "unsupported transfer-encoding");
+            return false;
+        }
         bodyMode = BodyMode::Chunked;
         bodyState = BodyState::SizeLine;
     }
-    else
+    else if (!contentLengths.empty())
     {
-        std::string cl = HeaderValue("content-length");
-        if (!cl.empty())
+        bool haveLength = false;
+        int64_t expectedLength = 0;
+        for (const std::string& field : contentLengths)
         {
-            if (cl.find(',') != std::string::npos || !ParseInt64Local(cl, contentLength) || contentLength < 0)
+            size_t start = 0;
+            while (start <= field.size())
             {
-                FinishError("malformed-response", "invalid content-length");
-                return false;
+                size_t comma = field.find(',', start);
+                std::string value = Trim(field.substr(start, comma == std::string::npos ? std::string::npos : comma - start));
+                int64_t parsed = 0;
+                if (!ParseInt64Local(value, parsed) || parsed < 0)
+                {
+                    FinishError("malformed-response", "invalid content-length");
+                    return false;
+                }
+                if (haveLength && parsed != expectedLength)
+                {
+                    FinishError("malformed-response", "conflicting content-length values");
+                    return false;
+                }
+                expectedLength = parsed;
+                haveLength = true;
+                if (comma == std::string::npos) break;
+                start = comma + 1;
             }
-            bodyMode = BodyMode::ContentLength;
         }
+        contentLength = expectedLength;
+        bodyMode = BodyMode::ContentLength;
     }
     return true;
 }
@@ -305,17 +438,48 @@ void HttpRequestContext::CompleteResponse()
         std::string next = ResolveRedirect(url.scheme + "://" + url.authority + url.path, location);
         if (!next.empty())
         {
+            ParsedUrl nextUrl = ParseUrl(next);
+            if (!nextUrl.valid)
+            {
+                FinishError("redirect", "invalid redirect URL: " + nextUrl.error);
+                return;
+            }
+            if (url.scheme == "https" && nextUrl.scheme == "http")
+            {
+                FinishError("redirect", "refusing HTTPS to HTTP downgrade");
+                return;
+            }
+
             ++redirectsDone;
-            // Create a new request based on the redirect
-            CloseHandles();
+            // Transfer the single logical completion to the next hop before
+            // closing this context.  Intermediate contexts must never resume
+            // the waiter or publish an async event.
+            Lode::Coroutine redirectTask = taskCtx;
+            taskCtx = Lode::Coroutine();
+            bool redirectAsync = isAsync;
+            isAsync = false;
+
             auto newReq = std::make_shared<HttpRequestContext>(client);
             newReq->opts = opts;
+            if (!IsSameOrigin(url, nextUrl))
+                RemoveSensitiveRedirectHeaders(newReq->opts);
+
+            if (status == 303 || ((status == 301 || status == 302) && newReq->opts.method == "POST"))
+            {
+                newReq->opts.method = "GET";
+                newReq->opts.body.clear();
+                newReq->opts.chunkedUpload = false;
+            }
             newReq->redirectsDone = redirectsDone;
-            newReq->taskCtx = taskCtx;
-            newReq->isAsync = isAsync;
+            newReq->taskCtx = redirectTask;
+            newReq->isAsync = redirectAsync;
             newReq->selfGuard = newReq;
             client->activeRequests.push_back(newReq);
-            newReq->Begin(next);
+
+            CloseHandles();
+            std::string err = newReq->Begin(next);
+            if (!err.empty())
+                newReq->FinishError("redirect", err);
             return;
         }
     }
@@ -422,14 +586,14 @@ std::string HttpRequestContext::Begin(const std::string& targetUrl)
         return "invalid-url: " + url.error;
     }
 
-#ifdef _WIN32
-    if (url.scheme == "https")
+#if defined(_WIN32) || defined(LODE_HAS_OPENSSL_TLS)
+    if (!connectionReady && url.scheme == "https")
     {
         tls = std::make_unique<TlsContext>();
         if (!tls->Init())
         {
             dnsDone = true;
-            return "tls: failed to acquire SSPI credentials";
+            return "tls: failed to initialize TLS credentials";
         }
     }
 #else
@@ -441,6 +605,29 @@ std::string HttpRequestContext::Begin(const std::string& targetUrl)
 #endif
 
     loop = client->loop;
+    if (timerInited && !timerClosed)
+    {
+        uv_timer_stop(&timer);
+        if (opts.timeoutMs > 0)
+            uv_timer_start(&timer, OnTimeout, opts.timeoutMs, 0);
+    }
+    else
+    {
+        timerInited = true;
+        timer.data = this;
+        uv_timer_init(loop, &timer);
+        if (opts.timeoutMs > 0)
+            uv_timer_start(&timer, OnTimeout, opts.timeoutMs, 0);
+    }
+
+    if (connectionReady)
+    {
+        BuildRequestText();
+        connReq.data = this;
+        OnConnected(&connReq, 0);
+        return "";
+    }
+
     addrInited = true;
     addrReq.data = this;
     struct addrinfo hints;
@@ -456,7 +643,7 @@ std::string HttpRequestContext::Begin(const std::string& targetUrl)
         return "dns: " + std::string(uv_strerror(r));
     }
 
-    if (opts.timeoutMs > 0)
+    if (opts.timeoutMs > 0 && !timerInited)
     {
         timerInited = true;
         timer.data = this;
@@ -490,7 +677,7 @@ void HttpRequestContext::OnResolved(uv_getaddrinfo_t* req, int status, struct ad
 
     // Only pre-build the plain-text request if NOT using TLS.
     // For HTTPS, BuildRequestText() is called after the handshake completes.
-#ifdef _WIN32
+#if defined(_WIN32) || defined(LODE_HAS_OPENSSL_TLS)
     if (!self->tls)
         self->BuildRequestText();
 #else
@@ -516,8 +703,8 @@ void HttpRequestContext::OnConnected(uv_connect_t* req, int status)
         return;
     }
 
-#ifdef _WIN32
-    if (self->tls)
+#if defined(_WIN32) || defined(LODE_HAS_OPENSSL_TLS)
+    if (self->tls && !self->connectionReady)
     {
         // Start TLS handshake: generate ClientHello and send it.
         self->tlsWriteBuffer = self->tls->StartHandshake(self->url.host);
@@ -530,6 +717,21 @@ void HttpRequestContext::OnConnected(uv_connect_t* req, int status)
         self->writeReq.data  = self;
         self->writeBuf.base  = reinterpret_cast<char*>(self->tlsWriteBuffer.data());
         self->writeBuf.len   = static_cast<decltype(self->writeBuf.len)>(self->tlsWriteBuffer.size());
+        uv_write(&self->writeReq, reinterpret_cast<uv_stream_t*>(&self->tcp), &self->writeBuf, 1, OnWritten);
+        return;
+    }
+    if (self->tls)
+    {
+        std::string error;
+        self->tlsWriteBuffer = self->tls->Encrypt(self->requestText.data(), self->requestText.size(), error);
+        if (!error.empty() || self->tlsWriteBuffer.empty())
+        {
+            self->FinishError("tls", error.empty() ? "failed to encrypt request" : error);
+            return;
+        }
+        self->writeReq.data = self;
+        self->writeBuf.base = reinterpret_cast<char*>(self->tlsWriteBuffer.data());
+        self->writeBuf.len = static_cast<decltype(self->writeBuf.len)>(self->tlsWriteBuffer.size());
         uv_write(&self->writeReq, reinterpret_cast<uv_stream_t*>(&self->tcp), &self->writeBuf, 1, OnWritten);
         return;
     }
@@ -557,6 +759,14 @@ void HttpRequestContext::OnWritten(uv_write_t* req, int status)
 void HttpRequestContext::OnTimeout(uv_timer_t* timer)
 {
     auto* self = static_cast<HttpRequestContext*>(timer->data);
+    if (self->idle)
+    {
+        self->idle = false;
+        if (self->client)
+            self->client->RemoveIdleRequest(self->shared_from_this());
+        self->CloseHandles();
+        return;
+    }
     if (self->requestComplete) return;
     self->FinishError("timeout", "request timed out");
 }
@@ -573,7 +783,7 @@ void HttpRequestContext::OnRead(uv_stream_t* stream, ssize_t nread, const uv_buf
     auto* self = static_cast<HttpRequestContext*>(stream->data);
     if (nread > 0)
     {
-#ifdef _WIN32
+#if defined(_WIN32) || defined(LODE_HAS_OPENSSL_TLS)
         if (self->tls)
         {
             if (self->tlsHandshaking)
@@ -777,6 +987,46 @@ void HttpClient::RemoveRequest(const std::shared_ptr<HttpRequestContext>& req)
         activeRequests.erase(it);
 }
 
+void HttpClient::RemoveIdleRequest(const std::shared_ptr<HttpRequestContext>& req)
+{
+    auto it = std::find(idleRequests.begin(), idleRequests.end(), req);
+    if (it != idleRequests.end())
+        idleRequests.erase(it);
+}
+
+void HttpClient::AddIdleRequest(const std::shared_ptr<HttpRequestContext>& req)
+{
+    while (idleRequests.size() >= maxIdleConnections && !idleRequests.empty())
+    {
+        auto oldest = idleRequests.front();
+        idleRequests.erase(idleRequests.begin());
+        oldest->idle = false;
+        oldest->CloseHandles();
+    }
+    idleRequests.push_back(req);
+}
+
+std::shared_ptr<HttpRequestContext> HttpClient::AcquireRequest(const std::string& targetUrl)
+{
+    ParsedUrl target = ParseUrl(targetUrl);
+    if (target.valid)
+    {
+        auto it = std::find_if(idleRequests.begin(), idleRequests.end(), [&target](const auto& req) {
+            return req->url.scheme == target.scheme && req->url.host == target.host && req->url.port == target.port;
+        });
+        if (it != idleRequests.end())
+        {
+            auto req = *it;
+            idleRequests.erase(it);
+            req->PrepareForReuse();
+            return req;
+        }
+    }
+    auto req = std::make_shared<HttpRequestContext>(shared_from_this());
+    req->selfGuard = req;
+    return req;
+}
+
 void HttpClient::RequestClose()
 {
     if (closed) return;
@@ -785,6 +1035,13 @@ void HttpClient::RequestClose()
     for (auto& req : copy)
     {
         req->FinishError("aborted", "client closed");
+    }
+    auto idleCopy = idleRequests;
+    idleRequests.clear();
+    for (auto& req : idleCopy)
+    {
+        req->idle = false;
+        req->CloseHandles();
     }
     mgr->RemoveClient(shared_from_this());
 }
@@ -801,16 +1058,16 @@ Lode::Value HttpClient::MethodRequestAsync(Lode::State& vm, const std::vector<Lo
     if (args.empty() || !args[0].IsString()) { vm.RaiseError("Expected url as string"); return Lode::Value(); }
     
     std::string url = args[0].AsString();
-    auto req = std::make_shared<HttpRequestContext>(shared_from_this());
+    auto req = AcquireRequest(url);
     req->isAsync = true;
-    req->selfGuard = req;
 
     if (args.size() > 1)
     {
         if (!ParseFetchOptions(vm, args[1], req->opts))
         {
             req->taskCtx = Lode::Coroutine();
-            activeRequests.pop_back();
+            req->dnsDone = true;
+            req->CloseHandles();
             return Lode::Value();
         }
     }
@@ -834,16 +1091,16 @@ Lode::Value HttpClient::MethodRequest(Lode::State& vm, const std::vector<Lode::V
     if (args.empty() || !args[0].IsString()) { vm.RaiseError("Expected url as string"); return Lode::Value(); }
 
     std::string url = args[0].AsString();
-    auto req = std::make_shared<HttpRequestContext>(shared_from_this());
+    auto req = AcquireRequest(url);
     req->isAsync = false;
-    req->selfGuard = req;
 
     if (args.size() > 1)
     {
         if (!ParseFetchOptions(vm, args[1], req->opts))
         {
             req->taskCtx = Lode::Coroutine();
-            activeRequests.pop_back();
+            req->dnsDone = true;
+            req->CloseHandles();
             return Lode::Value();
         }
     }

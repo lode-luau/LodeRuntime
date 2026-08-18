@@ -11,6 +11,10 @@
 namespace lodefs
 {
 
+class FileHandle;
+class ReadStream;
+class FileWatcher;
+
 struct FsManager
 {
     lua_State* mainL = nullptr;
@@ -20,6 +24,14 @@ struct FsManager
     Lode::Table fileMethods;
     Lode::Table readStreamMethods;
     Lode::Table watcherMethods;
+
+    std::vector<std::weak_ptr<FileHandle>> files;
+    std::vector<std::weak_ptr<ReadStream>> streams;
+    std::vector<std::weak_ptr<FileWatcher>> watchers;
+
+    void AddFile(const std::shared_ptr<FileHandle>& file);
+    void AddStream(const std::shared_ptr<ReadStream>& stream);
+    void AddWatcher(const std::shared_ptr<FileWatcher>& watcher);
     
     void Shutdown();
 };

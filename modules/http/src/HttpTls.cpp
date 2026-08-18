@@ -279,4 +279,226 @@ void TlsContext::Shutdown()
 
 } // namespace lodehttp
 
-#endif // _WIN32
+#elif defined(LODE_HAS_OPENSSL_TLS)
+
+#include "Http/HttpTls.hpp"
+#include <openssl/err.h>
+#include <openssl/ssl.h>
+#include <algorithm>
+#include <climits>
+
+namespace lodehttp
+{
+
+struct TlsContext::Impl
+{
+    SSL_CTX* context = nullptr;
+    SSL* session = nullptr;
+};
+
+static std::string LastTlsError(const char* operation)
+{
+    const unsigned long code = ERR_get_error();
+    if (code == 0)
+        return std::string("TLS ") + operation + " failed";
+
+    char detail[256];
+    ERR_error_string_n(code, detail, sizeof(detail));
+    return std::string("TLS ") + operation + " failed: " + detail;
+}
+
+static std::vector<uint8_t> DrainOutput(SSL* session)
+{
+    std::vector<uint8_t> output;
+    BIO* bio = SSL_get_wbio(session);
+    uint8_t buffer[16 * 1024];
+    while (BIO_ctrl_pending(bio) > 0)
+    {
+        const int count = BIO_read(bio, buffer, sizeof(buffer));
+        if (count <= 0)
+            break;
+        output.insert(output.end(), buffer, buffer + count);
+    }
+    return output;
+}
+
+TlsContext::TlsContext() = default;
+
+TlsContext::~TlsContext()
+{
+    Shutdown();
+}
+
+bool TlsContext::Init()
+{
+    Shutdown();
+    impl_ = new Impl();
+    impl_->context = SSL_CTX_new(TLS_client_method());
+    if (!impl_->context)
+    {
+        Shutdown();
+        return false;
+    }
+
+    SSL_CTX_set_verify(impl_->context, SSL_VERIFY_PEER, nullptr);
+    if (SSL_CTX_set_default_verify_paths(impl_->context) != 1)
+    {
+        Shutdown();
+        return false;
+    }
+    return true;
+}
+
+std::vector<uint8_t> TlsContext::StartHandshake(const std::string& hostname)
+{
+    if (!impl_ || !impl_->context)
+        return {};
+
+    impl_->session = SSL_new(impl_->context);
+    BIO* input = BIO_new(BIO_s_mem());
+    BIO* output = BIO_new(BIO_s_mem());
+    if (!impl_->session || !input || !output)
+    {
+        if (input) BIO_free(input);
+        if (output) BIO_free(output);
+        return {};
+    }
+
+    SSL_set_bio(impl_->session, input, output);
+    SSL_set_connect_state(impl_->session);
+    if (SSL_set_tlsext_host_name(impl_->session, hostname.c_str()) != 1 ||
+        SSL_set1_host(impl_->session, hostname.c_str()) != 1)
+        return {};
+
+    ERR_clear_error();
+    const int result = SSL_do_handshake(impl_->session);
+    if (result != 1 && SSL_get_error(impl_->session, result) != SSL_ERROR_WANT_READ)
+        return {};
+    return DrainOutput(impl_->session);
+}
+
+TlsContext::HandshakeResult TlsContext::ProcessHandshakeData(
+    const uint8_t* data, size_t len, std::vector<uint8_t>& outSend,
+    std::string& errorOut)
+{
+    if (!impl_ || !impl_->session)
+    {
+        errorOut = "TLS handshake was not initialized";
+        return HandshakeResult::Error;
+    }
+
+    BIO* input = SSL_get_rbio(impl_->session);
+    if (len > static_cast<size_t>(INT_MAX) || BIO_write(input, data, static_cast<int>(len)) != static_cast<int>(len))
+    {
+        errorOut = LastTlsError("input");
+        return HandshakeResult::Error;
+    }
+
+    ERR_clear_error();
+    const int result = SSL_do_handshake(impl_->session);
+    outSend = DrainOutput(impl_->session);
+    if (result == 1)
+    {
+        if (SSL_get_verify_result(impl_->session) != X509_V_OK)
+        {
+            errorOut = "TLS certificate verification failed";
+            return HandshakeResult::Error;
+        }
+        handshakeDone_ = true;
+        return HandshakeResult::Complete;
+    }
+
+    const int error = SSL_get_error(impl_->session, result);
+    if (error == SSL_ERROR_WANT_READ || error == SSL_ERROR_WANT_WRITE)
+        return outSend.empty() ? HandshakeResult::NeedMoreData : HandshakeResult::DataToSend;
+
+    errorOut = LastTlsError("handshake");
+    return HandshakeResult::Error;
+}
+
+std::vector<uint8_t> TlsContext::DrainPending()
+{
+    std::string error;
+    return Decrypt(nullptr, 0, error);
+}
+
+std::vector<uint8_t> TlsContext::Encrypt(const void* data, size_t len, std::string& errorOut)
+{
+    if (!impl_ || !impl_->session || !handshakeDone_)
+    {
+        errorOut = "TLS session is not ready";
+        return {};
+    }
+
+    const auto* bytes = static_cast<const uint8_t*>(data);
+    size_t offset = 0;
+    while (offset < len)
+    {
+        const int chunk = static_cast<int>(std::min(len - offset, static_cast<size_t>(INT_MAX)));
+        ERR_clear_error();
+        const int result = SSL_write(impl_->session, bytes + offset, chunk);
+        if (result <= 0)
+        {
+            errorOut = LastTlsError("write");
+            return {};
+        }
+        offset += static_cast<size_t>(result);
+    }
+    return DrainOutput(impl_->session);
+}
+
+std::vector<uint8_t> TlsContext::Decrypt(const uint8_t* data, size_t len, std::string& errorOut)
+{
+    std::vector<uint8_t> plaintext;
+    if (!impl_ || !impl_->session)
+    {
+        errorOut = "TLS session is not ready";
+        return plaintext;
+    }
+
+    BIO* input = SSL_get_rbio(impl_->session);
+    if (data && len > 0)
+    {
+        if (len > static_cast<size_t>(INT_MAX) || BIO_write(input, data, static_cast<int>(len)) != static_cast<int>(len))
+        {
+            errorOut = LastTlsError("input");
+            return plaintext;
+        }
+    }
+
+    uint8_t buffer[16 * 1024];
+    for (;;)
+    {
+        ERR_clear_error();
+        const int result = SSL_read(impl_->session, buffer, sizeof(buffer));
+        if (result > 0)
+        {
+            plaintext.insert(plaintext.end(), buffer, buffer + result);
+            continue;
+        }
+
+        const int error = SSL_get_error(impl_->session, result);
+        if (error == SSL_ERROR_WANT_READ || error == SSL_ERROR_WANT_WRITE || error == SSL_ERROR_ZERO_RETURN)
+            break;
+        errorOut = LastTlsError("read");
+        break;
+    }
+    return plaintext;
+}
+
+void TlsContext::Shutdown()
+{
+    handshakeDone_ = false;
+    if (!impl_)
+        return;
+    if (impl_->session)
+        SSL_free(impl_->session);
+    if (impl_->context)
+        SSL_CTX_free(impl_->context);
+    delete impl_;
+    impl_ = nullptr;
+}
+
+} // namespace lodehttp
+
+#endif // _WIN32 / LODE_HAS_OPENSSL_TLS

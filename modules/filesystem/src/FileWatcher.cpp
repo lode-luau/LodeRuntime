@@ -48,7 +48,7 @@ void FileWatcher::OnEvent(uv_fs_event_t* handle, const char* filename, int event
 {
     FileWatcher* self = static_cast<FileWatcher*>(handle->data);
     
-    if (self->closing || self->closed) return;
+    if (self->closing || self->closed || self->mgr->shuttingDown) return;
     
     if (status < 0) {
         auto err = uv_strerror(status);

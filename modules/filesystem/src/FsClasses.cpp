@@ -82,6 +82,7 @@ void BindClasses(Lode::State& vm, Lode::Exports& exports, std::shared_ptr<FsMana
         auto handle = std::make_shared<lodefs::FileHandle>();
         handle->mgr = mgr;
         handle->openFlags = flags;
+        mgr->AddFile(handle);
         
         // Open file async and yield
         Lode::Coroutine coroutine = Lode::Coroutine(vm2.GetLuaState());
@@ -106,6 +107,16 @@ void BindClasses(Lode::State& vm, Lode::Exports& exports, std::shared_ptr<FsMana
         
         int r = uv_fs_open(mgr->loop, &ctx->req, path.c_str(), flags, openMode, [](uv_fs_t* req) {
             auto ctx = static_cast<OpenCtx*>(req->data);
+            if (ctx->h->mgr->shuttingDown) {
+                if (req->result >= 0) {
+                    ctx->h->fd = req->result;
+                    ctx->h->isOpen = true;
+                    ctx->h->RequestClose();
+                }
+                uv_fs_req_cleanup(req);
+                delete ctx;
+                return;
+            }
             Lode::State vm(ctx->L);
             if (req->result < 0) {
                 auto res = ctx->co.ResumeError(std::string("fs File:Open: ") + uv_strerror(req->result));
@@ -159,6 +170,7 @@ void BindClasses(Lode::State& vm, Lode::Exports& exports, std::shared_ptr<FsMana
         Lode::Coroutine coroutine = Lode::Coroutine(vm2.GetLuaState());
         
         auto stream = std::make_shared<lodefs::ReadStream>(mgr);
+        mgr->AddStream(stream);
         
         struct OpenCtx {
             std::shared_ptr<lodefs::ReadStream> s;
@@ -174,6 +186,15 @@ void BindClasses(Lode::State& vm, Lode::Exports& exports, std::shared_ptr<FsMana
         
         int r = uv_fs_open(mgr->loop, &ctx->req, path.c_str(), UV_FS_O_RDONLY, 0644, [](uv_fs_t* req) {
             auto ctx = static_cast<OpenCtx*>(req->data);
+            if (ctx->s->mgr->shuttingDown) {
+                if (req->result >= 0) {
+                    ctx->s->fd = req->result;
+                    ctx->s->RequestClose();
+                }
+                uv_fs_req_cleanup(req);
+                delete ctx;
+                return;
+            }
             Lode::State vm(ctx->L);
             if (req->result < 0) {
                 auto res = ctx->co.ResumeError(std::string("fs ReadStream:Create: ") + uv_strerror(req->result));
@@ -223,6 +244,7 @@ void BindClasses(Lode::State& vm, Lode::Exports& exports, std::shared_ptr<FsMana
         
         auto watcher = std::make_shared<lodefs::FileWatcher>(mgr);
         watcher->targetPath = path;
+        mgr->AddWatcher(watcher);
         
         Lode::Value ud = lodefs::WrapFileWatcher(vm2, watcher, mgr->watcherMethods);
         

@@ -62,6 +62,50 @@ describe("async tests", function()
         expect(count >= 2).toBe(true)
     end)
 
+    it("task.spawn returns a running thread and passes arguments", function()
+        local result = ""
+        local t = task.spawn(function(a, b)
+            result = a .. b
+        end, "foo", "bar")
+        expect(typeof(t)).toBe("thread")
+        expect(result).toBe("foobar")
+    end)
+
+    it("task.defer returns a thread and executes on next tick", function()
+        local executed = false
+        local t = task.defer(function(arg)
+            expect(arg).toBe(123)
+            executed = true
+        end, 123)
+        expect(typeof(t)).toBe("thread")
+        expect(executed).toBe(false)
+        task.wait(0.05)
+        expect(executed).toBe(true)
+    end)
+
+    it("task.delay returns a thread and executes after duration", function()
+        local executed = false
+        local t = task.delay(0.05, function(msg)
+            expect(msg).toBe("hello")
+            executed = true
+        end, "hello")
+        expect(typeof(t)).toBe("thread")
+        expect(executed).toBe(false)
+        task.wait(0.1)
+        expect(executed).toBe(true)
+    end)
+
+    it("task.cancel cancels a thread scheduled with task.delay", function()
+        local executed = false
+        local t = task.delay(0.05, function()
+            executed = true
+        end)
+        expect(typeof(t)).toBe("thread")
+        task.cancel(t)
+        task.wait(0.1)
+        expect(executed).toBe(false)
+    end)
+
     it("task.cancel cancels a coroutine waiting on a timer", function()
         local ran = false
         local co = coroutine.create(function()

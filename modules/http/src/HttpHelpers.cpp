@@ -308,6 +308,17 @@ bool ParseFetchOptions(Lode::State& vm, const Lode::Value& val, HttpRequestOptio
             opts.onData = cb.GetValue();
     }
 
+    if (t.Has("keepAlive"))
+    {
+        auto keepAlive = t.Get("keepAlive");
+        if (!keepAlive.IsOk() || !keepAlive.GetValue().IsBoolean())
+        {
+            vm.RaiseError("fetch options 'keepAlive' must be a boolean");
+            return false;
+        }
+        opts.keepAlive = keepAlive.GetValue().AsBoolean();
+    }
+
     return true;
 }
 
