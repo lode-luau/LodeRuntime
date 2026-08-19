@@ -178,7 +178,9 @@ bool FindStdlibManifest(const fs::path& stdlibRoot,
     if (!fs::is_directory(stdlibRoot, ec))
         return false;
 
-    for (fs::recursive_directory_iterator it(stdlibRoot, ec), end; it != end && !ec; it.increment(ec))
+    for (fs::recursive_directory_iterator it(
+             stdlibRoot, fs::directory_options::follow_directory_symlink, ec),
+         end; it != end && !ec; it.increment(ec))
     {
         if (!it->is_regular_file(ec) || it->path().filename() != "lode.json")
             continue;
