@@ -32,5 +32,8 @@ struct ValidationReport
 
 LODE_API ValidationReport Validate(const std::filesystem::path& packageRoot);
 LODE_API ValidationReport Validate(const std::filesystem::path& packageRoot, ValidationMode mode);
+LODE_API ValidationReport Validate(const std::filesystem::path& packageRoot,
+                                   ValidationMode mode,
+                                   const std::filesystem::path& standardLibraryRoot);
 
 } // namespace Lode::Package

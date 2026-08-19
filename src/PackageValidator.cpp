@@ -140,10 +140,16 @@ struct DependencyGraphContext
     DependencyGraph graph;
     std::set<fs::path> activePackages;
     std::map<fs::path, size_t> packageIndexes;
+    fs::path standardLibraryRoot;
 };
 
-std::optional<fs::path> FindStdlibRoot(const fs::path& packageRoot)
+std::optional<fs::path> FindStdlibRoot(const fs::path& packageRoot,
+                                       const fs::path& standardLibraryRoot)
 {
+    std::error_code ec;
+    if (!standardLibraryRoot.empty() && fs::is_directory(standardLibraryRoot, ec))
+        return fs::weakly_canonical(standardLibraryRoot, ec);
+
     fs::path current = packageRoot;
     while (!current.empty())
     {
@@ -388,7 +394,7 @@ void ResolveDependencyTable(const fs::path& packageRoot,
             std::nullopt,
             scope
         };
-        const auto stdlibRoot = FindStdlibRoot(packageRoot);
+        const auto stdlibRoot = FindStdlibRoot(packageRoot, context.standardLibraryRoot);
         if (!stdlibRoot)
         {
             context.graph.packages[packageIndex].dependencies.push_back(std::move(edge));
@@ -575,6 +581,13 @@ ValidationReport Validate(const fs::path& packageRoot)
 
 ValidationReport Validate(const fs::path& packageRoot, ValidationMode mode)
 {
+    return Validate(packageRoot, mode, {});
+}
+
+ValidationReport Validate(const fs::path& packageRoot,
+                          ValidationMode mode,
+                          const fs::path& standardLibraryRoot)
+{
     ValidationReport report;
     std::error_code ec;
     fs::path root = fs::weakly_canonical(fs::absolute(packageRoot, ec), ec);
@@ -615,6 +628,7 @@ ValidationReport Validate(const fs::path& packageRoot, ValidationMode mode)
         ValidateDependencyTable(manifest["devDependencies"], "devDependencies", report);
 
     DependencyGraphContext context;
+    context.standardLibraryRoot = standardLibraryRoot;
     ResolveDependencyGraph(root, manifest, DependencySource::Root, context, report);
     report.dependencyGraph = std::move(context.graph);
 

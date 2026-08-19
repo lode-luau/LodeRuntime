@@ -55,6 +55,7 @@ int main(int argc, char* argv[])
     // Initialize cross-platform CrashHandler and Logger ANSI support
     Lode::Platform::CrashHandler::Initialize();
     Lode::Logger::Initialize();
+    const fs::path standardLibraryPath = FindStandardLibraryPath(fs::path(argv[0]));
 
     if (argc < 2)
     {
@@ -102,7 +103,8 @@ int main(int argc, char* argv[])
                 }
             }
 
-            Lode::Package::ValidationReport report = Lode::Package::GenerateWorkflow(packageRoot, force);
+            Lode::Package::ValidationReport report = Lode::Package::GenerateWorkflow(
+                packageRoot, force, standardLibraryPath);
             for (const std::string& warning : report.warnings)
                 Lode::Logger::Warn(warning);
             for (const std::string& error : report.errors)
@@ -127,7 +129,8 @@ int main(int argc, char* argv[])
             if (argc == 4)
                 packageRoot = fs::path(argv[3]);
 
-            Lode::Package::ValidationReport report = Lode::Package::UpdateWorkflow(packageRoot);
+            Lode::Package::ValidationReport report = Lode::Package::UpdateWorkflow(
+                packageRoot, standardLibraryPath);
             for (const std::string& warning : report.warnings)
                 Lode::Logger::Warn(warning);
             for (const std::string& error : report.errors)
@@ -180,7 +183,8 @@ int main(int argc, char* argv[])
             }
         }
 
-        Lode::Package::ValidationReport report = Lode::Package::Validate(packageRoot, mode);
+        Lode::Package::ValidationReport report = Lode::Package::Validate(
+            packageRoot, mode, standardLibraryPath);
         for (const std::string& warning : report.warnings)
             Lode::Logger::Warn(warning);
         for (const std::string& error : report.errors)
@@ -301,7 +305,6 @@ int main(int argc, char* argv[])
 
     Lode::State vm = std::move(stateResult.GetValue());
 
-    const fs::path standardLibraryPath = FindStandardLibraryPath(fs::path(argv[0]));
     if (!standardLibraryPath.empty())
         vm.SetStandardLibraryPath(PathToUtf8(standardLibraryPath));
 

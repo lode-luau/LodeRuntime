@@ -169,6 +169,13 @@ transitive dependency requests an incompatible stdlib version, only the
 required module artifact is installed and the affected package receives a
 package-local `.config.luau` context.
 
+When Lode validates a package outside the runtime checkout, the validator uses
+the stdlib catalog installed alongside the `lode` executable. The CLI passes
+that directory explicitly to validation and CI generation; it is not inferred
+from the package's source tree. When running inside this repository, the local
+`modules/` catalog remains the fallback. The catalog source is therefore
+deterministic for both installed CI environments and repository fixtures.
+
 ## Lockfile
 
 `lode.lock` is separate from `lode.json`. It records the resolved graph rather

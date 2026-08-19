@@ -244,9 +244,12 @@ jobs:
     return workflow.str();
 }
 
-bool BuildWorkflowText(const fs::path& root, ValidationReport& report, std::string& workflow)
+bool BuildWorkflowText(const fs::path& root,
+                       const fs::path& standardLibraryRoot,
+                       ValidationReport& report,
+                       std::string& workflow)
 {
-    ValidationReport sourceReport = Validate(root, ValidationMode::Source);
+    ValidationReport sourceReport = Validate(root, ValidationMode::Source, standardLibraryRoot);
     report.errors.insert(report.errors.end(), sourceReport.errors.begin(), sourceReport.errors.end());
     report.warnings.insert(report.warnings.end(), sourceReport.warnings.begin(), sourceReport.warnings.end());
     if (!sourceReport.IsValid())
@@ -342,7 +345,9 @@ bool ReplaceManagedWorkflowBlock(const fs::path& workflowPath, const std::string
 
 } // namespace
 
-ValidationReport GenerateWorkflow(const fs::path& packageRoot, bool force)
+ValidationReport GenerateWorkflow(const fs::path& packageRoot,
+                                  bool force,
+                                  const fs::path& standardLibraryRoot)
 {
     ValidationReport report;
     std::error_code ec;
@@ -361,7 +366,7 @@ ValidationReport GenerateWorkflow(const fs::path& packageRoot, bool force)
     }
 
     std::string workflow;
-    if (!BuildWorkflowText(root, report, workflow))
+    if (!BuildWorkflowText(root, standardLibraryRoot, report, workflow))
         return report;
 
     std::error_code createError;
@@ -386,7 +391,8 @@ ValidationReport GenerateWorkflow(const fs::path& packageRoot, bool force)
     return report;
 }
 
-ValidationReport UpdateWorkflow(const fs::path& packageRoot)
+ValidationReport UpdateWorkflow(const fs::path& packageRoot,
+                                const fs::path& standardLibraryRoot)
 {
     ValidationReport report;
     std::error_code ec;
@@ -405,7 +411,7 @@ ValidationReport UpdateWorkflow(const fs::path& packageRoot)
     }
 
     std::string generated;
-    if (!BuildWorkflowText(root, report, generated))
+    if (!BuildWorkflowText(root, standardLibraryRoot, report, generated))
         return report;
 
     ReplaceManagedWorkflowBlock(workflowPath, generated, report);
