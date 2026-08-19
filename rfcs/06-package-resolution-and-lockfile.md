@@ -330,22 +330,27 @@ reproduce the same package graph.
 
 ## Current installer boundary
 
-The implemented first installer command is:
+The current installer commands are:
 
+    lode install [--dev] [package-root]
     lode install --locked [--dev] [package-root]
 
-It validates the source graph against the existing lockfile, copies resolved
-stdlib and path packages into the global cache, materializes their aliases
-under the project's lode_modules directory, and updates the project's
-.config.luau. Without --dev, root devDependencies and the runtime dependencies
-reachable only through those development roots are not materialized. With
---dev, those root development packages and their runtime dependency subgraphs
-are materialized; a dependency package's own devDependencies remain excluded.
+The unlocked local resolver validates the current source graph, supports only
+stdlib and local path packages already present on disk, copies them into the
+global cache, materializes their aliases under the project's lode_modules
+directory, updates the project's .config.luau, and writes the deterministic
+lode.lock atomically. It does not compile native packages.
 
-This command does not resolve or install Git dependencies, download release
-archives, extract ZIP files, build native packages, or write a new lockfile.
-Calling lode install without --locked returns an explicit unsupported-mode
-error. Those operations remain separate implementation blocks.
+`--locked` performs the same local materialization only after validating the
+existing lockfile and never changes it. Without --dev, root devDependencies
+and the runtime dependencies reachable only through those development roots
+are not materialized. With --dev, those root development packages and their
+runtime dependency subgraphs are materialized; a dependency package's own
+devDependencies remain excluded.
+
+Neither mode resolves or installs Git dependencies, downloads release
+archives, extracts ZIP files, or builds native packages. Those operations
+remain separate implementation blocks.
 
 ## Version conflicts
 
