@@ -9,7 +9,9 @@
 
 #include <fstream>
 #include <cstring>
+#include <optional>
 #include <regex>
+#include <set>
 
 namespace fs = std::filesystem;
 
@@ -129,6 +131,114 @@ void ValidateDependencyTable(const json& dependencies,
                 ".version must be a SemVer or a ^/~ SemVer requirement.");
         }
     }
+}
+
+struct DependencyGraphContext
+{
+    fs::path stdlibRoot;
+    std::set<fs::path> activePackages;
+    std::set<fs::path> visitedPackages;
+};
+
+std::optional<fs::path> FindStdlibRoot(const fs::path& packageRoot)
+{
+    fs::path current = packageRoot;
+    while (!current.empty())
+    {
+        if (current.filename() == "modules" && fs::is_directory(current))
+            return current;
+
+        const fs::path parent = current.parent_path();
+        if (parent == current)
+            break;
+        current = parent;
+    }
+
+    return std::nullopt;
+}
+
+bool FindStdlibManifest(const fs::path& stdlibRoot,
+                        const std::string& name,
+                        fs::path& packageRoot,
+                        json& manifest)
+{
+    std::error_code ec;
+    if (!fs::is_directory(stdlibRoot, ec))
+        return false;
+
+    for (fs::recursive_directory_iterator it(stdlibRoot, ec), end; it != end && !ec; it.increment(ec))
+    {
+        if (!it->is_regular_file(ec) || it->path().filename() != "lode.json")
+            continue;
+
+        std::ifstream file(it->path());
+        if (!file.is_open())
+            continue;
+
+        try
+        {
+            json candidate = json::parse(file);
+            if (candidate.is_object() && candidate.value("name", "") == name)
+            {
+                packageRoot = it->path().parent_path();
+                manifest = std::move(candidate);
+                return true;
+            }
+        }
+        catch (const std::exception&)
+        {
+            // The package validator reports malformed manifests when they are
+            // selected; unrelated catalog entries are not part of this lookup.
+        }
+    }
+
+    return false;
+}
+
+void ResolveStdlibDependencies(const fs::path& packageRoot,
+                               const json& manifest,
+                               DependencyGraphContext& context,
+                               ValidationReport& report)
+{
+    if (!manifest.contains("dependencies") || !manifest["dependencies"].is_object())
+        return;
+
+    const fs::path canonicalRoot = fs::weakly_canonical(packageRoot);
+    if (!context.activePackages.insert(canonicalRoot).second)
+    {
+        Error(report, "Dependency cycle detected at " + PathToUtf8(canonicalRoot));
+        return;
+    }
+
+    for (const auto& [alias, declaration] : manifest["dependencies"].items())
+    {
+        if (!declaration.is_string())
+            continue;
+
+        const std::string requestedVersion = declaration.get<std::string>();
+        fs::path dependencyRoot;
+        json dependencyManifest;
+        if (!FindStdlibManifest(context.stdlibRoot, alias, dependencyRoot, dependencyManifest))
+        {
+            Error(report, "Standard library dependency '" + alias + "' was not found in " +
+                PathToUtf8(context.stdlibRoot) + ".");
+            continue;
+        }
+
+        const std::string availableVersion = dependencyManifest.value("version", "");
+        if (availableVersion != requestedVersion)
+        {
+            Error(report, "Standard library dependency '" + alias + "' requires version " +
+                requestedVersion + ", but the repository contains " + availableVersion + ".");
+            continue;
+        }
+
+        const fs::path canonicalDependencyRoot = fs::weakly_canonical(dependencyRoot);
+        if (context.visitedPackages.insert(canonicalDependencyRoot).second)
+            ResolveStdlibDependencies(dependencyRoot, dependencyManifest, context, report);
+    }
+
+    context.activePackages.erase(canonicalRoot);
 }
 
 std::string ReadText(const fs::path& path)
@@ -286,6 +396,12 @@ ValidationReport Validate(const fs::path& packageRoot, ValidationMode mode)
         ValidateDependencyTable(manifest["dependencies"], "dependencies", report);
     if (manifest.contains("devDependencies"))
         ValidateDependencyTable(manifest["devDependencies"], "devDependencies", report);
+
+    if (auto stdlibRoot = FindStdlibRoot(root))
+    {
+        DependencyGraphContext context{ *stdlibRoot };
+        ResolveStdlibDependencies(root, manifest, context, report);
+    }
 
     if (!manifest.contains("name") || !manifest["name"].is_string() || manifest["name"].get<std::string>().empty())
         Error(report, "lode.json.name must be a non-empty string.");
