@@ -231,6 +231,12 @@ void State::AddModulePath(std::string_view path)
     UpdateModulePaths(L_, impl_->modulePaths);
 }
 
+void State::SetStandardLibraryPath(std::string_view path)
+{
+    if (!L_) return;
+    Lode::SetStandardLibraryPath(L_, path);
+}
+
 void State::SetCliArgs(const std::vector<std::string>& args)
 {
     if (!L_) return;

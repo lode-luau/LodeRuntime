@@ -17,10 +17,33 @@
 #include <filesystem>
 #include <algorithm>
 #include <cctype>
+#include <array>
 
 namespace fs = std::filesystem;
 
 using Lode::Detail::PathToUtf8;
+
+static fs::path FindStandardLibraryPath(const fs::path& executablePath)
+{
+    std::error_code ec;
+    const fs::path executable = fs::weakly_canonical(fs::absolute(executablePath, ec), ec);
+    if (ec)
+        return {};
+
+    const fs::path executableDirectory = executable.parent_path();
+    const std::array<fs::path, 2> candidates = {
+        executableDirectory.parent_path() / "stdlib",
+        executableDirectory / "stdlib"
+    };
+
+    for (const fs::path& candidate : candidates)
+    {
+        if (fs::is_directory(candidate) && fs::is_regular_file(candidate / ".config.luau"))
+            return fs::weakly_canonical(candidate, ec);
+    }
+
+    return {};
+}
 
 #if defined(_WIN32)
 int wmain(int argc, wchar_t* argv[])
@@ -254,6 +277,10 @@ int main(int argc, char* argv[])
     }
 
     Lode::State vm = std::move(stateResult.GetValue());
+
+    const fs::path standardLibraryPath = FindStandardLibraryPath(fs::path(argv[0]));
+    if (!standardLibraryPath.empty())
+        vm.SetStandardLibraryPath(PathToUtf8(standardLibraryPath));
 
     std::vector<std::string> scriptArgs;
     for (int i = 2; i < argc; ++i)

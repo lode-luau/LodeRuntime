@@ -51,6 +51,7 @@ struct LodeNavigationContext
     std::vector<std::string> modulePaths;
     fs::path currentPath;
     fs::path rootPath;
+    fs::path standardLibraryRoot;
     // Root directory of the current package (the folder that contains init.luau or lode.json).
     // Used to resolve @self aliases to the package's own internal files.
     fs::path packagePath;
@@ -116,75 +117,82 @@ static luarequire_NavigateResult reset(lua_State* L, void* ctx, const char* requ
     }
 }
 
-static std::optional<fs::path> ResolveAliasRecursively(const fs::path& startDir, const std::string& aliasName)
+static std::optional<fs::path> ResolveAliasInConfig(const fs::path& configPath, const std::string& aliasName)
+{
+    std::ifstream file(configPath);
+    if (!file.is_open())
+        return std::nullopt;
+
+    std::string contents((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    Luau::Config result;
+    Luau::ConfigOptions::AliasOptions aliasOpts;
+    aliasOpts.configLocation = PathToUtf8(configPath);
+    aliasOpts.overwriteAliases = true;
+
+    const bool isLuau = configPath.extension() == ".luau";
+    if (isLuau)
+    {
+        Luau::InterruptCallbacks callbacks{};
+        std::optional<std::string> err = Luau::extractLuauConfig(contents, result, aliasOpts, std::move(callbacks));
+        if (err)
+            Lode::Logger::Info("Failed to extract config in " + PathToUtf8(configPath) + ": " + *err);
+    }
+    else
+    {
+        Luau::ConfigOptions opts;
+        opts.aliasOptions = std::move(aliasOpts);
+        Luau::parseConfig(contents, result, opts);
+    }
+
+    std::string lowerAlias = aliasName;
+    for (char& c : lowerAlias)
+    {
+        if (c >= 'A' && c <= 'Z')
+            c += ('a' - 'A');
+    }
+
+    auto it = result.aliases.find(lowerAlias);
+    if (it != nullptr)
+        return PathFromUtf8(std::string(it->configLocation)).parent_path() / PathFromUtf8(it->value);
+
+    return std::nullopt;
+}
+
+static std::optional<fs::path> ResolveAliasRecursively(const fs::path& startDir, const std::string& aliasName, const fs::path& standardLibraryRoot)
 {
     fs::path current = startDir;
     while (true)
     {
         fs::path luauConfigPath = current / ".config.luau";
         fs::path luaurcPath = current / ".luaurc";
-        
-        std::string configPathToUse;
-        bool isLuau = false;
-        
+
         if (fs::exists(luauConfigPath))
         {
-            configPathToUse = PathToUtf8(luauConfigPath);
-            isLuau = true;
+            if (auto resolved = ResolveAliasInConfig(luauConfigPath, aliasName))
+                return resolved;
         }
         else if (fs::exists(luaurcPath))
         {
-            configPathToUse = PathToUtf8(luaurcPath);
+            if (auto resolved = ResolveAliasInConfig(luaurcPath, aliasName))
+                return resolved;
         }
-        
-        if (!configPathToUse.empty())
-        {
-            std::ifstream file(PathFromUtf8(configPathToUse));
-            if (file.is_open())
-            {
-                std::string contents((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-                Luau::Config result;
-                Luau::ConfigOptions::AliasOptions aliasOpts;
-                aliasOpts.configLocation = configPathToUse;
-                aliasOpts.overwriteAliases = true;
-                
-                if (isLuau)
-                {
-                    Luau::InterruptCallbacks callbacks{};
-                    std::optional<std::string> err = Luau::extractLuauConfig(contents, result, aliasOpts, std::move(callbacks));
-                    if (err)
-                    {
-                        Lode::Logger::Info("Failed to extract config in " + configPathToUse + ": " + *err);
-                    }
-                }
-                else
-                {
-                    Luau::ConfigOptions opts;
-                    opts.aliasOptions = std::move(aliasOpts);
-                    Luau::parseConfig(contents, result, opts);
-                }
-                
-                std::string lowerAlias = aliasName;
-                for (char& c : lowerAlias)
-                {
-                    if (c >= 'A' && c <= 'Z')
-                        c += ('a' - 'A');
-                }
 
-                auto it = result.aliases.find(lowerAlias);
-                if (it != nullptr)
-                {
-                    return PathFromUtf8(std::string(it->configLocation)).parent_path() / PathFromUtf8(it->value);
-                }
-            }
-        }
-        
         if (!current.has_parent_path() || current.parent_path() == current)
             break;
-            
+
         current = current.parent_path();
     }
-    
+
+    if (!standardLibraryRoot.empty())
+    {
+        const fs::path standardConfig = standardLibraryRoot / ".config.luau";
+        if (fs::exists(standardConfig))
+        {
+            if (auto resolved = ResolveAliasInConfig(standardConfig, aliasName))
+                return resolved;
+        }
+    }
+
     return std::nullopt;
 }
 
@@ -210,7 +218,7 @@ static luarequire_NavigateResult jump_to_alias(lua_State* L, void* ctx, const ch
         if (!lookupName.empty() && lookupName[0] == '@')
             lookupName = lookupName.substr(1);
             
-        auto resolvedAlias = ResolveAliasRecursively(nav->rootPath, lookupName);
+        auto resolvedAlias = ResolveAliasRecursively(nav->rootPath, lookupName, nav->standardLibraryRoot);
         if (resolvedAlias)
         {
             nav->currentPath = fs::weakly_canonical(*resolvedAlias);
@@ -367,6 +375,8 @@ static luarequire_ConfigStatus get_config_status(lua_State* L, void* ctx)
         return CONFIG_PRESENT_LUAU;
     if (fs::exists(luaurc))
         return CONFIG_PRESENT_JSON;
+    if (!nav->standardLibraryRoot.empty() && fs::exists(nav->standardLibraryRoot / ".config.luau"))
+        return CONFIG_PRESENT_LUAU;
 
     return CONFIG_ABSENT;
 }
@@ -380,6 +390,11 @@ static luarequire_WriteResult get_config(lua_State* L, void* ctx, char* buffer, 
     fs::path target;
     if (fs::exists(luauConfig)) target = luauConfig;
     else if (fs::exists(luaurc)) target = luaurc;
+    else if (!nav->standardLibraryRoot.empty())
+    {
+        const fs::path standardConfig = nav->standardLibraryRoot / ".config.luau";
+        if (fs::exists(standardConfig)) target = standardConfig;
+    }
 
     if (!target.empty())
     {
@@ -915,6 +930,18 @@ void UpdateModulePaths(lua_State* L, const std::vector<std::string>& modulePaths
     if (auto* ctx = static_cast<LodeNavigationContext*>(lua_touserdata(L, -1)))
     {
         ctx->modulePaths = modulePaths;
+    }
+    lua_pop(L, 1);
+}
+
+void SetStandardLibraryPath(lua_State* L, std::string_view path)
+{
+    lua_getfield(L, LUA_REGISTRYINDEX, "_LODE_NAVIGATION_CTX");
+    if (auto* ctx = static_cast<LodeNavigationContext*>(lua_touserdata(L, -1)))
+    {
+        std::error_code ec;
+        const fs::path root = fs::weakly_canonical(fs::absolute(PathFromUtf8(std::string(path)), ec), ec);
+        ctx->standardLibraryRoot = (!ec && fs::is_directory(root)) ? root : fs::path();
     }
     lua_pop(L, 1);
 }
