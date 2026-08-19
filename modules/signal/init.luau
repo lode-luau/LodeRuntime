@@ -132,13 +132,6 @@ function SignalMT:Wait<T...>(timeout: number?): T...
         task.defer(thread, ...)
     end)
 
-    if timeout then
-        local args = {coroutine.yield()}
-        if #args > 0 then
-            return table.unpack(args, 1)
-        end
-        return nil
-    end
     return coroutine.yield()
 end
 
