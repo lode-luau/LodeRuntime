@@ -42,4 +42,9 @@ struct DependencyGraph
     std::vector<PackageNode> packages;
 };
 
+// Produces a deterministic, portable snapshot of the validated graph. This
+// is an in-memory candidate for the lockfile; it does not write to disk and it
+// deliberately excludes machine-specific absolute package roots.
+std::string SerializeDependencyGraph(const DependencyGraph& graph);
+
 } // namespace Lode::Package

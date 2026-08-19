@@ -174,6 +174,7 @@ set(LODE_CORE_SOURCES
     src/Registry.cpp
     src/ModuleLoader.cpp
     src/PackageValidator.cpp
+    src/PackageGraph.cpp
     src/CiGenerator.cpp
     src/State.cpp
     src/StateLifetime.cpp
