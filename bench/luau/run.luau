@@ -1,7 +1,7 @@
 --!strict
 
 -- Benchmark runner for Luau-side scenarios (bench/luau/run.luau).
--- Usage: build/bin/Release/lode_runtime.exe bench/luau/run.luau
+-- Usage: build/bin/Release/lode.exe bench/luau/run.luau
 --
 -- Methodology: adaptive timing (google-benchmark min_time model) — a doubling
 -- calibration probe estimates per-op cost, the iteration count targets a

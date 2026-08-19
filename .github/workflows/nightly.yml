@@ -85,7 +85,7 @@ jobs:
         run: cmake --build build-debug
 
       - name: Validate Debug (sanity suite)
-        run: ./build-debug/bin/Debug/lode_runtime.exe modules/sanity/run.luau
+        run: ./build-debug/bin/Debug/lode.exe modules/sanity/run.luau
 
       - name: "Validate Debug (ctest: native fixtures + diagnostics)"
         run: ctest --test-dir build-debug -C Debug --output-on-failure
@@ -107,7 +107,7 @@ jobs:
         run: cmake --build build-release
 
       - name: Validate Release (sanity suite)
-        run: ./build-release/bin/Release/lode_runtime.exe modules/sanity/run.luau
+        run: ./build-release/bin/Release/lode.exe modules/sanity/run.luau
 
       - name: "Validate Release (ctest: native fixtures + diagnostics)"
         run: ctest --test-dir build-release -C Release --output-on-failure
@@ -127,7 +127,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path $modulesDist | Out-Null
 
           # ---- Runtime artifact: executable, core DLLs, headers ----
-          Copy-Item build-release/bin/Release/lode_runtime.exe $runtimeDist
+          Copy-Item build-release/bin/Release/lode.exe $runtimeDist
           Copy-Item build-release/bin/Release/LodeCore.dll $runtimeDist
           Copy-Item build-release/bin/Release/uv.dll $runtimeDist
           Copy-Item include/Lode $runtimeDist/Lode -Recurse

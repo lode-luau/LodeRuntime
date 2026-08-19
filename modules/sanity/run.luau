@@ -5,7 +5,7 @@
     Sanity CLI runner.
 
     Entry point for running the test suite:
-        lode_runtime modules/sanity/run.luau
+        lode modules/sanity/run.luau
 
     Steps:
       1. Load optional config (sanity.config.luau).

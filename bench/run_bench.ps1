@@ -61,7 +61,7 @@ try {
     $OutDir = if ($OutDir -eq "") { Join-Path $Root "bench/results" } else { $OutDir }
     if (-not (Test-Path $OutDir)) { New-Item -ItemType Directory -Force -Path $OutDir | Out-Null }
 
-    $Runtime = Join-Path $Root "build/bin/$Config/lode_runtime.exe"
+    $Runtime = Join-Path $Root "build/bin/$Config/lode.exe"
     $LodeBench = Join-Path $Root "build/bin/$Config/lode_bench.exe"
     $CliWarm = Join-Path $Root "bench/luau/cli_warm.ps1"
     $FixtureGen = "bench/fixtures/gen_big.luau"

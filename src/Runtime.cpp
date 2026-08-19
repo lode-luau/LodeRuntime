@@ -32,8 +32,8 @@ int main(int argc, char* argv[])
 
     if (argc < 2)
     {
-        Lode::Logger::Info("LodeRuntime (lode_runtime) v1.0.0");
-        Lode::Logger::Info("Usage: lode_runtime <file.luac | file.luau>");
+        Lode::Logger::Info("Lode (lode) v1.0.0");
+        Lode::Logger::Info("Usage: lode <file.luac | file.luau>");
         return 1;
     }
 
