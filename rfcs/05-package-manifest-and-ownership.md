@@ -48,10 +48,10 @@ The fields have these meanings:
 
 | Field | Owner | Meaning |
 | --- | --- | --- |
-| `name` | Package manager/registry | Canonical package identity. |
-| `version` | Package manager/registry | SemVer package version. |
-| `description`, `author`, `license` | Package manager/registry | Package metadata. |
-| `repository` | Package manager/registry | Canonical source repository for external packages; runtime-owned stdlib modules omit it. |
+| `name` | Package manager and release metadata | Canonical package identity. |
+| `version` | Package manager and release metadata | SemVer package version. |
+| `description`, `author`, `license` | Package manager and release metadata | Package metadata. |
+| `repository` | Package manager and release metadata | Canonical source repository for external packages; runtime-owned stdlib modules omit it. |
 | `dependencies` | Package manager | Runtime Lode package requirements. |
 | `devDependencies` | Package manager/CI | Test and development requirements. |
 | `libraries` | Runtime and package manager | Native artifact map and packaging validation. |

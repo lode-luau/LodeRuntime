@@ -55,6 +55,82 @@ bool IsSemVer(const std::string& value)
     return std::regex_match(value, pattern);
 }
 
+bool IsVersionRequirement(const std::string& value)
+{
+    if (IsSemVer(value))
+        return true;
+
+    static const std::regex rangePattern(
+        R"(^[\^~][0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$)"
+    );
+    return std::regex_match(value, rangePattern);
+}
+
+void ValidateDependencyTable(const json& dependencies,
+                             const std::string& fieldName,
+                             ValidationReport& report)
+{
+    if (!dependencies.is_object())
+    {
+        Error(report, "lode.json." + fieldName + " must be an object.");
+        return;
+    }
+
+    for (const auto& [alias, declaration] : dependencies.items())
+    {
+        if (alias.empty())
+        {
+            Error(report, "lode.json." + fieldName + " contains an empty dependency alias.");
+            continue;
+        }
+
+        if (declaration.is_string())
+        {
+            if (!IsSemVer(declaration.get<std::string>()))
+            {
+                Error(report, "lode.json." + fieldName + "." + alias +
+                    " must use an exact SemVer string for an official standard module.");
+            }
+            continue;
+        }
+
+        if (!declaration.is_object())
+        {
+            Error(report, "lode.json." + fieldName + "." + alias +
+                " must be an exact version string or a source object.");
+            continue;
+        }
+
+        if (declaration.contains("alias"))
+        {
+            Error(report, "lode.json." + fieldName + "." + alias +
+                " must not contain an alias field; the dependency key is the alias.");
+        }
+
+        const bool hasGit = declaration.contains("git");
+        const bool hasPath = declaration.contains("path");
+        if (hasGit == hasPath)
+        {
+            Error(report, "lode.json." + fieldName + "." + alias +
+                " must contain exactly one of git or path.");
+        }
+
+        const char* sourceField = hasGit ? "git" : "path";
+        if (declaration.contains(sourceField) && !declaration[sourceField].is_string())
+        {
+            Error(report, "lode.json." + fieldName + "." + alias + "." + sourceField +
+                " must be a string.");
+        }
+
+        if (!declaration.contains("version") || !declaration["version"].is_string() ||
+            !IsVersionRequirement(declaration["version"].get<std::string>()))
+        {
+            Error(report, "lode.json." + fieldName + "." + alias +
+                ".version must be a SemVer or a ^/~ SemVer requirement.");
+        }
+    }
+}
+
 std::string ReadText(const fs::path& path)
 {
     std::ifstream file(path, std::ios::binary);
@@ -205,6 +281,11 @@ ValidationReport Validate(const fs::path& packageRoot, ValidationMode mode)
         Error(report, "lode.json must contain a JSON object.");
         return report;
     }
+
+    if (manifest.contains("dependencies"))
+        ValidateDependencyTable(manifest["dependencies"], "dependencies", report);
+    if (manifest.contains("devDependencies"))
+        ValidateDependencyTable(manifest["devDependencies"], "devDependencies", report);
 
     if (!manifest.contains("name") || !manifest["name"].is_string() || manifest["name"].get<std::string>().empty())
         Error(report, "lode.json.name must be a non-empty string.");

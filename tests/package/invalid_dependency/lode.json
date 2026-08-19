@@ -1,0 +1,14 @@
+{
+  "name": "invalid_dependency",
+  "version": "1.0.0",
+  "description": "Invalid dependency declaration regression fixture",
+  "author": "Lode Tests",
+  "license": "MIT",
+  "dependencies": {
+    "task": {
+      "path": "../task",
+      "version": "1.0.0",
+      "alias": "task"
+    }
+  }
+}
