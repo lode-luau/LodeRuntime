@@ -81,6 +81,12 @@ add_test(
 )
 set_tests_properties(package_validator_rejects_stdlib_version_mismatch PROPERTIES WILL_FAIL TRUE)
 
+add_test(
+    NAME package_validator_accepts_path_dependency
+    COMMAND lode ci validate --source "${CMAKE_CURRENT_SOURCE_DIR}/package/path_consumer"
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+)
+
 # Exercises State destruction while filesystem resources are still active.
 # The script deliberately raises after opening them, so the runtime must run
 # module shutdown hooks without hanging or crashing.

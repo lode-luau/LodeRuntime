@@ -1,0 +1,13 @@
+{
+  "name": "path_consumer",
+  "version": "1.0.0",
+  "description": "Local path dependency regression fixture",
+  "author": "Lode Tests",
+  "license": "MIT",
+  "dependencies": {
+    "local_signal": {
+      "path": "../../../modules/signal",
+      "version": "1.0.0"
+    }
+  }
+}

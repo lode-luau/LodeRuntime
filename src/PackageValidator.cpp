@@ -9,6 +9,7 @@
 
 #include <fstream>
 #include <cstring>
+#include <array>
 #include <optional>
 #include <regex>
 #include <set>
@@ -135,7 +136,6 @@ void ValidateDependencyTable(const json& dependencies,
 
 struct DependencyGraphContext
 {
-    fs::path stdlibRoot;
     std::set<fs::path> activePackages;
     std::set<fs::path> visitedPackages;
 };
@@ -195,10 +195,83 @@ bool FindStdlibManifest(const fs::path& stdlibRoot,
     return false;
 }
 
-void ResolveStdlibDependencies(const fs::path& packageRoot,
-                               const json& manifest,
-                               DependencyGraphContext& context,
-                               ValidationReport& report)
+std::optional<std::array<int, 3>> ParseVersionCore(const std::string& value)
+{
+    static const std::regex pattern(R"(^([0-9]+)\.([0-9]+)\.([0-9]+))");
+    std::smatch match;
+    if (!std::regex_search(value, match, pattern))
+        return std::nullopt;
+
+    return std::array<int, 3>{
+        std::stoi(match[1].str()),
+        std::stoi(match[2].str()),
+        std::stoi(match[3].str())
+    };
+}
+
+bool VersionSatisfies(const std::string& actual, const std::string& requirement)
+{
+    if (IsSemVer(requirement))
+        return actual == requirement;
+
+    if (requirement.empty() || (requirement[0] != '^' && requirement[0] != '~'))
+        return false;
+
+    const auto actualCore = ParseVersionCore(actual);
+    const auto requiredCore = ParseVersionCore(requirement.substr(1));
+    if (!actualCore || !requiredCore)
+        return false;
+
+    if (*actualCore < *requiredCore)
+        return false;
+
+    if (requirement[0] == '~')
+        return (*actualCore)[0] == (*requiredCore)[0] &&
+            (*actualCore)[1] == (*requiredCore)[1];
+
+    if ((*requiredCore)[0] > 0)
+        return (*actualCore)[0] == (*requiredCore)[0];
+    if ((*requiredCore)[1] > 0)
+        return (*actualCore)[0] == 0 && (*actualCore)[1] == (*requiredCore)[1];
+    return (*actualCore)[0] == 0 && (*actualCore)[1] == 0 &&
+        (*actualCore)[2] == (*requiredCore)[2];
+}
+
+bool ReadDependencyManifest(const fs::path& packageRoot,
+                            json& manifest,
+                            ValidationReport& report)
+{
+    const fs::path manifestPath = packageRoot / "lode.json";
+    std::ifstream file(manifestPath);
+    if (!file.is_open())
+    {
+        Error(report, "Missing dependency manifest: " + PathToUtf8(manifestPath));
+        return false;
+    }
+
+    try
+    {
+        manifest = json::parse(file);
+    }
+    catch (const std::exception& exception)
+    {
+        Error(report, "Failed to parse dependency manifest " + PathToUtf8(manifestPath) + ": " + exception.what());
+        return false;
+    }
+
+    if (!manifest.is_object())
+    {
+        Error(report, "Dependency manifest must contain a JSON object: " + PathToUtf8(manifestPath));
+        return false;
+    }
+
+    return true;
+}
+
+void ResolveDependencyGraph(const fs::path& packageRoot,
+                            const json& manifest,
+                            DependencyGraphContext& context,
+                            ValidationReport& report)
 {
     if (!manifest.contains("dependencies") || !manifest["dependencies"].is_object())
         return;
@@ -212,16 +285,49 @@ void ResolveStdlibDependencies(const fs::path& packageRoot,
 
     for (const auto& [alias, declaration] : manifest["dependencies"].items())
     {
+        if (declaration.is_object() && declaration.contains("path") && declaration["path"].is_string())
+        {
+            std::error_code ec;
+            const fs::path dependencyRoot = fs::weakly_canonical(
+                fs::absolute(packageRoot / PathFromUtf8(declaration["path"].get<std::string>()), ec), ec);
+            if (ec || !fs::is_directory(dependencyRoot))
+            {
+                Error(report, "Path dependency '" + alias + "' does not point to a directory.");
+                continue;
+            }
+
+            json dependencyManifest;
+            if (!ReadDependencyManifest(dependencyRoot, dependencyManifest, report))
+                continue;
+
+            const std::string requestedVersion = declaration.value("version", "");
+            const std::string availableVersion = dependencyManifest.value("version", "");
+            if (!VersionSatisfies(availableVersion, requestedVersion))
+            {
+                Error(report, "Path dependency '" + alias + "' requires version " +
+                    requestedVersion + ", but the package contains " + availableVersion + ".");
+                continue;
+            }
+
+            if (context.visitedPackages.insert(dependencyRoot).second)
+                ResolveDependencyGraph(dependencyRoot, dependencyManifest, context, report);
+            continue;
+        }
+
         if (!declaration.is_string())
             continue;
 
         const std::string requestedVersion = declaration.get<std::string>();
+        const auto stdlibRoot = FindStdlibRoot(packageRoot);
+        if (!stdlibRoot)
+            continue;
+
         fs::path dependencyRoot;
         json dependencyManifest;
-        if (!FindStdlibManifest(context.stdlibRoot, alias, dependencyRoot, dependencyManifest))
+        if (!FindStdlibManifest(*stdlibRoot, alias, dependencyRoot, dependencyManifest))
         {
             Error(report, "Standard library dependency '" + alias + "' was not found in " +
-                PathToUtf8(context.stdlibRoot) + ".");
+                PathToUtf8(*stdlibRoot) + ".");
             continue;
         }
 
@@ -235,7 +341,7 @@ void ResolveStdlibDependencies(const fs::path& packageRoot,
 
         const fs::path canonicalDependencyRoot = fs::weakly_canonical(dependencyRoot);
         if (context.visitedPackages.insert(canonicalDependencyRoot).second)
-            ResolveStdlibDependencies(dependencyRoot, dependencyManifest, context, report);
+            ResolveDependencyGraph(dependencyRoot, dependencyManifest, context, report);
     }
 
     context.activePackages.erase(canonicalRoot);
@@ -397,11 +503,8 @@ ValidationReport Validate(const fs::path& packageRoot, ValidationMode mode)
     if (manifest.contains("devDependencies"))
         ValidateDependencyTable(manifest["devDependencies"], "devDependencies", report);
 
-    if (auto stdlibRoot = FindStdlibRoot(root))
-    {
-        DependencyGraphContext context{ *stdlibRoot };
-        ResolveStdlibDependencies(root, manifest, context, report);
-    }
+    DependencyGraphContext context;
+    ResolveDependencyGraph(root, manifest, context, report);
 
     if (!manifest.contains("name") || !manifest["name"].is_string() || manifest["name"].get<std::string>().empty())
         Error(report, "lode.json.name must be a non-empty string.");
