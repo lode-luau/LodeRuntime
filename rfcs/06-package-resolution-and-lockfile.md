@@ -155,6 +155,31 @@ The decided global cache root is `%USERPROFILE%\\.lode\\global\\lode_modules`.
 Downloaded archives and staging data remain outside the project and must not
 appear in `.config.luau` or determine the project's import paths.
 
+The complete cache layout is:
+
+```text
+%USERPROFILE%\\.lode\\
+├── cache\\
+│   ├── archives\\sha256\\<lowercase-sha256>.zip
+│   └── staging\\<operation-id>\\
+└── global\\lode_modules\\
+    └── <name>\\<version>\\<identity-sha256>\\
+```
+
+Archive files are addressed only by their verified lowercase SHA-256. Staging
+directories are operation-scoped and are never used as installed packages.
+The global module directory is addressed by a lowercase SHA-256 of the
+canonical resolved identity tuple defined above, encoded as deterministic JSON;
+the dependency alias is never included. When a native artifact is selected,
+its platform, architecture, configuration when applicable, ABI, and artifact
+checksum are included in the identity material so incompatible artifacts
+cannot share an installation directory.
+
+The extracted package root is stored directly inside the identity directory.
+The project-local `lode_modules/<alias>` view may be a supported link or a
+copy of that immutable global installation, but `.config.luau` never points
+into `%USERPROFILE%`.
+
 The global installation is deduplicated by the resolved package identity, not
 by the dependency alias. A package with the same logical identity is extracted
 once and may be linked into multiple project or package-local contexts. Two
