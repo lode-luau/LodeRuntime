@@ -175,6 +175,7 @@ set(LODE_CORE_SOURCES
     src/ModuleLoader.cpp
     src/PackageValidator.cpp
     src/PackageGraph.cpp
+    src/PackageLockfile.cpp
     src/CiGenerator.cpp
     src/State.cpp
     src/StateLifetime.cpp
@@ -214,6 +215,7 @@ set(LODE_CORE_HEADERS
     include/Lode/Json.hpp
     src/PackageValidator.hpp
     src/PackageGraph.hpp
+    src/PackageLockfile.hpp
     src/CiGenerator.hpp
     src/Platform/Platform.hpp
     src/Platform/CrashHandler.hpp
