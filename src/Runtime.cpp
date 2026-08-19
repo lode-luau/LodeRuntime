@@ -6,6 +6,7 @@
 #include "Lode/Result.hpp"
 #include "Lode/EventLoop.hpp"
 #include "Lode/Task.hpp"
+#include "PackageValidator.hpp"
 #include "PathUtil.hpp"
 #include "Platform/CrashHandler.hpp"
 
@@ -34,7 +35,33 @@ int main(int argc, char* argv[])
     {
         Lode::Logger::Info("Lode (lode) v1.0.0");
         Lode::Logger::Info("Usage: lode <file.luac | file.luau>");
+        Lode::Logger::Info("       lode ci validate [package-root]");
         return 1;
+    }
+
+    const std::string firstArgument = PathToUtf8(fs::path(argv[1]));
+    if (firstArgument == "ci")
+    {
+        if (argc < 3 || PathToUtf8(fs::path(argv[2])) != "validate")
+        {
+            Lode::Logger::Error("Usage: lode ci validate [package-root]");
+            return 1;
+        }
+
+        fs::path packageRoot = argc >= 4
+            ? fs::path(argv[3])
+            : fs::current_path();
+        Lode::Package::ValidationReport report = Lode::Package::Validate(packageRoot);
+        for (const std::string& warning : report.warnings)
+            Lode::Logger::Warn(warning);
+        for (const std::string& error : report.errors)
+            Lode::Logger::Error(error);
+
+        if (!report.IsValid())
+            return 1;
+
+        Lode::Logger::Success("Package validation passed: " + PathToUtf8(fs::absolute(packageRoot)));
+        return 0;
     }
 
     fs::path filePath = fs::path(argv[1]);
