@@ -1,0 +1,138 @@
+# RFC: Lode Package Resolution, Aliases, and Lockfiles
+
+## Status
+
+Accepted design direction for the `package-manager` branch. Implementation is
+not part of this RFC.
+
+## Summary
+
+The package manager resolves package requirements and writes the result into a
+lockfile and Luau configuration. The manifest package name is an identity; it
+does not automatically become a `require` alias.
+
+The existing `.config.luau` format remains in use because it is consumed by the
+Luau compiler and LSP. The package manager may update managed aliases in that
+file, but must not replace the Luau configuration format with a new one.
+
+## Dependency declarations
+
+The shorthand form resolves a package from the configured registry:
+
+```json
+{
+  "dependencies": {
+    "signal": "^1.0.0"
+  }
+}
+```
+
+An explicit source may be used for Git or local development:
+
+```json
+{
+  "dependencies": {
+    "signal": {
+      "git": "yanlvl99/lode-signal",
+      "version": "^1.0.0"
+    }
+  }
+}
+```
+
+For local development, the same alias is overridden by changing its source;
+it is not declared a second time:
+
+```json
+{
+  "dependencies": {
+    "signal": {
+      "path": "../lode-signal",
+      "version": "1.0.0"
+    }
+  }
+}
+```
+
+The dependency key is the project-local alias and must be unique within its
+dependency table. There is no separate `alias` field in the initial contract,
+so two declarations cannot silently produce the same alias. The package
+manager must validate that the resolved package manifest has the expected
+`name` and that its version satisfies the requested range.
+
+Published versions use SemVer without a leading `v` in the manifest. Git
+release tags use `vMAJOR.MINOR.PATCH`, for example `v1.2.0`. A Git branch may be
+used for local development, but release and lockfile resolution must record a
+commit rather than relying on a moving branch or the word `latest`.
+
+## Alias generation
+
+For a dependency key named `signal`, the package manager generates a relative
+alias in `.config.luau`:
+
+```lua
+aliases = {
+    signal = "lode_modules/signal",
+}
+```
+
+The generated paths must be project-relative. Absolute paths into a global
+cache would make the committed project configuration machine-specific.
+
+## Global cache and project installation
+
+Downloads may be cached globally and reused by multiple projects. The project
+must still receive a local, portable view under `lode_modules/`, using a copy,
+junction, or supported link mechanism.
+
+The intended layout is:
+
+```text
+project/
+├── lode.json
+├── lode.lock
+├── .config.luau
+└── lode_modules/
+    └── signal/
+```
+
+Whether a global download cache exists, and where it is stored, is intentionally
+not part of this RFC. It must not appear in `.config.luau` or determine the
+project's import paths.
+
+## Lockfile
+
+`lode.lock` is separate from `lode.json`. It records the resolved graph rather
+than the requested ranges. A lock entry must include at least:
+
+```text
+package identity
+resolved version
+source kind
+repository or registry source
+exact Git commit when applicable
+package/artifact checksum when applicable
+resolved aliases
+transitive dependencies
+```
+
+The runtime does not read `lode.lock`. `lode install --locked` and CI use it to
+reproduce the same package graph.
+
+## Version conflicts
+
+The package manager must not silently replace one incompatible version with
+another. Compatible requirements may share one installation. Incompatible
+requirements must either be isolated in package-local dependency contexts or
+reported as a conflict until contextual resolution is implemented.
+
+Package-local `.config.luau` files may provide the aliases for a dependency's
+own context. This preserves the existing upward Luau configuration lookup and
+allows two packages to require different versions without encoding versions in
+the `require` string.
+
+## Current compatibility boundary
+
+The current runtime does not parse `dependencies` from `lode.json`. Until the
+package manager generates the required `.config.luau` files, existing relative
+requires and manually configured aliases remain the supported behavior.
