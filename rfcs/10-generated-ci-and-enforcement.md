@@ -11,16 +11,25 @@ The package manager will provide:
 
 ```text
 lode ci init
-lode ci validate
+lode ci validate [--source|--artifact]
 lode ci update
 ```
 
 `lode ci init` creates `.github/workflows/lode.yml` and refuses to overwrite an
 existing file unless explicitly forced. It does not execute package code.
 
-`lode ci validate` validates `lode.json`, dependency/lockfile consistency,
-`init.luau`, native library paths, required package files, and the native ABI
-metadata required for publication.
+`lode ci validate --source` validates the development tree: `lode.json`,
+`init.luau`, `LICENSE`, native library path declarations, and `CMakeLists.txt`
+for native packages. It does not require compiled native libraries.
+
+Dependency and lockfile consistency are separate package-manager validation
+work and are not silently claimed by the current command.
+
+`lode ci validate --artifact` validates the publishable tree: the source
+contract plus the Debug/Release native libraries, required exports, ABI,
+configuration metadata, package-local runtime libraries, and required
+third-party notices. The flagless `lode ci validate` form remains an alias for
+`--artifact`.
 
 `lode ci update` updates only the generated baseline section. User-owned jobs
 and configuration must remain outside that section; silent replacement of the

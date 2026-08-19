@@ -160,7 +160,8 @@ The package manager may provide:
 
 ```text
 lode ci init
-lode ci validate
+lode ci validate --source
+lode ci validate --artifact
 lode ci update
 ```
 
