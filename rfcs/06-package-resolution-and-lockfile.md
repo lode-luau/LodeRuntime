@@ -190,11 +190,86 @@ package and points to one resolved package identity. The edge must not point
 only to a name or alias, because that would be ambiguous when multiple
 versions or sources coexist.
 
-The lockfile format is versioned. Its package records must be able to express
-the identity tuple above, while artifact records must be able to express the
-selected target and checksum. The exact serialized field layout and the
-command that writes the file remain implementation work; the identity rules
-are fixed by this RFC.
+The lockfile format is versioned JSON. Version 1 uses the following concrete
+shape:
+
+```json
+{
+  "lockfileVersion": 1,
+  "root": 0,
+  "packages": [
+    {
+      "name": "signal",
+      "version": "1.0.0",
+      "source": "root",
+      "dependencies": [
+        {
+          "alias": "task",
+          "requirement": "1.0.0",
+          "target": 1
+        }
+      ]
+    },
+    {
+      "name": "task",
+      "version": "1.0.0",
+      "source": "stdlib",
+      "dependencies": []
+    }
+  ]
+}
+```
+
+The `root` value is a zero-based index into `packages`. Every dependency edge
+contains the local alias, the original requirement for lock consistency, and a
+`target` index pointing to the exact resolved package record. The target record
+contains the complete logical identity, so an edge never resolves by name or
+alias alone.
+
+The root record may also contain a `devDependencies` array with the same edge
+shape. The lockfile resolves and records the root development graph, but
+development packages are installed only when `--dev` is supplied. A dependency
+package's own `devDependencies` are not transitive runtime dependencies and
+are not included in the consumer's graph.
+
+The package array is deterministic: the root record is first, and all other
+records are ordered by source kind, name, exact version, source reference, and
+Git commit. The index is only a reference within this lockfile; the package
+identity is the complete record data.
+
+For `path` and `git` records, `reference` is required. A path reference is
+normalized and remains relative to the project/package context; it is never an
+absolute cache path. A Git record also requires its resolved `commit`. A
+`stdlib` record has no external repository reference.
+
+Native package records may include an `artifacts` array. Each artifact record
+contains `platform`, `architecture`, optional `configuration`, `abi`, the exact
+GitHub Release `release` tag, the selected `asset` name, and its lowercase
+SHA-256 `sha256`. Artifact selection is part of installation, not runtime
+module resolution.
+
+The package manager writes `lode.lock` atomically as part of:
+
+```text
+lode install
+```
+
+`lode install` resolves `lode.json`, reuses compatible locked records when
+possible, updates the lockfile when the requested graph changes, installs the
+resolved runtime artifacts, and materializes project/package-local aliases. It
+also resolves the root `devDependencies` into the lockfile but does not install
+those packages unless `--dev` is supplied. It does not compile published
+dependencies locally.
+
+```text
+lode install --locked
+```
+
+`--locked` requires an existing, current lockfile and never changes it or
+performs a new version/revision resolution. It may still download the exact
+locked artifact when it is absent from the global cache. A missing or stale
+lockfile is an error. A project with no dependencies may complete without a
+lockfile.
 
 The runtime does not read `lode.lock`. `lode install --locked` and CI use it to
 reproduce the same package graph.

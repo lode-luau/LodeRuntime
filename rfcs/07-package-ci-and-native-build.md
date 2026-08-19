@@ -67,7 +67,7 @@ the platform-specific CI environment.
 The intended native package workflow is:
 
 ```text
-lode install --dev
+lode install --dev --locked
     ↓
 prepare package-local aliases and development modules
     ↓
@@ -84,9 +84,14 @@ validate lode.json and declared libraries
 lode pack
 ```
 
-The exact CLI commands remain implementation work. The ownership boundary is
-fixed: the package manager invokes CMake; it does not encode CMake's link
-instructions in `lode.json`.
+`lode install` resolves and installs runtime dependencies. `--dev` includes
+the current project's `devDependencies`; `--locked` requires the committed
+lockfile and forbids changing its resolved versions, revisions, or checksums.
+The package manager may download an exact locked artifact that is not cached,
+but it must not perform a new resolution in this mode.
+
+The ownership boundary is fixed: the package manager invokes CMake; it does
+not encode CMake's link instructions in `lode.json`.
 
 The normal consumer installation path uses prebuilt release artifacts. A
 consumer does not compile a dependency as part of a regular install. Source
@@ -109,13 +114,15 @@ user-editable workflow, not in a new `test`, `entry`, or `type` field in
 Pull request CI for a package must:
 
 1. validate the manifest;
-2. download and verify the pinned Lode SDK;
-3. prepare the platform toolchain and system libraries;
-4. configure with `CMAKE_PREFIX_PATH` and build through the package's CMake
+2. install dependencies with `lode install --dev --locked` when the package
+   declares dependencies or development dependencies;
+3. download and verify the pinned Lode SDK;
+4. prepare the platform toolchain and system libraries;
+5. configure with `CMAKE_PREFIX_PATH` and build through the package's CMake
    project;
-5. run tests through `lode`;
-6. verify the native entry point, `LodeModuleABI()`, and `LodeModuleConfig()`;
-7. verify every declared platform artifact that the matrix builds.
+6. run tests through `lode`;
+7. verify the native entry point, `LodeModuleABI()`, and `LodeModuleConfig()`;
+8. verify every declared platform artifact that the matrix builds.
 
 The matrix must only claim platforms, architectures, and configurations that
 the workflow actually builds and tests. A native package must not publish a
@@ -134,7 +141,7 @@ Release CI must additionally:
 4. package `lode.json`, `init.luau`, licenses, Luau sources, and native
    libraries according to the package layout;
 5. generate checksums;
-6. publish the package artifact and registry metadata.
+6. publish the package artifact and GitHub Release metadata.
 
 Release CI must run from a clean checkout and must package only artifacts
 produced by successful matrix jobs. The release tag uses `vMAJOR.MINOR.PATCH`
