@@ -46,6 +46,15 @@ lode_add_script_test(integration_simd_bench      native/simd_bench.luau)
 lode_add_script_test(integration_config_mismatch native/config_mismatch.luau)
 lode_add_script_test(integration_abi_mismatch  native/abi_mismatch.luau)
 
+# Package validation must reject malformed native artifact paths before any
+# package can be published.
+add_test(
+    NAME package_validator_rejects_path_escape
+    COMMAND lode ci validate "${CMAKE_CURRENT_SOURCE_DIR}/native/path_escape_module"
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+)
+set_tests_properties(package_validator_rejects_path_escape PROPERTIES WILL_FAIL TRUE)
+
 # Exercises State destruction while filesystem resources are still active.
 # The script deliberately raises after opening them, so the runtime must run
 # module shutdown hooks without hanging or crashing.
