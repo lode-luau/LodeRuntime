@@ -44,3 +44,7 @@ bench/results/local-baseline.json
 
 # Scratch file written by the fs_write_file benchmark scenario
 bench/results/fs_bench_tmp.bin
+
+# Local scratch directories
+/f/
+/t/
