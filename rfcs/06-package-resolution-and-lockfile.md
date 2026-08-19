@@ -201,6 +201,28 @@ from the package's source tree. When running inside this repository, the local
 `modules/` catalog remains the fallback. The catalog source is therefore
 deterministic for both installed CI environments and repository fixtures.
 
+## Local materialization and managed aliases
+
+The current local materializer copies an already verified global installation
+into project/lode_modules/<alias> through a temporary sibling directory and
+renames it into place only after the copy succeeds. It creates
+lode_modules/ when needed, refuses to replace an existing destination, rejects
+symbolic links in the source installation, and removes a failed temporary copy.
+Link-based views remain a future optimization; they are not required for the
+initial implementation.
+
+After the local package directory is materialized, the package manager updates
+the existing root .config.luau luau.aliases table with:
+
+    ["<alias>"] = "lode_modules/<alias>",
+
+Only that aliases table is changed. Existing aliases with the same target are
+left untouched; an existing alias with a different target is an error. The
+configuration file is replaced atomically, and a malformed or missing
+luau.aliases table is an error rather than an opportunity to overwrite the
+user's configuration. Alias and path values must remain single, relative,
+non-traversing components/paths.
+
 ## Lockfile
 
 `lode.lock` is separate from `lode.json`. It records the resolved graph rather
