@@ -296,20 +296,21 @@ void ResolveDependencyGraph(const fs::path& packageRoot,
                             const json& manifest,
                             DependencySource source,
                             DependencyGraphContext& context,
+                            ValidationReport& report);
+
+void ResolveDependencyTable(const fs::path& packageRoot,
+                            const json& manifest,
+                            DependencySource source,
+                            const char* fieldName,
+                            DependencyScope scope,
+                            DependencyGraphContext& context,
                             ValidationReport& report)
 {
-    const fs::path canonicalRoot = fs::weakly_canonical(packageRoot);
     const size_t packageIndex = AddGraphNode(packageRoot, manifest, source, context);
-    if (!manifest.contains("dependencies") || !manifest["dependencies"].is_object())
+    if (!manifest.contains(fieldName) || !manifest[fieldName].is_object())
         return;
 
-    if (!context.activePackages.insert(canonicalRoot).second)
-    {
-        Error(report, "Dependency cycle detected at " + PathToUtf8(canonicalRoot));
-        return;
-    }
-
-    for (const auto& [alias, declaration] : manifest["dependencies"].items())
+    for (const auto& [alias, declaration] : manifest[fieldName].items())
     {
         if (declaration.is_object() && declaration.contains("path") && declaration["path"].is_string())
         {
@@ -318,7 +319,8 @@ void ResolveDependencyGraph(const fs::path& packageRoot,
                 DependencySource::Path,
                 declaration.value("version", ""),
                 declaration["path"].get<std::string>(),
-                std::nullopt
+                std::nullopt,
+                scope
             };
             std::error_code ec;
             const fs::path dependencyRoot = fs::weakly_canonical(
@@ -364,7 +366,8 @@ void ResolveDependencyGraph(const fs::path& packageRoot,
                 DependencySource::Git,
                 declaration.value("version", ""),
                 declaration["git"].get<std::string>(),
-                std::nullopt
+                std::nullopt,
+                scope
             });
             continue;
         }
@@ -378,7 +381,8 @@ void ResolveDependencyGraph(const fs::path& packageRoot,
             DependencySource::StandardLibrary,
             requestedVersion,
             "",
-            std::nullopt
+            std::nullopt,
+            scope
         };
         const auto stdlibRoot = FindStdlibRoot(packageRoot);
         if (!stdlibRoot)
@@ -413,6 +417,38 @@ void ResolveDependencyGraph(const fs::path& packageRoot,
         if (context.activePackages.find(dependencyRoot) == context.activePackages.end() &&
             context.graph.packages[dependencyIndex].dependencies.empty())
             ResolveDependencyGraph(dependencyRoot, dependencyManifest, DependencySource::StandardLibrary, context, report);
+    }
+
+}
+
+void ResolveDependencyGraph(const fs::path& packageRoot,
+                            const json& manifest,
+                            DependencySource source,
+                            DependencyGraphContext& context,
+                            ValidationReport& report)
+{
+    const fs::path canonicalRoot = fs::weakly_canonical(packageRoot);
+    AddGraphNode(packageRoot, manifest, source, context);
+
+    const bool hasRuntimeDependencies = manifest.contains("dependencies") &&
+        manifest["dependencies"].is_object();
+    const bool hasRootDevelopmentDependencies = source == DependencySource::Root &&
+        manifest.contains("devDependencies") && manifest["devDependencies"].is_object();
+    if (!hasRuntimeDependencies && !hasRootDevelopmentDependencies)
+        return;
+
+    if (!context.activePackages.insert(canonicalRoot).second)
+    {
+        Error(report, "Dependency cycle detected at " + PathToUtf8(canonicalRoot));
+        return;
+    }
+
+    ResolveDependencyTable(packageRoot, manifest, source, "dependencies",
+        DependencyScope::Runtime, context, report);
+    if (source == DependencySource::Root)
+    {
+        ResolveDependencyTable(packageRoot, manifest, source, "devDependencies",
+            DependencyScope::Development, context, report);
     }
 
     context.activePackages.erase(canonicalRoot);

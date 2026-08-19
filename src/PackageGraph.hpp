@@ -18,6 +18,12 @@ enum class DependencySource
     Git,
 };
 
+enum class DependencyScope
+{
+    Runtime,
+    Development,
+};
+
 struct DependencyEdge
 {
     std::string alias;
@@ -25,6 +31,7 @@ struct DependencyEdge
     std::string requestedVersion;
     std::string sourceReference;
     std::optional<size_t> target;
+    DependencyScope scope = DependencyScope::Runtime;
 };
 
 struct PackageNode

@@ -56,7 +56,12 @@ std::string SerializeDependencyGraph(const DependencyGraph& graph)
             if (dependency.target)
                 dependencyDocument["target"] = *dependency.target;
 
-            packageDocument["dependencies"].push_back(std::move(dependencyDocument));
+            const char* fieldName = dependency.scope == DependencyScope::Development
+                ? "devDependencies"
+                : "dependencies";
+            if (!packageDocument.contains(fieldName))
+                packageDocument[fieldName] = json::array();
+            packageDocument[fieldName].push_back(std::move(dependencyDocument));
         }
 
         document["packages"].push_back(std::move(packageDocument));

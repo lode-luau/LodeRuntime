@@ -212,7 +212,22 @@ LockfileResult BuildLockfile(const DependencyGraph& graph)
                 continue;
             }
 
-            packageDocument["dependencies"].push_back({
+            if (dependency->scope == DependencyScope::Development)
+            {
+                if (oldIndex != graph.root)
+                {
+                    AddError(result, "Cannot write lode.lock: development dependency '" +
+                        dependency->alias + "' belongs to a non-root package.");
+                    continue;
+                }
+                if (!packageDocument.contains("devDependencies"))
+                    packageDocument["devDependencies"] = json::array();
+            }
+
+            const char* fieldName = dependency->scope == DependencyScope::Development
+                ? "devDependencies"
+                : "dependencies";
+            packageDocument[fieldName].push_back({
                 { "alias", dependency->alias },
                 { "requirement", dependency->requestedVersion },
                 { "target", target->second }
