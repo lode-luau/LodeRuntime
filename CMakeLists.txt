@@ -212,6 +212,7 @@ set(LODE_CORE_HEADERS
     include/Lode/Logger.hpp
     include/Lode/Json.hpp
     src/PackageValidator.hpp
+    src/PackageGraph.hpp
     src/CiGenerator.hpp
     src/Platform/Platform.hpp
     src/Platform/CrashHandler.hpp

@@ -3,6 +3,7 @@
 #pragma once
 
 #include "Lode/Export.hpp"
+#include "PackageGraph.hpp"
 
 #include <filesystem>
 #include <string>
@@ -21,6 +22,7 @@ struct ValidationReport
 {
     std::vector<std::string> errors;
     std::vector<std::string> warnings;
+    DependencyGraph dependencyGraph;
 
     bool IsValid() const
     {

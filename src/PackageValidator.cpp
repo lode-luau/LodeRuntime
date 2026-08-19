@@ -12,6 +12,7 @@
 #include <array>
 #include <optional>
 #include <regex>
+#include <map>
 #include <set>
 
 namespace fs = std::filesystem;
@@ -136,8 +137,9 @@ void ValidateDependencyTable(const json& dependencies,
 
 struct DependencyGraphContext
 {
+    DependencyGraph graph;
     std::set<fs::path> activePackages;
-    std::set<fs::path> visitedPackages;
+    std::map<fs::path, size_t> packageIndexes;
 };
 
 std::optional<fs::path> FindStdlibRoot(const fs::path& packageRoot)
@@ -268,15 +270,39 @@ bool ReadDependencyManifest(const fs::path& packageRoot,
     return true;
 }
 
+size_t AddGraphNode(const fs::path& packageRoot,
+                    const json& manifest,
+                    DependencySource source,
+                    DependencyGraphContext& context)
+{
+    const fs::path canonicalRoot = fs::weakly_canonical(packageRoot);
+    auto existing = context.packageIndexes.find(canonicalRoot);
+    if (existing != context.packageIndexes.end())
+        return existing->second;
+
+    const size_t index = context.graph.packages.size();
+    context.packageIndexes.emplace(canonicalRoot, index);
+    context.graph.packages.push_back(PackageNode{
+        manifest.value("name", ""),
+        manifest.value("version", ""),
+        canonicalRoot,
+        source,
+        {}
+    });
+    return index;
+}
+
 void ResolveDependencyGraph(const fs::path& packageRoot,
                             const json& manifest,
+                            DependencySource source,
                             DependencyGraphContext& context,
                             ValidationReport& report)
 {
+    const fs::path canonicalRoot = fs::weakly_canonical(packageRoot);
+    const size_t packageIndex = AddGraphNode(packageRoot, manifest, source, context);
     if (!manifest.contains("dependencies") || !manifest["dependencies"].is_object())
         return;
 
-    const fs::path canonicalRoot = fs::weakly_canonical(packageRoot);
     if (!context.activePackages.insert(canonicalRoot).second)
     {
         Error(report, "Dependency cycle detected at " + PathToUtf8(canonicalRoot));
@@ -287,18 +313,34 @@ void ResolveDependencyGraph(const fs::path& packageRoot,
     {
         if (declaration.is_object() && declaration.contains("path") && declaration["path"].is_string())
         {
+            DependencyEdge edge{
+                alias,
+                DependencySource::Path,
+                declaration.value("version", ""),
+                declaration["path"].get<std::string>(),
+                std::nullopt
+            };
             std::error_code ec;
             const fs::path dependencyRoot = fs::weakly_canonical(
                 fs::absolute(packageRoot / PathFromUtf8(declaration["path"].get<std::string>()), ec), ec);
             if (ec || !fs::is_directory(dependencyRoot))
             {
                 Error(report, "Path dependency '" + alias + "' does not point to a directory.");
+                context.graph.packages[packageIndex].dependencies.push_back(std::move(edge));
                 continue;
             }
 
             json dependencyManifest;
             if (!ReadDependencyManifest(dependencyRoot, dependencyManifest, report))
+            {
+                context.graph.packages[packageIndex].dependencies.push_back(std::move(edge));
                 continue;
+            }
+
+            const size_t dependencyIndex = AddGraphNode(
+                dependencyRoot, dependencyManifest, DependencySource::Path, context);
+            edge.target = dependencyIndex;
+            context.graph.packages[packageIndex].dependencies.push_back(edge);
 
             const std::string requestedVersion = declaration.value("version", "");
             const std::string availableVersion = dependencyManifest.value("version", "");
@@ -309,8 +351,21 @@ void ResolveDependencyGraph(const fs::path& packageRoot,
                 continue;
             }
 
-            if (context.visitedPackages.insert(dependencyRoot).second)
-                ResolveDependencyGraph(dependencyRoot, dependencyManifest, context, report);
+            if (context.activePackages.find(dependencyRoot) == context.activePackages.end() &&
+                context.graph.packages[dependencyIndex].dependencies.empty())
+                ResolveDependencyGraph(dependencyRoot, dependencyManifest, DependencySource::Path, context, report);
+            continue;
+        }
+
+        if (declaration.is_object() && declaration.contains("git") && declaration["git"].is_string())
+        {
+            context.graph.packages[packageIndex].dependencies.push_back(DependencyEdge{
+                alias,
+                DependencySource::Git,
+                declaration.value("version", ""),
+                declaration["git"].get<std::string>(),
+                std::nullopt
+            });
             continue;
         }
 
@@ -318,9 +373,19 @@ void ResolveDependencyGraph(const fs::path& packageRoot,
             continue;
 
         const std::string requestedVersion = declaration.get<std::string>();
+        DependencyEdge edge{
+            alias,
+            DependencySource::StandardLibrary,
+            requestedVersion,
+            "",
+            std::nullopt
+        };
         const auto stdlibRoot = FindStdlibRoot(packageRoot);
         if (!stdlibRoot)
+        {
+            context.graph.packages[packageIndex].dependencies.push_back(std::move(edge));
             continue;
+        }
 
         fs::path dependencyRoot;
         json dependencyManifest;
@@ -328,8 +393,14 @@ void ResolveDependencyGraph(const fs::path& packageRoot,
         {
             Error(report, "Standard library dependency '" + alias + "' was not found in " +
                 PathToUtf8(*stdlibRoot) + ".");
+            context.graph.packages[packageIndex].dependencies.push_back(std::move(edge));
             continue;
         }
+
+        const size_t dependencyIndex = AddGraphNode(
+            dependencyRoot, dependencyManifest, DependencySource::StandardLibrary, context);
+        edge.target = dependencyIndex;
+        context.graph.packages[packageIndex].dependencies.push_back(edge);
 
         const std::string availableVersion = dependencyManifest.value("version", "");
         if (availableVersion != requestedVersion)
@@ -339,9 +410,9 @@ void ResolveDependencyGraph(const fs::path& packageRoot,
             continue;
         }
 
-        const fs::path canonicalDependencyRoot = fs::weakly_canonical(dependencyRoot);
-        if (context.visitedPackages.insert(canonicalDependencyRoot).second)
-            ResolveDependencyGraph(dependencyRoot, dependencyManifest, context, report);
+        if (context.activePackages.find(dependencyRoot) == context.activePackages.end() &&
+            context.graph.packages[dependencyIndex].dependencies.empty())
+            ResolveDependencyGraph(dependencyRoot, dependencyManifest, DependencySource::StandardLibrary, context, report);
     }
 
     context.activePackages.erase(canonicalRoot);
@@ -504,7 +575,8 @@ ValidationReport Validate(const fs::path& packageRoot, ValidationMode mode)
         ValidateDependencyTable(manifest["devDependencies"], "devDependencies", report);
 
     DependencyGraphContext context;
-    ResolveDependencyGraph(root, manifest, context, report);
+    ResolveDependencyGraph(root, manifest, DependencySource::Root, context, report);
+    report.dependencyGraph = std::move(context.graph);
 
     if (!manifest.contains("name") || !manifest["name"].is_string() || manifest["name"].get<std::string>().empty())
         Error(report, "lode.json.name must be a non-empty string.");
