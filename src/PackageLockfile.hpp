@@ -32,4 +32,9 @@ LODE_API LockfileResult BuildLockfile(const DependencyGraph& graph);
 LODE_API LockfileResult WriteLockfile(const std::filesystem::path& lockfilePath,
                                       const DependencyGraph& graph);
 
+// Verifies that an existing lockfile is valid JSON and describes exactly the
+// current validated graph. This never modifies the lockfile.
+LODE_API LockfileResult ValidateLockfile(const std::filesystem::path& lockfilePath,
+                                         const DependencyGraph& graph);
+
 } // namespace Lode::Package

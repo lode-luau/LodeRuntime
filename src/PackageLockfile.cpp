@@ -275,4 +275,44 @@ LockfileResult WriteLockfile(const fs::path& lockfilePath, const DependencyGraph
     return result;
 }
 
+LockfileResult ValidateLockfile(const fs::path& lockfilePath, const DependencyGraph& graph)
+{
+    LockfileResult expected = BuildLockfile(graph);
+    if (!expected.IsValid())
+        return expected;
+
+    std::ifstream file(lockfilePath, std::ios::binary);
+    if (!file.is_open())
+    {
+        AddError(expected, "Cannot open lockfile: " + PathToUtf8(lockfilePath));
+        return expected;
+    }
+
+    const std::istreambuf_iterator<char> begin(file);
+    const std::istreambuf_iterator<char> end;
+    const std::string content(begin, end);
+
+    try
+    {
+        const json actual = json::parse(content);
+        const json expectedDocument = json::parse(expected.content);
+        if (actual != expectedDocument)
+        {
+            expected.errors.push_back("Lockfile does not match the current dependency graph: " +
+                PathToUtf8(lockfilePath));
+            expected.content.clear();
+            return expected;
+        }
+    }
+    catch (const std::exception& exception)
+    {
+        expected.errors.push_back("Failed to parse lockfile " + PathToUtf8(lockfilePath) + ": " + exception.what());
+        expected.content.clear();
+        return expected;
+    }
+
+    expected.content = content;
+    return expected;
+}
+
 } // namespace Lode::Package
