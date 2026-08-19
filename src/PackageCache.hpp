@@ -53,11 +53,24 @@ struct CacheIdentityResult
 struct MaterializationResult
 {
     std::filesystem::path packageDirectory;
+    bool reused = false;
     std::vector<std::string> errors;
 
     bool IsValid() const
     {
         return errors.empty() && !packageDirectory.empty();
+    }
+};
+
+struct CachePopulationResult
+{
+    std::filesystem::path installationDirectory;
+    bool reused = false;
+    std::vector<std::string> errors;
+
+    bool IsValid() const
+    {
+        return errors.empty() && !installationDirectory.empty();
     }
 };
 
@@ -76,6 +89,13 @@ LODE_API CacheIdentityResult ResolvePackageCacheIdentity(
     const DependencyGraph& graph,
     size_t packageIndex,
     const PackageCacheLayout& layout);
+
+// Copies a validated source package into its immutable global identity
+// directory. Existing directories are reused and never overwritten.
+LODE_API CachePopulationResult PopulatePackageCache(
+    const PackageCacheLayout& layout,
+    const PackageCacheIdentity& identity,
+    const std::filesystem::path& sourceRoot);
 
 // Copies an immutable global installation into the project-local
 // lode_modules/<alias> view. The destination must not already exist; failed

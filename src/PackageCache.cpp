@@ -7,9 +7,11 @@
 #include "nlohmann/json.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <chrono>
 #include <cstdlib>
+#include <fstream>
 #include <system_error>
 #include <utility>
 
@@ -35,6 +37,11 @@ void AddError(CacheIdentityResult& result, std::string message)
 }
 
 void AddError(MaterializationResult& result, std::string message)
+{
+    result.errors.push_back(std::move(message));
+}
+
+void AddError(CachePopulationResult& result, std::string message)
 {
     result.errors.push_back(std::move(message));
 }
@@ -126,6 +133,88 @@ bool ContainsSymlink(const fs::path& root)
             return true;
     }
     return ec.value() != 0;
+}
+
+bool CopyDirectoryContents(const fs::path& source,
+                           const fs::path& destination,
+                           std::error_code& error)
+{
+    for (fs::directory_iterator it(source, error), end; it != end && !error; it.increment(error))
+    {
+        fs::copy(it->path(), destination / it->path().filename(),
+            fs::copy_options::recursive, error);
+    }
+    return !error;
+}
+
+bool FilesEqual(const fs::path& left, const fs::path& right, std::error_code& error)
+{
+    const auto leftSize = fs::file_size(left, error);
+    if (error)
+        return false;
+    const auto rightSize = fs::file_size(right, error);
+    if (error || leftSize != rightSize)
+        return false;
+
+    std::ifstream leftFile(left, std::ios::binary);
+    std::ifstream rightFile(right, std::ios::binary);
+    if (!leftFile.is_open() || !rightFile.is_open())
+    {
+        error = std::make_error_code(std::errc::io_error);
+        return false;
+    }
+
+    std::array<char, 64 * 1024> leftBuffer{};
+    std::array<char, 64 * 1024> rightBuffer{};
+    while (leftFile && rightFile)
+    {
+        leftFile.read(leftBuffer.data(), static_cast<std::streamsize>(leftBuffer.size()));
+        rightFile.read(rightBuffer.data(), static_cast<std::streamsize>(rightBuffer.size()));
+        if (leftFile.gcount() != rightFile.gcount())
+            return false;
+        if (!std::equal(leftBuffer.begin(),
+                        leftBuffer.begin() + leftFile.gcount(),
+                        rightBuffer.begin()))
+            return false;
+    }
+    return leftFile.eof() && rightFile.eof();
+}
+
+bool DirectoriesEqual(const fs::path& left, const fs::path& right, std::error_code& error)
+{
+    std::vector<std::string> leftNames;
+    std::vector<std::string> rightNames;
+    for (fs::directory_iterator it(left, error), end; it != end && !error; it.increment(error))
+        leftNames.push_back(it->path().filename().generic_string());
+    if (error)
+        return false;
+    for (fs::directory_iterator it(right, error), end; it != end && !error; it.increment(error))
+        rightNames.push_back(it->path().filename().generic_string());
+    if (error)
+        return false;
+
+    std::sort(leftNames.begin(), leftNames.end());
+    std::sort(rightNames.begin(), rightNames.end());
+    if (leftNames != rightNames)
+        return false;
+
+    for (const std::string& name : leftNames)
+    {
+        const fs::path leftEntry = left / name;
+        const fs::path rightEntry = right / name;
+        const bool leftDirectory = fs::is_directory(leftEntry, error);
+        const bool rightDirectory = fs::is_directory(rightEntry, error);
+        if (error || leftDirectory != rightDirectory)
+            return false;
+        if (leftDirectory)
+        {
+            if (!DirectoriesEqual(leftEntry, rightEntry, error))
+                return false;
+        }
+        else if (!FilesEqual(leftEntry, rightEntry, error))
+            return false;
+    }
+    return !error;
 }
 
 } // namespace
@@ -230,6 +319,100 @@ CacheIdentityResult ResolvePackageCacheIdentity(const DependencyGraph& graph,
     return result;
 }
 
+CachePopulationResult PopulatePackageCache(const PackageCacheLayout& layout,
+                                           const PackageCacheIdentity& identity,
+                                           const fs::path& sourceRoot)
+{
+    CachePopulationResult result;
+    result.installationDirectory = identity.installationDirectory;
+
+    std::error_code ec;
+    const fs::path globalRoot = fs::weakly_canonical(layout.globalModulesDirectory, ec);
+    const fs::path destination = fs::weakly_canonical(identity.installationDirectory, ec);
+    if (ec || !IsPathInside(destination, globalRoot))
+    {
+        result.installationDirectory.clear();
+        AddError(result, "Cannot populate package cache: identity directory is outside the Lode cache.");
+        return result;
+    }
+
+    const fs::path source = fs::weakly_canonical(sourceRoot, ec);
+    if (ec || !fs::is_directory(source, ec))
+    {
+        result.installationDirectory.clear();
+        AddError(result, "Cannot populate package cache: source package is not a directory: " +
+            PathToUtf8(sourceRoot));
+        return result;
+    }
+    if (ContainsSymlink(source))
+    {
+        result.installationDirectory.clear();
+        AddError(result, "Cannot populate package cache: source package contains a symbolic link.");
+        return result;
+    }
+
+    if (fs::is_symlink(destination, ec))
+    {
+        result.installationDirectory.clear();
+        AddError(result, "Cannot populate package cache: identity directory is a symbolic link.");
+        return result;
+    }
+    if (fs::is_directory(destination, ec))
+    {
+        if (ContainsSymlink(destination) || !DirectoriesEqual(source, destination, ec))
+        {
+            result.installationDirectory.clear();
+            AddError(result, "Cannot populate package cache: existing identity differs from the source package.");
+            return result;
+        }
+        result.reused = true;
+        return result;
+    }
+    if (fs::exists(destination, ec))
+    {
+        result.installationDirectory.clear();
+        AddError(result, "Cannot populate package cache: identity path is not a directory.");
+        return result;
+    }
+
+    const fs::path parent = destination.parent_path();
+    if (!fs::create_directories(parent, ec) && ec)
+    {
+        result.installationDirectory.clear();
+        AddError(result, "Cannot create package cache directory: " + ec.message());
+        return result;
+    }
+
+    const auto timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    const fs::path temporary = parent /
+        ("." + destination.filename().string() + ".tmp-" + std::to_string(timestamp));
+    if (!fs::create_directory(temporary, ec))
+    {
+        result.installationDirectory.clear();
+        AddError(result, "Cannot create temporary package cache directory: " + ec.message());
+        return result;
+    }
+
+    if (!CopyDirectoryContents(source, temporary, ec))
+    {
+        const std::string message = "Cannot populate package cache: " + ec.message();
+        fs::remove_all(temporary, ec);
+        result.installationDirectory.clear();
+        AddError(result, message);
+        return result;
+    }
+
+    fs::rename(temporary, destination, ec);
+    if (ec)
+    {
+        const std::string message = "Cannot finalize package cache installation: " + ec.message();
+        fs::remove_all(temporary, ec);
+        result.installationDirectory.clear();
+        AddError(result, message);
+    }
+    return result;
+}
+
 MaterializationResult MaterializePackage(const PackageCacheLayout& layout,
                                          const PackageCacheIdentity& identity,
                                          const fs::path& projectRoot,
@@ -275,6 +458,13 @@ MaterializationResult MaterializePackage(const PackageCacheLayout& layout,
     }
     if (fs::exists(destination, ec) || fs::is_symlink(destination, ec))
     {
+        if (fs::is_directory(destination, ec) && !ContainsSymlink(destination) &&
+            DirectoriesEqual(canonicalSource, destination, ec))
+        {
+            result.packageDirectory = destination;
+            result.reused = true;
+            return result;
+        }
         AddError(result, "Cannot materialize package: destination already exists: " +
             PathToUtf8(destination));
         return result;
@@ -296,21 +486,7 @@ MaterializationResult MaterializePackage(const PackageCacheLayout& layout,
         return result;
     }
 
-    bool copied = true;
-    for (fs::directory_iterator it(canonicalSource, ec), end; it != end && !ec; it.increment(ec))
-    {
-        fs::copy(it->path(), temporary / it->path().filename(),
-            fs::copy_options::recursive, ec);
-        if (ec)
-        {
-            copied = false;
-            break;
-        }
-    }
-    if (ec)
-        copied = false;
-
-    if (!copied)
+    if (!CopyDirectoryContents(canonicalSource, temporary, ec))
     {
         const std::string message = "Cannot copy global package installation: " + ec.message();
         fs::remove_all(temporary, ec);
