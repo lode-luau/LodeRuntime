@@ -17,15 +17,21 @@ file, but must not replace the Luau configuration format with a new one.
 
 ## Dependency declarations
 
-The shorthand form resolves a package from the configured registry:
+The shorthand form is reserved for an official Lode standard-library module.
 
 ```json
 {
   "dependencies": {
-    "signal": "^1.0.0"
+    "task": "1.0.0"
   }
 }
 ```
+
+For an official standard module, the package manager first checks the stdlib
+bundle associated with the installed Lode runtime. If the bundled version does
+not satisfy the requirement, it downloads only that module's GitHub Release
+artifact from the official LodeRuntime repository. This is a GitHub Release
+convention, not a Lode-owned registry.
 
 An explicit source may be used for Git or local development:
 
@@ -109,9 +115,16 @@ project/
     └── signal/
 ```
 
-Whether a global download cache exists, and where it is stored, is intentionally
-not part of this RFC. It must not appear in `.config.luau` or determine the
-project's import paths.
+The decided global cache root is `%USERPROFILE%\\.lode\\global\\lode_modules`.
+Downloaded archives and staging data remain outside the project and must not
+appear in `.config.luau` or determine the project's import paths.
+
+The runtime-owned stdlib is separate from project dependencies. A normal Lode
+distribution contains a complete stdlib bundle and its root `.config.luau`.
+The package manager does not put that bundle in `lode.lock`. When a project or
+transitive dependency requests an incompatible stdlib version, only the
+required module artifact is installed and the affected package receives a
+package-local `.config.luau` context.
 
 ## Lockfile
 
@@ -122,7 +135,7 @@ than the requested ranges. A lock entry must include at least:
 package identity
 resolved version
 source kind
-repository or registry source
+Git source or official stdlib source
 exact Git commit when applicable
 package/artifact checksum when applicable
 resolved aliases
@@ -146,6 +159,8 @@ the `require` string.
 
 ## Current compatibility boundary
 
-The current runtime does not parse `dependencies` from `lode.json`. Until the
-package manager generates the required `.config.luau` files, existing relative
-requires and manually configured aliases remain the supported behavior.
+The current runtime does not parse `dependencies` from `lode.json`. The
+runtime-owned stdlib fallback is independent of dependency resolution. Until
+the package manager generates project and package-local `.config.luau` files,
+existing relative requires and manually configured aliases remain the
+supported behavior.

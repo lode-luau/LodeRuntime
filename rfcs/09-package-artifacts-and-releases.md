@@ -2,13 +2,17 @@
 
 ## Status
 
-Accepted design direction. The release automation is not implemented yet.
+Accepted design direction. The Lode nightly distribution now publishes the
+runtime/stdlib bundle and SDK baseline. Per-package release automation remains
+separate work.
 
 ## Summary
 
 The normal package-manager installation downloads a package already built by
 package CI. The consumer does not compile the package during a regular install.
-GitHub Releases provide the compressed artifacts and their checksums.
+GitHub Releases provide the compressed artifacts and their checksums. The Lode
+nightly distribution also publishes a complete runtime/stdlib bundle and
+individual standard-module artifacts for selective version resolution.
 
 ## Package source layout
 
@@ -87,16 +91,18 @@ unit. A lock entry may record the Git commit that produced the release when the
 source is Git-based, but the package manager must also record the artifact
 checksum.
 
-Possible asset names are illustrative and are not yet final:
+Package asset names are:
 
 ```text
-lode-http-1.0.0-windows-x64-debug.zip
-lode-http-1.0.0-windows-x64-release.zip
-lode-http-1.0.0-linux-x64-release.tar.gz
+lode-http-1.0.0-windows-x64.zip
+lode-stdlib-task-1.0.0-windows-x64.zip
+lode-windows-x64-1.0.0-nightly.YYYYMMDD.N.zip
+lode-sdk-windows-x64-1.0.0-nightly.YYYYMMDD.N.zip
 ```
 
-The final naming convention must be defined together with the release
-metadata format.
+Package artifacts carry their package version. The runtime and stdlib bundle
+carry the nightly runtime version. The lockfile records the exact GitHub
+Release tag and SHA-256 for every selected artifact.
 
 ## Release requirements
 
@@ -136,10 +142,26 @@ module, and include the required notices. A target that cannot provide this
 package-local runtime is rejected from publication rather than represented by
 an invented manifest dependency.
 
-## Open decisions
+## Standard-library distribution
 
-- One archive containing Debug and Release versus separate configuration
-  artifacts.
-- The final release asset naming convention.
-- The release metadata schema.
-- Whether a registry index mirrors GitHub Release metadata.
+The standard library is runtime-owned, not a normal `lode.json` dependency.
+The full end-user archive contains:
+
+```text
+bin/lode.exe
+bin/LodeCore.dll
+bin/uv.dll
+stdlib/.config.luau
+stdlib/modules/<module>/
+VERSION
+```
+
+The root stdlib configuration exposes the bundled module aliases. The nightly
+also publishes one `lode-stdlib-<name>-<version>-<platform>-<architecture>`
+archive per standard module. A package requesting an exact standard-module
+version can therefore download only that artifact; if the bundled version is
+compatible, no additional download is required.
+
+No new stdlib manifest or Lode-owned registry is required. Existing module
+`lode.json` files provide names, versions, and dependency declarations, while
+the release tag and checksum provide artifact identity.
