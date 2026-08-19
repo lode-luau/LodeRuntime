@@ -3,7 +3,8 @@
 ## Status
 
 Accepted design. The first CMake and runtime pieces are implemented in this
-repository. SDK release packaging and external-package validation remain
+repository. Nightly SDK packaging and external-package validation are wired
+for Windows x64; additional SDK targets and stable release publication remain
 follow-up work.
 
 ## Scope
