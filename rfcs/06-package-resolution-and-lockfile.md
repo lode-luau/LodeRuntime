@@ -38,8 +38,8 @@ An explicit source may be used for Git or local development:
 ```json
 {
   "dependencies": {
-    "signal": {
-      "git": "yanlvl99/lode-signal",
+    "example": {
+      "git": "<git-repository>",
       "version": "^1.0.0"
     }
   }
@@ -52,8 +52,8 @@ it is not declared a second time:
 ```json
 {
   "dependencies": {
-    "signal": {
-      "path": "../lode-signal",
+    "example": {
+      "path": "../example-package",
       "version": "1.0.0"
     }
   }
@@ -73,12 +73,12 @@ commit rather than relying on a moving branch or the word `latest`.
 
 ## Alias generation
 
-For a dependency key named `signal`, the package manager generates a relative
+For a dependency key named `<alias>`, the package manager generates a relative
 alias in `.config.luau`:
 
 ```lua
 aliases = {
-    signal = "lode_modules/signal",
+    ["<alias>"] = "lode_modules/<alias>",
 }
 ```
 

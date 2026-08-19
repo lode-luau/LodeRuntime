@@ -94,7 +94,7 @@ checksum.
 Package asset names are:
 
 ```text
-lode-http-1.0.0-windows-x64.zip
+<package-name>-1.0.0-windows-x64.zip
 lode-stdlib-task-1.0.0-windows-x64.zip
 lode-windows-x64-1.0.0-nightly.YYYYMMDD.N.zip
 lode-sdk-windows-x64-1.0.0-nightly.YYYYMMDD.N.zip

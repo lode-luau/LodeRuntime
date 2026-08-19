@@ -35,15 +35,11 @@ The initial package-manager contract is:
 {
   "name": "signal",
   "version": "1.0.0",
-  "description": "Lode signal module",
+  "description": "Lode signal module (observer pattern with Connect, Once, Wait)",
   "author": "Lode Team",
   "license": "MIT",
-  "repository": "yanlvl99/lode-signal",
   "dependencies": {
-    "task": "^1.0.0"
-  },
-  "devDependencies": {
-    "sanity": "^1.0.0"
+    "task": "1.0.0"
   }
 }
 ```
@@ -55,7 +51,7 @@ The fields have these meanings:
 | `name` | Package manager/registry | Canonical package identity. |
 | `version` | Package manager/registry | SemVer package version. |
 | `description`, `author`, `license` | Package manager/registry | Package metadata. |
-| `repository` | Package manager/registry | Canonical source repository. |
+| `repository` | Package manager/registry | Canonical source repository for external packages; runtime-owned stdlib modules omit it. |
 | `dependencies` | Package manager | Runtime Lode package requirements. |
 | `devDependencies` | Package manager/CI | Test and development requirements. |
 | `libraries` | Runtime and package manager | Native artifact map and packaging validation. |
@@ -66,19 +62,22 @@ A native package adds `libraries` to the same manifest:
 {
   "name": "http",
   "version": "0.1.0",
-  "description": "Lode HTTP module",
+  "description": "Lode HTTP client module (Async/LibUV)",
   "author": "Lode Team",
   "license": "MIT",
-  "repository": "yanlvl99/lode-http",
   "libraries": {
     "windows": {
-      "x64": "libs/windows/x64/http.dll"
+      "x64": "libs/windows/x64/http.dll",
+      "arm64": "libs/windows/arm64/http.dll",
+      "x86": "libs/windows/x86/http.dll"
     },
     "linux": {
-      "x64": "libs/linux/x64/http.so"
+      "x64": "libs/linux/x64/http.so",
+      "arm64": "libs/linux/arm64/http.so"
     },
     "macos": {
-      "x64": "libs/macos/x64/http.dylib"
+      "x64": "libs/macos/x64/http.dylib",
+      "arm64": "libs/macos/arm64/http.dylib"
     }
   }
 }
