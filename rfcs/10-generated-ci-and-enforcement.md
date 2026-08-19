@@ -2,8 +2,10 @@
 
 ## Status
 
-Accepted design. The generated workflow command itself is not implemented;
-the native build contract it must invoke is now defined by RFC 08.
+Accepted design. `lode ci init` now generates the first Windows x64 native
+package workflow baseline. `lode ci update` and additional target matrices are
+not implemented yet. The native build contract it invokes is defined by RFC
+08.
 
 ## Commands
 
@@ -16,7 +18,10 @@ lode ci update
 ```
 
 `lode ci init` creates `.github/workflows/lode.yml` and refuses to overwrite an
-existing file unless explicitly forced. It does not execute package code.
+existing file unless explicitly forced. It validates package metadata and file
+presence only; it does not execute package code. The initial generator accepts
+native Windows x64 packages and emits a pure-Luau test workflow. Other native
+targets are rejected until their runner and SDK matrix is implemented.
 
 `lode ci validate --source` validates the development tree: `lode.json`,
 `init.luau`, `LICENSE`, native library path declarations, and `CMakeLists.txt`
