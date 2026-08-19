@@ -94,6 +94,18 @@ builds are a development and package-maintainer workflow and must be explicit.
 
 ## Continuous integration
 
+### Package test entry
+
+The default package test entry is `tests/run.luau`. It is executed through
+the matching `lode` executable from the SDK, with the package's `.config.luau`
+active. A native package test loads the package through its configured alias;
+the package's own local test configuration may map that alias to `.`.
+
+The default does not prevent a maintainer from choosing another test script.
+That choice belongs in the package CMake/CTest configuration or the
+user-editable workflow, not in a new `test`, `entry`, or `type` field in
+`lode.json`.
+
 Pull request CI for a package must:
 
 1. validate the manifest;
