@@ -122,43 +122,16 @@ void RollbackMaterializedPackages(const fs::path& projectRoot,
 
 } // namespace
 
-InstallResult InstallLocked(const fs::path& packageRoot,
-                            const fs::path& standardLibraryRoot,
-                            bool includeDevelopmentDependencies)
+InstallResult InstallResolvedGraph(const DependencyGraph& graph,
+                                   const fs::path& root,
+                                   const PackageCacheLayout& cacheLayout,
+                                   bool includeDevelopmentDependencies)
 {
     InstallResult result;
-    const ValidationReport validation = Validate(
-        packageRoot, ValidationMode::Source, standardLibraryRoot);
-    if (!validation.IsValid())
-    {
-        result.errors = validation.errors;
-        return result;
-    }
-
-    const DependencyGraph& graph = validation.dependencyGraph;
-    const fs::path root = graph.packages[graph.root].root;
-    const fs::path lockfilePath = root / "lode.lock";
     const std::vector<bool> installablePackages = CollectInstallablePackages(
         graph, includeDevelopmentDependencies);
-    if (HasInstallEdges(graph, installablePackages, includeDevelopmentDependencies))
-    {
-        const LockfileResult lock = ValidateLockfile(lockfilePath, graph);
-        if (!lock.IsValid())
-        {
-            result.errors = lock.errors;
-            return result;
-        }
-    }
-
     if (!HasInstallEdges(graph, installablePackages, includeDevelopmentDependencies))
         return result;
-
-    const CacheLayoutResult cache = ResolvePackageCacheLayout();
-    if (!cache.IsValid())
-    {
-        result.errors = cache.errors;
-        return result;
-    }
 
     std::map<std::string, PackageCacheIdentity> aliases;
     std::map<size_t, PackageCacheIdentity> packages;
@@ -182,7 +155,7 @@ InstallResult InstallLocked(const fs::path& packageRoot,
             if (package == packages.end())
             {
                 const CacheIdentityResult identity = ResolvePackageCacheIdentity(
-                    graph, target, *cache.layout);
+                    graph, target, cacheLayout);
                 if (!identity.IsValid())
                 {
                     result.errors.insert(result.errors.end(),
@@ -210,7 +183,7 @@ InstallResult InstallLocked(const fs::path& packageRoot,
     for (const auto& [packageIndex, identity] : packages)
     {
         const CachePopulationResult population = PopulatePackageCache(
-            *cache.layout, identity, graph.packages[packageIndex].root);
+            cacheLayout, identity, graph.packages[packageIndex].root);
         if (!population.IsValid())
         {
             result.errors.insert(result.errors.end(),
@@ -224,7 +197,7 @@ InstallResult InstallLocked(const fs::path& packageRoot,
     for (const auto& [alias, identity] : aliases)
     {
         const MaterializationResult materialization = MaterializePackage(
-            *cache.layout, identity, root, alias);
+            cacheLayout, identity, root, alias);
         if (!materialization.IsValid())
         {
             result.errors.insert(result.errors.end(),
@@ -278,6 +251,84 @@ InstallResult InstallLocked(const fs::path& packageRoot,
         }
     }
 
+    return result;
+}
+
+InstallResult InstallLocked(const fs::path& packageRoot,
+                            const fs::path& standardLibraryRoot,
+                            bool includeDevelopmentDependencies)
+{
+    InstallResult result;
+    const ValidationReport validation = Validate(
+        packageRoot, ValidationMode::Source, standardLibraryRoot);
+    if (!validation.IsValid())
+    {
+        result.errors = validation.errors;
+        return result;
+    }
+
+    const DependencyGraph& graph = validation.dependencyGraph;
+    const fs::path root = graph.packages[graph.root].root;
+    const std::vector<bool> installablePackages = CollectInstallablePackages(
+        graph, includeDevelopmentDependencies);
+    if (HasInstallEdges(graph, installablePackages, includeDevelopmentDependencies))
+    {
+        const LockfileResult lock = ValidateLockfile(root / "lode.lock", graph);
+        if (!lock.IsValid())
+        {
+            result.errors = lock.errors;
+            return result;
+        }
+    }
+
+    const CacheLayoutResult cache = ResolvePackageCacheLayout();
+    if (!cache.IsValid())
+    {
+        result.errors = cache.errors;
+        return result;
+    }
+
+    return InstallResolvedGraph(graph, root, *cache.layout,
+                                includeDevelopmentDependencies);
+}
+
+InstallResult InstallLocal(const fs::path& packageRoot,
+                           const fs::path& standardLibraryRoot,
+                           bool includeDevelopmentDependencies)
+{
+    InstallResult result;
+    const ValidationReport validation = Validate(
+        packageRoot, ValidationMode::Source, standardLibraryRoot);
+    if (!validation.IsValid())
+    {
+        result.errors = validation.errors;
+        return result;
+    }
+
+    const DependencyGraph& graph = validation.dependencyGraph;
+    const fs::path root = graph.packages[graph.root].root;
+    const LockfileResult lock = BuildLockfile(graph);
+    if (!lock.IsValid())
+    {
+        result.errors = lock.errors;
+        return result;
+    }
+
+    const CacheLayoutResult cache = ResolvePackageCacheLayout();
+    if (!cache.IsValid())
+    {
+        result.errors = cache.errors;
+        return result;
+    }
+
+    result = InstallResolvedGraph(graph, root, *cache.layout,
+                                  includeDevelopmentDependencies);
+    if (!result.IsValid())
+        return result;
+
+    const LockfileResult written = WriteLockfile(root / "lode.lock", graph);
+    if (!written.IsValid())
+        result.errors = written.errors;
     return result;
 }
 

@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <system_error>
+#include <thread>
 #include <utility>
 
 namespace Lode::Package
@@ -145,6 +146,24 @@ bool CopyDirectoryContents(const fs::path& source,
             fs::copy_options::recursive, error);
     }
     return !error;
+}
+
+bool RenameWithRetry(const fs::path& source,
+                     const fs::path& destination,
+                     std::error_code& error)
+{
+    constexpr int attempts = 20;
+    for (int attempt = 0; attempt < attempts; ++attempt)
+    {
+        error.clear();
+        fs::rename(source, destination, error);
+        if (!error)
+            return true;
+
+        if (attempt + 1 < attempts)
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    return false;
 }
 
 bool FilesEqual(const fs::path& left, const fs::path& right, std::error_code& error)
@@ -402,10 +421,20 @@ CachePopulationResult PopulatePackageCache(const PackageCacheLayout& layout,
         return result;
     }
 
-    fs::rename(temporary, destination, ec);
+    RenameWithRetry(temporary, destination, ec);
     if (ec)
     {
-        const std::string message = "Cannot finalize package cache installation: " + ec.message();
+        std::error_code destinationError;
+        if (fs::is_directory(destination, destinationError) &&
+            !ContainsSymlink(destination) &&
+            DirectoriesEqual(source, destination, destinationError))
+        {
+            fs::remove_all(temporary, destinationError);
+            result.reused = true;
+            return result;
+        }
+        const std::string message = "Cannot finalize package cache installation from '" +
+            PathToUtf8(temporary) + "' to '" + PathToUtf8(destination) + "': " + ec.message();
         fs::remove_all(temporary, ec);
         result.installationDirectory.clear();
         AddError(result, message);
@@ -494,10 +523,21 @@ MaterializationResult MaterializePackage(const PackageCacheLayout& layout,
         return result;
     }
 
-    fs::rename(temporary, destination, ec);
+    RenameWithRetry(temporary, destination, ec);
     if (ec)
     {
-        const std::string message = "Cannot finalize local package installation: " + ec.message();
+        std::error_code destinationError;
+        if (fs::is_directory(destination, destinationError) &&
+            !ContainsSymlink(destination) &&
+            DirectoriesEqual(canonicalSource, destination, destinationError))
+        {
+            fs::remove_all(temporary, destinationError);
+            result.packageDirectory = destination;
+            result.reused = true;
+            return result;
+        }
+        const std::string message = "Cannot finalize local package installation from '" +
+            PathToUtf8(temporary) + "' to '" + PathToUtf8(destination) + "': " + ec.message();
         fs::remove_all(temporary, ec);
         AddError(result, message);
         return result;

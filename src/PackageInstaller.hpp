@@ -30,4 +30,12 @@ LODE_API InstallResult InstallLocked(
     const std::filesystem::path& standardLibraryRoot,
     bool includeDevelopmentDependencies);
 
+// Resolves and installs the currently available stdlib and local path graph,
+// then writes its deterministic lockfile. Git resolution, downloads, and
+// native package builds are intentionally unsupported by this local resolver.
+LODE_API InstallResult InstallLocal(
+    const std::filesystem::path& packageRoot,
+    const std::filesystem::path& standardLibraryRoot,
+    bool includeDevelopmentDependencies);
+
 } // namespace Lode::Package

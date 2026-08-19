@@ -62,7 +62,7 @@ int main(int argc, char* argv[])
     {
         Lode::Logger::Info("Lode (lode) v1.0.0");
         Lode::Logger::Info("Usage: lode <file.luac | file.luau>");
-        Lode::Logger::Info("       lode install --locked [--dev] [package-root]");
+        Lode::Logger::Info("       lode install [--locked] [--dev] [package-root]");
         Lode::Logger::Info("       lode ci validate [--source|--artifact] [--locked] [package-root]");
         Lode::Logger::Info("       lode ci init [--force] [package-root]");
         Lode::Logger::Info("       lode ci update [package-root]");
@@ -89,7 +89,7 @@ int main(int argc, char* argv[])
             }
             else if (argument.rfind("--", 0) == 0 || hasPackageRoot)
             {
-                Lode::Logger::Error("Usage: lode install --locked [--dev] [package-root]");
+                Lode::Logger::Error("Usage: lode install [--locked] [--dev] [package-root]");
                 return 1;
             }
             else
@@ -99,21 +99,18 @@ int main(int argc, char* argv[])
             }
         }
 
-        if (!locked)
-        {
-            Lode::Logger::Error(
-                "The initial installer only supports locked graphs. Use: lode install --locked [--dev] [package-root]");
-            return 1;
-        }
-
-        Lode::Package::InstallResult result = Lode::Package::InstallLocked(
-            packageRoot, standardLibraryPath, includeDevelopmentDependencies);
+        Lode::Package::InstallResult result = locked
+            ? Lode::Package::InstallLocked(
+                packageRoot, standardLibraryPath, includeDevelopmentDependencies)
+            : Lode::Package::InstallLocal(
+                packageRoot, standardLibraryPath, includeDevelopmentDependencies);
         for (const std::string& error : result.errors)
             Lode::Logger::Error(error);
         if (!result.IsValid())
             return 1;
 
-        Lode::Logger::Success("Locked package installation completed: " +
+        Lode::Logger::Success(std::string(locked ? "Locked" : "Local") +
+            " package installation completed: " +
             PathToUtf8(fs::absolute(packageRoot)));
         return 0;
     }
