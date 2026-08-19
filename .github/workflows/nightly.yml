@@ -121,12 +121,12 @@ jobs:
         shell: pwsh
         run: |
           $ver = "${{ steps.version.outputs.version }}"
-          $runtimeDist = "dist/runtime"
-          $modulesDist = "dist/modules"
+          $distributionDist = "dist/lode"
+          $runtimeBinDist = "$distributionDist/bin"
+          $stdlibDist = "$distributionDist/stdlib"
           $sdkDist = "dist/sdk"
-          New-Item -ItemType Directory -Force -Path $runtimeDist | Out-Null
-          New-Item -ItemType Directory -Force -Path $modulesDist | Out-Null
-          New-Item -ItemType Directory -Force -Path $sdkDist | Out-Null
+          $modulePackagesDist = "dist/stdlib-packages"
+          New-Item -ItemType Directory -Force -Path $runtimeBinDist, $stdlibDist, $sdkDist, $modulePackagesDist | Out-Null
 
           # ---- SDK artifact: install both configurations into one prefix ----
           # The SDK is consumed through find_package(Lode CONFIG REQUIRED).
@@ -137,20 +137,71 @@ jobs:
           Copy-Item LICENSE, README.md $sdkDist
           Set-Content -Path "$sdkDist/VERSION" -Value $ver
 
-          # ---- Runtime artifact: executable, core DLLs, headers ----
-          Copy-Item build-release/bin/Release/lode.exe $runtimeDist
-          Copy-Item build-release/bin/Release/LodeCore.dll $runtimeDist
-          Copy-Item build-release/bin/Release/uv.dll $runtimeDist
-          Copy-Item include/Lode $runtimeDist/Lode -Recurse
-          Copy-Item LICENSE, README.md $runtimeDist
-          Set-Content -Path "$runtimeDist/VERSION" -Value $ver
+          # ---- Runtime distribution: executable and runtime DLLs ----
+          # The end-user archive contains the runtime and the bundled stdlib.
+          # SDK headers and CMake targets remain in the separate SDK archive.
+          Copy-Item build-release/bin/Release/lode.exe $runtimeBinDist
+          Copy-Item build-release/bin/Release/LodeCore.dll $runtimeBinDist
+          Copy-Item build-release/bin/Release/uv.dll $runtimeBinDist
+          Copy-Item LICENSE, README.md $distributionDist
+          Set-Content -Path "$distributionDist/VERSION" -Value $ver
 
-          # ---- Modules artifact: recursive module discovery ----
+          # ---- Standard library: recursive module discovery ----
           # Every directory (recursively) that has a lode.json manifest is a
-          # package (native or pure-Luau). This supports nested modules such as
-          # filesystem/path without touching this workflow when modules change.
+          # standard module (native or pure-Luau). This supports nested modules
+          # such as filesystem/path without touching this workflow when modules
+          # change.
           $moduleDirs = Get-ChildItem modules -Directory -Recurse | Where-Object { Test-Path (Join-Path $_.FullName "lode.json") }
           $modulesRoot = (Resolve-Path modules).Path
+          $moduleRecords = @{}
+
+          foreach ($mdir in $moduleDirs) {
+              $manifestPath = Join-Path $mdir.FullName "lode.json"
+              $manifest = Get-Content -Raw $manifestPath | ConvertFrom-Json
+              $name = [string]$manifest.name
+              $version = [string]$manifest.version
+              $rel = $mdir.FullName.Substring($modulesRoot.Length + 1).Replace('\', '/')
+
+              if ([string]::IsNullOrWhiteSpace($name) -or [string]::IsNullOrWhiteSpace($version)) {
+                  throw "Standard module manifest is missing name or version: $manifestPath"
+              }
+              if ($moduleRecords.ContainsKey($name)) {
+                  throw "Duplicate standard module name '$name' in $manifestPath"
+              }
+              if ($version -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
+                  throw "Standard module '$name' has an invalid SemVer: $version"
+              }
+
+              $moduleRecords[$name] = [pscustomobject]@{
+                  Name = $name
+                  Version = $version
+                  RelativePath = $rel
+                  SourcePath = $mdir.FullName
+                  Manifest = $manifest
+              }
+          }
+
+          # Standard-module dependencies are resolved against this same
+          # nightly bundle. They use exact versions so a bundle cannot silently
+          # ship an incompatible transitive module.
+          foreach ($record in $moduleRecords.Values) {
+              $dependencies = $record.Manifest.dependencies
+              if ($null -eq $dependencies) { continue }
+
+              foreach ($dependency in $dependencies.PSObject.Properties) {
+                  if ($dependency.Value -isnot [string]) {
+                      throw "Standard module '$($record.Name)' must use an exact version string for dependency '$($dependency.Name)'."
+                  }
+                  $requestedVersion = [string]$dependency.Value
+                  if (-not $moduleRecords.ContainsKey($dependency.Name)) {
+                      throw "Standard module '$($record.Name)' depends on missing standard module '$($dependency.Name)'."
+                  }
+                  $availableVersion = $moduleRecords[$dependency.Name].Version
+                  if ($requestedVersion -ne $availableVersion) {
+                      throw "Standard module '$($record.Name)' requires $($dependency.Name)@$requestedVersion, but the nightly bundle contains $availableVersion."
+                  }
+              }
+          }
 
           # Map of module relative paths (forward slashes) so a parent module's
           # copy skips its nested module directories (handled separately).
@@ -160,12 +211,11 @@ jobs:
               $moduleRelSet[$rel] = $true
           }
 
-          $shipped = @()
-          foreach ($mdir in $moduleDirs) {
-              $rel = $mdir.FullName.Substring($modulesRoot.Length + 1).Replace('\', '/')
-              $name = $mdir.Name
+          foreach ($record in ($moduleRecords.Values | Sort-Object RelativePath)) {
+              $rel = $record.RelativePath
+              $name = $record.Name
               $src = "modules/$rel"
-              $dst = Join-Path $modulesDist "modules/$rel"
+              $dst = Join-Path $stdlibDist "modules/$rel"
               New-Item -ItemType Directory -Force -Path $dst | Out-Null
 
               $isNative = Test-Path "$src/CMakeLists.txt"
@@ -207,42 +257,43 @@ jobs:
                       Write-Error "Native library for $name was not found at $libRelease, $libFlat, or $libBin"
                   }
               }
-              $shipped += $rel
+              $packageDst = Join-Path $modulePackagesDist $name
+              New-Item -ItemType Directory -Force -Path $packageDst | Out-Null
+              Copy-Item (Join-Path $dst '*') $packageDst -Recurse -Force
+              if (-not (Test-Path (Join-Path $packageDst "LICENSE"))) {
+                  Copy-Item LICENSE (Join-Path $packageDst "LICENSE")
+              }
+
+              $moduleArchive = "lode-stdlib-$name-$($record.Version)-windows-x64.zip"
+              Compress-Archive -Path "$packageDst/*" -DestinationPath $moduleArchive -Force
+              $moduleHash = (Get-FileHash -LiteralPath $moduleArchive -Algorithm SHA256).Hash.ToLowerInvariant()
+              "$moduleHash  $moduleArchive" | Set-Content -Path "$moduleArchive.sha256" -Encoding ascii
           }
 
           # Alias config so require("@name") resolves for every shipped module.
-          $aliasLines = foreach ($mdir in $moduleDirs) {
-              $rel = $mdir.FullName.Substring($modulesRoot.Length + 1).Replace('\', '/')
-              $name = $mdir.Name
-              "            $name = `"modules/$rel`","
+          $aliasLines = foreach ($record in ($moduleRecords.Values | Sort-Object RelativePath)) {
+              $rel = $record.RelativePath
+              $name = $record.Name
+              $aliasLine = ('            ' + $name + ' = "modules/' + $rel + '",')
+              $aliasLine
           }
           $config = @"
           return {
               luau = {
-                  languagemode = "nonstrict",
-                  lint = {
-                      ["*"] = true,
-                      LocalUnused = false
-                  },
-                  linterrors = true,
-                  typeerrors = true,
                   aliases = {
           $($aliasLines -join "`n")
                   }
               }
           }
           "@
-          Set-Content -Path "$modulesDist/.config.luau" -Value $config
-          Copy-Item LICENSE, README.md $modulesDist
-          Set-Content -Path "$modulesDist/VERSION" -Value $ver
+          Set-Content -Path "$stdlibDist/.config.luau" -Value $config
+          Set-Content -Path "$stdlibDist/VERSION" -Value $ver
 
-          Compress-Archive -Path $runtimeDist -DestinationPath "lode-windows-x64-$ver.zip"
-          Compress-Archive -Path $modulesDist -DestinationPath "lode-windows-x64-modules-$ver.zip"
+          Compress-Archive -Path "$distributionDist/*" -DestinationPath "lode-windows-x64-$ver.zip"
           Compress-Archive -Path "$sdkDist/*" -DestinationPath "lode-sdk-windows-x64-$ver.zip"
 
           foreach ($archive in @(
               "lode-windows-x64-$ver.zip",
-              "lode-windows-x64-modules-$ver.zip",
               "lode-sdk-windows-x64-$ver.zip"
           )) {
               $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -256,10 +307,10 @@ jobs:
           gh release create "${{ steps.version.outputs.version }}" \
             "lode-windows-x64-${{ steps.version.outputs.version }}.zip" \
             "lode-windows-x64-${{ steps.version.outputs.version }}.zip.sha256" \
-            "lode-windows-x64-modules-${{ steps.version.outputs.version }}.zip" \
-            "lode-windows-x64-modules-${{ steps.version.outputs.version }}.zip.sha256" \
             "lode-sdk-windows-x64-${{ steps.version.outputs.version }}.zip" \
             "lode-sdk-windows-x64-${{ steps.version.outputs.version }}.zip.sha256" \
+            lode-stdlib-*.zip \
+            lode-stdlib-*.zip.sha256 \
             --title "Nightly ${{ steps.version.outputs.version }}" \
-            --notes "Automated nightly build. Runtime, SDK, bundled modules, sanity suite, and CTest validated." \
+            --notes "Automated nightly build. Runtime, bundled stdlib, individual stdlib artifacts, SDK, sanity suite, and CTest validated." \
             --prerelease
