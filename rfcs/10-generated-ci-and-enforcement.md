@@ -2,10 +2,10 @@
 
 ## Status
 
-Accepted design. `lode ci init` now generates the first Windows x64 native
-package workflow baseline. `lode ci update` and additional target matrices are
-not implemented yet. The native build contract it invokes is defined by RFC
-08.
+Accepted design. `lode ci init` generates the first Windows x64 native package
+workflow baseline, and `lode ci update` refreshes only its managed block. The
+native build contract it invokes is defined by RFC 08. Additional target
+matrices are not implemented yet.
 
 ## Commands
 
@@ -36,9 +36,11 @@ configuration metadata, package-local runtime libraries, and required
 third-party notices. The flagless `lode ci validate` form remains an alias for
 `--artifact`.
 
-`lode ci update` updates only the generated baseline section. User-owned jobs
-and configuration must remain outside that section; silent replacement of the
-workflow is forbidden.
+`lode ci update` requires an existing workflow containing the exact managed
+markers emitted by `lode ci init`. It updates only the generated baseline
+section. User-owned jobs and configuration must remain outside that section;
+missing or malformed markers cause the command to fail instead of replacing
+the workflow silently.
 
 ## Native workflow
 
@@ -98,8 +100,8 @@ The repository's branch protection, not the CLI, enforces these checks.
 
 ## Workflow ownership
 
-The first implementation will generate a versioned local workflow template.
-The generated baseline will identify its template version, and
-`lode ci update` will preserve user-owned sections. A reusable workflow may be
-introduced later only after its repository, pinning policy, and required-check
-stability are defined.
+The first implementation generates a versioned local workflow template. The
+generated baseline identifies its template version, and `lode ci update`
+preserves user-owned sections outside the managed markers. A reusable workflow
+may be introduced later only after its repository, pinning policy, and
+required-check stability are defined.
