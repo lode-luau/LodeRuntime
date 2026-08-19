@@ -558,6 +558,27 @@ static ModuleLoadResult LoadModuleNoJump(lua_State* L, void* ctx, const char* pa
                             }
                         }
 
+                        // SDK-built modules expose an opaque ABI identifier.
+                        // Compare it before calling LodeModuleInit so a module
+                        // built against an incompatible C++/Luau boundary is
+                        // rejected without crossing that boundary. Modules
+                        // without this symbol remain loadable for legacy
+                        // compatibility; package publication will require it.
+                        auto abiSymResult = lib->GetSymbol("LodeModuleABI");
+                        if (abiSymResult.IsOk())
+                        {
+                            typedef const char* (*LodeModuleABIFn)();
+                            LodeModuleABIFn abiFn = reinterpret_cast<LodeModuleABIFn>(abiSymResult.GetValue());
+                            const char* moduleAbi = abiFn ? abiFn() : nullptr;
+                            const char* runtimeAbi = LodeAbiId();
+                            if (!moduleAbi || !runtimeAbi || std::strcmp(moduleAbi, runtimeAbi) != 0)
+                            {
+                                return { 0, "Native library " + PathToUtf8(fullLibPath) +
+                                            " was built for ABI '" + (moduleAbi ? moduleAbi : "<missing>") +
+                                            "' but the running runtime requires '" + (runtimeAbi ? runtimeAbi : "<missing>") + "'." };
+                            }
+                        }
+
                         std::string nativeModulePath = PathToUtf8(dirPath);
                         lua_pushstring(L, nativeModulePath.c_str());
                         lua_setfield(L, LUA_REGISTRYINDEX, "_LODE_NATIVE_MODULE_PATH");

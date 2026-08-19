@@ -25,7 +25,12 @@ endif()
 # its header-only target can be added via FetchContent_MakeAvailable below.
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 
-project(LodeRuntime LANGUAGES C CXX)
+project(LodeRuntime VERSION 1.0.0 LANGUAGES C CXX)
+
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
+
+set(LODE_ABI_ID "lode-abi-1" CACHE STRING "Native ABI identifier exported by the Lode SDK")
 
 if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Debug CACHE STRING "Build type" FORCE)
@@ -131,7 +136,13 @@ FetchContent_Declare(
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
 
+# FetchContent projects are build dependencies, not part of Lode's install
+# tree. Prevent their own install scripts from being pulled into the SDK
+# package; Lode exports the targets and headers it intentionally supports
+# below.
+set(CMAKE_SKIP_INSTALL_RULES TRUE)
 FetchContent_MakeAvailable(luau json libuv rapidjson)
+unset(CMAKE_SKIP_INSTALL_RULES)
 
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -214,6 +225,21 @@ target_compile_definitions(LodeCore PRIVATE LODE_CORE_BUILD)
 # to load a module built with a different CRT/STL ABI (Debug vs Release) than
 # the runtime.
 target_compile_definitions(LodeCore PUBLIC LODE_BUILD_CONFIG_NAME=$<CONFIG> LODE_HAS_BUILD_CONFIG)
+target_compile_definitions(LodeCore PUBLIC LODE_ABI_ID=\"${LODE_ABI_ID}\")
+
+# Public SDK target names. LodeCore remains the implementation target used by
+# this superbuild; the namespaced targets are the stable package-facing API.
+set_target_properties(LodeCore PROPERTIES EXPORT_NAME Core)
+add_library(LodeModule INTERFACE)
+set_target_properties(LodeModule PROPERTIES EXPORT_NAME Module)
+target_link_libraries(LodeModule INTERFACE LodeCore)
+target_compile_definitions(LodeModule INTERFACE
+    LODE_BUILD_CONFIG_NAME=$<CONFIG>
+    LODE_HAS_BUILD_CONFIG
+    LODE_ABI_ID=\"${LODE_ABI_ID}\"
+)
+add_library(Lode::Core ALIAS LodeCore)
+add_library(Lode::Module ALIAS LodeModule)
 
 target_include_directories(LodeCore PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -233,12 +259,18 @@ target_link_libraries(LodeCore PUBLIC
     ${CMAKE_DL_LIBS}
 )
 
-# Main Executable LodeRuntime (lode_runtime on Linux/macOS, lode_runtime.exe on Windows)
-add_executable(lode_runtime
+# Main Executable lode (lode on Linux/macOS, lode.exe on Windows)
+add_executable(lode
     src/Runtime.cpp
 )
 
-target_link_libraries(lode_runtime PRIVATE LodeCore Luau.Compiler Luau.Ast Luau.Analysis)
+if(WIN32)
+    target_sources(lode PRIVATE src/Runtime.rc)
+endif()
+
+target_link_libraries(lode PRIVATE LodeCore Luau.Compiler Luau.Ast Luau.Analysis)
+
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/LodeNativeModule.cmake")
 
 # Benchmark harness (opt-in: -DLODE_BUILD_BENCH=ON keeps the nightly build unchanged)
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/bench/CMakeLists.txt")
@@ -256,3 +288,113 @@ enable_testing()
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.txt")
     add_subdirectory(tests)
 endif()
+
+# Installable CMake package used to build native packages outside this
+# repository. All transitive Luau targets are exported because native modules
+# call Luau's C API in addition to calling Lode's C++ wrappers.
+set(LODE_LUAU_TARGETS
+    Luau.Common
+    Luau.Ast
+    Luau.Bytecode
+    Luau.Compiler
+    Luau.Config
+    Luau.Analysis
+    Luau.CodeGen
+    Luau.VM
+    Luau.Require
+    Luau.VM.Internals
+)
+
+set(LODE_LUAU_INCLUDE_DIRS
+    "${luau_SOURCE_DIR}/Common/include"
+    "${luau_SOURCE_DIR}/Ast/include"
+    "${luau_SOURCE_DIR}/Bytecode/include"
+    "${luau_SOURCE_DIR}/Compiler/include"
+    "${luau_SOURCE_DIR}/Config/include"
+    "${luau_SOURCE_DIR}/Analysis/include"
+    "${luau_SOURCE_DIR}/CodeGen/include"
+    "${luau_SOURCE_DIR}/VM/include"
+    "${luau_SOURCE_DIR}/Require/include"
+)
+
+set(LODE_LUAU_BUILD_INCLUDE_DIRS
+    ${LODE_LUAU_INCLUDE_DIRS}
+    "${luau_SOURCE_DIR}/VM/src"
+)
+
+# Luau's upstream targets use source-tree include paths. Replace those
+# interface paths with relocatable build/install paths before exporting them.
+foreach(LODE_LUAU_TARGET IN LISTS LODE_LUAU_TARGETS)
+    if(TARGET "${LODE_LUAU_TARGET}")
+        set_target_properties("${LODE_LUAU_TARGET}" PROPERTIES
+            INTERFACE_INCLUDE_DIRECTORIES
+                "$<BUILD_INTERFACE:${LODE_LUAU_BUILD_INCLUDE_DIRS}>;$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
+        )
+    endif()
+endforeach()
+
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/"
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+    COMPONENT LodeSDK
+)
+
+foreach(LODE_LUAU_INCLUDE_DIR IN LISTS LODE_LUAU_INCLUDE_DIRS)
+    install(DIRECTORY "${LODE_LUAU_INCLUDE_DIR}/"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+        COMPONENT LodeSDK
+    )
+endforeach()
+
+install(TARGETS LodeCore LodeModule ${LODE_LUAU_TARGETS} uv
+    EXPORT LodeTargets
+    RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}/$<CONFIG>" COMPONENT LodeSDK
+    LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}/$<CONFIG>" COMPONENT LodeSDK
+    ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}/$<CONFIG>" COMPONENT LodeSDK
+)
+
+install(TARGETS lode
+    RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}/$<CONFIG>" COMPONENT LodeSDK
+    BUNDLE DESTINATION . COMPONENT LodeSDK
+)
+
+set(LODE_INSTALL_CMAKEDIR "${CMAKE_INSTALL_LIBDIR}/cmake/Lode")
+
+lode_get_platform_name(LODE_SDK_PLATFORM)
+lode_get_architecture_name(LODE_SDK_ARCHITECTURE)
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/lode-sdk.json.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/lode-sdk.json"
+    @ONLY
+)
+
+configure_package_config_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/LodeConfig.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/LodeConfig.cmake"
+    INSTALL_DESTINATION "${LODE_INSTALL_CMAKEDIR}"
+)
+
+write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/LodeConfigVersion.cmake"
+    VERSION "${PROJECT_VERSION}"
+    COMPATIBILITY SameMajorVersion
+)
+
+install(EXPORT LodeTargets
+    FILE LodeTargets.cmake
+    NAMESPACE Lode::
+    DESTINATION "${LODE_INSTALL_CMAKEDIR}"
+    COMPONENT LodeSDK
+)
+
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/lode-sdk.json"
+    DESTINATION .
+    COMPONENT LodeSDK
+)
+
+install(FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/LodeConfig.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/LodeConfigVersion.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/LodeNativeModule.cmake"
+    DESTINATION "${LODE_INSTALL_CMAKEDIR}"
+    COMPONENT LodeSDK
+)

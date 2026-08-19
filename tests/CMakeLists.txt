@@ -1,6 +1,6 @@
 # Regression and integration tests, driven by CTest.
 #
-# Every test here runs through the real runtime path (lode_runtime + .luau),
+# Every test here runs through the real runtime path (lode + .luau),
 # never a standalone probe that links Luau a second time. Two kinds of tests
 # live under this directory:
 #
@@ -28,10 +28,14 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/native/config_mismatch_module/CMakeLists.
     add_subdirectory(native/config_mismatch_module)
 endif()
 
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/native/abi_mismatch_module/CMakeLists.txt")
+    add_subdirectory(native/abi_mismatch_module)
+endif()
+
 function(lode_add_script_test test_name script_path)
     add_test(
         NAME ${test_name}
-        COMMAND lode_runtime "${CMAKE_CURRENT_SOURCE_DIR}/${script_path}"
+        COMMAND lode "${CMAKE_CURRENT_SOURCE_DIR}/${script_path}"
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     )
 endfunction()
@@ -40,6 +44,7 @@ lode_add_script_test(integration_core_api        native/core_api.luau)
 lode_add_script_test(integration_native_require  native/native_require.luau)
 lode_add_script_test(integration_simd_bench      native/simd_bench.luau)
 lode_add_script_test(integration_config_mismatch native/config_mismatch.luau)
+lode_add_script_test(integration_abi_mismatch  native/abi_mismatch.luau)
 
 # Exercises State destruction while filesystem resources are still active.
 # The script deliberately raises after opening them, so the runtime must run
@@ -52,7 +57,7 @@ set_tests_properties(regression_filesystem_shutdown PROPERTIES WILL_FAIL TRUE TI
 #
 # duplicate_cond.luau is intentionally excluded: it demonstrates a lint-only
 # warning (duplicate branch condition) that the LSP/`luau-analyze` flags, but
-# does not raise a compile or runtime error through lode_runtime itself, so
+# does not raise a compile or runtime error through lode itself, so
 # it has no pass/fail exit code to assert on here.
 set(LODE_DIAGNOSTIC_SCRIPTS
     syntax
@@ -71,6 +76,6 @@ endforeach()
 # CTest alongside everything else in this directory.
 add_test(
     NAME sanity_suite
-    COMMAND lode_runtime "${CMAKE_SOURCE_DIR}/modules/sanity/run.luau"
+    COMMAND lode "${CMAKE_SOURCE_DIR}/modules/sanity/run.luau"
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
 )

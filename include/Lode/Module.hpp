@@ -110,8 +110,11 @@ Lode::ModuleReturn LodeModuleRegister(Lode::State& vm);
 #ifdef LODE_HAS_BUILD_CONFIG
 #define LODE_MODULE_CONFIG_EXPORT \
     LODE_EXPORT const char* LodeModuleConfig() { return LodeBuildConfigName(); }
+#define LODE_MODULE_ABI_EXPORT \
+    LODE_EXPORT const char* LodeModuleABI() { return LodeAbiId(); }
 #else
 #define LODE_MODULE_CONFIG_EXPORT
+#define LODE_MODULE_ABI_EXPORT
 #endif
 
 #define LODE_MODULE_NAMED(name, vm_var) \
@@ -124,6 +127,7 @@ Lode::ModuleReturn LodeModuleRegister(Lode::State& vm);
         return static_cast<int>(ret.GetValues().size()); \
     } \
     LODE_MODULE_CONFIG_EXPORT \
+    LODE_MODULE_ABI_EXPORT \
     Lode::ModuleReturn LodeModuleRegister(Lode::State& vm_var)
 
 #define LODE_MODULE(vm_var) LODE_MODULE_NAMED(default_module, vm_var)
