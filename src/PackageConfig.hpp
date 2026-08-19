@@ -38,4 +38,10 @@ LODE_API ConfigAliasUpdateResult WriteConfigAliases(
     const std::filesystem::path& configPath,
     const std::vector<std::pair<std::string, std::string>>& aliases);
 
+// Creates the minimal Luau configuration used when a project has no existing
+// .config.luau file.
+LODE_API ConfigAliasUpdateResult WriteGeneratedConfigAliases(
+    const std::filesystem::path& configPath,
+    const std::vector<std::pair<std::string, std::string>>& aliases);
+
 } // namespace Lode::Package

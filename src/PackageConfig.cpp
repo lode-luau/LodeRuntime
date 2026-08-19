@@ -324,6 +324,49 @@ bool ReplaceFileAtomically(const fs::path& temporaryPath,
 #endif
 }
 
+bool WriteConfigContent(const fs::path& configPath,
+                        std::string_view content,
+                        std::vector<std::string>& errors)
+{
+    std::error_code ec;
+    const fs::path absolutePath = fs::absolute(configPath, ec);
+    if (ec)
+    {
+        errors.push_back("Cannot determine .config.luau path: " + ec.message());
+        return false;
+    }
+
+    const auto timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    fs::path temporaryPath = absolutePath;
+    temporaryPath += ".tmp-" + std::to_string(timestamp);
+    {
+        std::ofstream output(temporaryPath, std::ios::binary | std::ios::trunc);
+        if (!output.is_open())
+        {
+            errors.push_back("Cannot open temporary .config.luau: " + PathToUtf8(temporaryPath));
+            return false;
+        }
+        output.write(content.data(), static_cast<std::streamsize>(content.size()));
+        output.flush();
+        if (!output.good())
+        {
+            errors.push_back("Failed to write temporary .config.luau: " + PathToUtf8(temporaryPath));
+            output.close();
+            fs::remove(temporaryPath, ec);
+            return false;
+        }
+    }
+
+    std::string replacementError;
+    if (!ReplaceFileAtomically(temporaryPath, absolutePath, replacementError))
+    {
+        errors.push_back("Cannot replace .config.luau: " + replacementError);
+        fs::remove(temporaryPath, ec);
+        return false;
+    }
+    return true;
+}
+
 } // namespace
 
 ConfigAliasUpdateResult UpdateConfigAliases(
@@ -458,45 +501,42 @@ ConfigAliasUpdateResult WriteConfigAliases(
     if (!result.IsValid() || !result.changed)
         return result;
 
-    std::error_code ec;
-    const fs::path absolutePath = fs::absolute(configPath, ec);
-    if (ec)
+    if (!WriteConfigContent(configPath, result.content, result.errors))
+        result.content.clear();
+    return result;
+}
+
+ConfigAliasUpdateResult WriteGeneratedConfigAliases(
+    const fs::path& configPath,
+    const std::vector<std::pair<std::string, std::string>>& aliases)
+{
+    ConfigAliasUpdateResult result;
+    result.content = "return {\n    luau = {\n        aliases = {\n";
+    for (const auto& [alias, path] : aliases)
     {
-        result.errors.push_back("Cannot determine .config.luau path: " + ec.message());
+        if (!IsSafeAlias(alias))
+        {
+            AddError(result, "Cannot create .config.luau: unsafe package alias '" + alias + "'.");
+            continue;
+        }
+        if (path.empty() || fs::path(path).is_absolute())
+        {
+            AddError(result, "Cannot create .config.luau: alias '" + alias +
+                "' must use a non-empty relative path.");
+            continue;
+        }
+        result.content += "            [\"" + EscapeLuaString(alias) + "\"] = \"" +
+            EscapeLuaString(path) + "\",\n";
+    }
+    result.content += "        }\n    }\n}\n";
+    if (!result.IsValid())
+    {
         result.content.clear();
         return result;
     }
-
-    const auto timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
-    fs::path temporaryPath = absolutePath;
-    temporaryPath += ".tmp-" + std::to_string(timestamp);
-    {
-        std::ofstream output(temporaryPath, std::ios::binary | std::ios::trunc);
-        if (!output.is_open())
-        {
-            result.errors.push_back("Cannot open temporary .config.luau: " + PathToUtf8(temporaryPath));
-            result.content.clear();
-            return result;
-        }
-        output.write(result.content.data(), static_cast<std::streamsize>(result.content.size()));
-        output.flush();
-        if (!output.good())
-        {
-            result.errors.push_back("Failed to write temporary .config.luau: " + PathToUtf8(temporaryPath));
-            output.close();
-            fs::remove(temporaryPath, ec);
-            result.content.clear();
-            return result;
-        }
-    }
-
-    std::string replacementError;
-    if (!ReplaceFileAtomically(temporaryPath, absolutePath, replacementError))
-    {
-        result.errors.push_back("Cannot replace .config.luau: " + replacementError);
-        fs::remove(temporaryPath, ec);
+    result.changed = !aliases.empty();
+    if (result.changed && !WriteConfigContent(configPath, result.content, result.errors))
         result.content.clear();
-    }
     return result;
 }
 
