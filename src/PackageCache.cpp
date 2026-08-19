@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cstdlib>
 #include <system_error>
 #include <utility>
@@ -29,6 +30,11 @@ void AddError(CacheLayoutResult& result, std::string message)
 }
 
 void AddError(CacheIdentityResult& result, std::string message)
+{
+    result.errors.push_back(std::move(message));
+}
+
+void AddError(MaterializationResult& result, std::string message)
 {
     result.errors.push_back(std::move(message));
 }
@@ -96,6 +102,30 @@ bool IsSafePathComponent(const std::string& value)
     return std::all_of(value.begin(), value.end(), [](unsigned char character) {
         return std::isalnum(character) || character == '-' || character == '_' || character == '.';
     });
+}
+
+bool IsPathInside(const fs::path& candidate, const fs::path& root)
+{
+    std::error_code ec;
+    const fs::path relative = fs::relative(candidate, root, ec);
+    if (ec)
+        return false;
+    if (relative.empty() || relative == ".")
+        return true;
+    const auto first = relative.begin();
+    return first == relative.end() || *first != "..";
+}
+
+bool ContainsSymlink(const fs::path& root)
+{
+    std::error_code ec;
+    for (fs::recursive_directory_iterator it(root, fs::directory_options::none, ec), end;
+         it != end && !ec; it.increment(ec))
+    {
+        if (it->is_symlink(ec))
+            return true;
+    }
+    return ec.value() != 0;
 }
 
 } // namespace
@@ -197,6 +227,107 @@ CacheIdentityResult ResolvePackageCacheIdentity(const DependencyGraph& graph,
     identity.installationDirectory = layout.globalModulesDirectory /
         package.name / package.version / digest;
     result.identity = std::move(identity);
+    return result;
+}
+
+MaterializationResult MaterializePackage(const PackageCacheLayout& layout,
+                                         const PackageCacheIdentity& identity,
+                                         const fs::path& projectRoot,
+                                         std::string_view alias)
+{
+    MaterializationResult result;
+    if (!IsSafePathComponent(std::string(alias)))
+    {
+        AddError(result, "Cannot materialize package: unsafe dependency alias '" +
+            std::string(alias) + "'.");
+        return result;
+    }
+
+    std::error_code ec;
+    const fs::path canonicalProject = fs::weakly_canonical(projectRoot, ec);
+    if (ec || !fs::is_directory(canonicalProject, ec))
+    {
+        AddError(result, "Cannot materialize package: project root is not a directory: " +
+            PathToUtf8(projectRoot));
+        return result;
+    }
+
+    const fs::path canonicalGlobalRoot = fs::weakly_canonical(layout.globalModulesDirectory, ec);
+    const fs::path canonicalSource = fs::weakly_canonical(identity.installationDirectory, ec);
+    if (ec || !fs::is_directory(canonicalSource, ec) ||
+        !IsPathInside(canonicalSource, canonicalGlobalRoot))
+    {
+        AddError(result, "Cannot materialize package: the global installation is missing or outside the Lode cache.");
+        return result;
+    }
+    if (ContainsSymlink(canonicalSource))
+    {
+        AddError(result, "Cannot materialize package: the global installation contains a symbolic link.");
+        return result;
+    }
+
+    const fs::path modulesDirectory = canonicalProject / "lode_modules";
+    const fs::path destination = modulesDirectory / std::string(alias);
+    if (!IsPathInside(destination, modulesDirectory))
+    {
+        AddError(result, "Cannot materialize package: resolved destination leaves lode_modules.");
+        return result;
+    }
+    if (fs::exists(destination, ec) || fs::is_symlink(destination, ec))
+    {
+        AddError(result, "Cannot materialize package: destination already exists: " +
+            PathToUtf8(destination));
+        return result;
+    }
+
+    if (!fs::create_directories(modulesDirectory, ec) && ec)
+    {
+        AddError(result, "Cannot create lode_modules: " + ec.message());
+        return result;
+    }
+
+    const auto timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    const fs::path temporary = modulesDirectory /
+        ("." + std::string(alias) + ".tmp-" + std::to_string(timestamp));
+    fs::create_directory(temporary, ec);
+    if (ec)
+    {
+        AddError(result, "Cannot create temporary package directory: " + ec.message());
+        return result;
+    }
+
+    bool copied = true;
+    for (fs::directory_iterator it(canonicalSource, ec), end; it != end && !ec; it.increment(ec))
+    {
+        fs::copy(it->path(), temporary / it->path().filename(),
+            fs::copy_options::recursive, ec);
+        if (ec)
+        {
+            copied = false;
+            break;
+        }
+    }
+    if (ec)
+        copied = false;
+
+    if (!copied)
+    {
+        const std::string message = "Cannot copy global package installation: " + ec.message();
+        fs::remove_all(temporary, ec);
+        AddError(result, message);
+        return result;
+    }
+
+    fs::rename(temporary, destination, ec);
+    if (ec)
+    {
+        const std::string message = "Cannot finalize local package installation: " + ec.message();
+        fs::remove_all(temporary, ec);
+        AddError(result, message);
+        return result;
+    }
+
+    result.packageDirectory = destination;
     return result;
 }
 

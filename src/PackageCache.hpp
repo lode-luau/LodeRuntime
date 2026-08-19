@@ -50,6 +50,17 @@ struct CacheIdentityResult
     }
 };
 
+struct MaterializationResult
+{
+    std::filesystem::path packageDirectory;
+    std::vector<std::string> errors;
+
+    bool IsValid() const
+    {
+        return errors.empty() && !packageDirectory.empty();
+    }
+};
+
 // Resolves the decided user-level cache layout without creating any files or
 // directories. An explicit home directory is intended for deterministic
 // callers and tests; the default uses USERPROFILE on Windows and HOME on
@@ -65,5 +76,14 @@ LODE_API CacheIdentityResult ResolvePackageCacheIdentity(
     const DependencyGraph& graph,
     size_t packageIndex,
     const PackageCacheLayout& layout);
+
+// Copies an immutable global installation into the project-local
+// lode_modules/<alias> view. The destination must not already exist; failed
+// copies are removed and never leave a partial package directory behind.
+LODE_API MaterializationResult MaterializePackage(
+    const PackageCacheLayout& layout,
+    const PackageCacheIdentity& identity,
+    const std::filesystem::path& projectRoot,
+    std::string_view alias);
 
 } // namespace Lode::Package
