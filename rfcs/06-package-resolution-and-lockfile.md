@@ -328,6 +328,22 @@ lockfile.
 The runtime does not read `lode.lock`. `lode install --locked` and CI use it to
 reproduce the same package graph.
 
+## Current installer boundary
+
+The implemented first installer command is:
+
+    lode install --locked [--dev] [package-root]
+
+It validates the source graph against the existing lockfile, copies resolved
+stdlib and path packages into the global cache, materializes their aliases
+under the project's lode_modules directory, and updates the project's
+.config.luau. Without --dev, root devDependencies are not materialized.
+
+This command does not resolve or install Git dependencies, download release
+archives, extract ZIP files, build native packages, or write a new lockfile.
+Calling lode install without --locked returns an explicit unsupported-mode
+error. Those operations remain separate implementation blocks.
+
 ## Version conflicts
 
 The package manager must not silently replace one incompatible version with
