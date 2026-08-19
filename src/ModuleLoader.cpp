@@ -98,16 +98,8 @@ static luarequire_NavigateResult reset(lua_State* L, void* ctx, const char* requ
 
         if (fs::is_regular_file(canonicalP))
         {
-            if (canonicalP.filename() == "init.luau")
-            {
-                nav->currentPath = canonicalP.parent_path();
-                nav->packagePath = canonicalP.parent_path();
-            }
-            else
-            {
-                nav->currentPath = canonicalP.parent_path();
-                nav->packagePath = canonicalP.parent_path();
-            }
+            nav->currentPath = canonicalP.parent_path();
+            nav->packagePath = canonicalP.parent_path();
         }
         else
         {
@@ -302,16 +294,19 @@ static bool is_module_present(lua_State* L, void* ctx)
     if (check_path_exists(p))
         return true;
 
+    if (p.has_parent_path() && p.parent_path().has_parent_path())
+    {
+        fs::path siblingPath = p.parent_path().parent_path() / p.filename();
+        if (check_path_exists(siblingPath))
+        {
+            nav->currentPath = fs::weakly_canonical(siblingPath);
+            return true;
+        }
+    }
+
     for (const auto& searchDir : nav->modulePaths)
     {
         fs::path searchPath = PathFromUtf8(searchDir) / p.filename();
-        if (check_path_exists(searchPath))
-        {
-            nav->currentPath = fs::weakly_canonical(searchPath);
-            return true;
-        }
-
-        searchPath = p.parent_path().parent_path() / p.filename();
         if (check_path_exists(searchPath))
         {
             nav->currentPath = fs::weakly_canonical(searchPath);

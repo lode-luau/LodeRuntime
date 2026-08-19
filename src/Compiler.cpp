@@ -95,12 +95,20 @@ namespace
 
                     if (aliasName == "self")
                     {
-                        // @self resolves to the package's own directory (the folder
+                        // @self resolves to the module's own directory (the folder
                         // containing init.luau or lode.json), mirroring the runtime.
                         fs::path requirerPath = PathFromUtf8(context ? context->name : "");
-                        fs::path pkgDir = Lode::FindLodeJson(requirerPath);
-                        if (pkgDir.empty())
+                        fs::path pkgDir;
+                        if (requirerPath.filename() == "init.luau")
+                        {
                             pkgDir = requirerPath.parent_path();
+                        }
+                        else
+                        {
+                            pkgDir = Lode::FindLodeJson(requirerPath);
+                            if (pkgDir.empty())
+                                pkgDir = requirerPath.parent_path();
+                        }
 
                         fs::path resolvedPath = pkgDir;
                         if (!remainder.empty())
@@ -132,8 +140,19 @@ namespace
                     fs::path ctxPath = PathFromUtf8(context->name);
                     fs::path dirPath = ctxPath.has_parent_path() ? ctxPath.parent_path() : ctxPath;
                     fs::path resolvedPath = dirPath / relPath;
-                    
-                    return Luau::ModuleInfo{PathToUtf8(ResolveModuleFile(resolvedPath))};
+                    fs::path candidate = ResolveModuleFile(resolvedPath);
+
+                    if (!fs::exists(candidate) && dirPath.has_parent_path())
+                    {
+                        fs::path siblingPath = dirPath.parent_path() / relPath;
+                        fs::path siblingCandidate = ResolveModuleFile(siblingPath);
+                        if (fs::exists(siblingCandidate))
+                        {
+                            return Luau::ModuleInfo{PathToUtf8(siblingCandidate)};
+                        }
+                    }
+
+                    return Luau::ModuleInfo{PathToUtf8(candidate)};
                 }
             }
             return std::nullopt;
