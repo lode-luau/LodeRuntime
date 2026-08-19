@@ -55,6 +55,12 @@ add_test(
 )
 set_tests_properties(package_validator_rejects_path_escape PROPERTIES WILL_FAIL TRUE)
 
+add_test(
+    NAME package_validator_accepts_native_source
+    COMMAND lode ci validate --source "${CMAKE_CURRENT_SOURCE_DIR}/native/source_package"
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+)
+
 # Exercises State destruction while filesystem resources are still active.
 # The script deliberately raises after opening them, so the runtime must run
 # module shutdown hooks without hanging or crashing.
