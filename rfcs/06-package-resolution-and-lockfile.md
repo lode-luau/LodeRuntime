@@ -337,7 +337,10 @@ The implemented first installer command is:
 It validates the source graph against the existing lockfile, copies resolved
 stdlib and path packages into the global cache, materializes their aliases
 under the project's lode_modules directory, and updates the project's
-.config.luau. Without --dev, root devDependencies are not materialized.
+.config.luau. Without --dev, root devDependencies and the runtime dependencies
+reachable only through those development roots are not materialized. With
+--dev, those root development packages and their runtime dependency subgraphs
+are materialized; a dependency package's own devDependencies remain excluded.
 
 This command does not resolve or install Git dependencies, download release
 archives, extract ZIP files, build native packages, or write a new lockfile.
