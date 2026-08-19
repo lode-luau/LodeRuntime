@@ -11,6 +11,12 @@
 namespace Lode::Package
 {
 
+enum class ValidationMode
+{
+    Source,
+    Artifact,
+};
+
 struct ValidationReport
 {
     std::vector<std::string> errors;
@@ -23,5 +29,6 @@ struct ValidationReport
 };
 
 LODE_API ValidationReport Validate(const std::filesystem::path& packageRoot);
+LODE_API ValidationReport Validate(const std::filesystem::path& packageRoot, ValidationMode mode);
 
 } // namespace Lode::Package

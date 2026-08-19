@@ -10,7 +10,6 @@
 #include <fstream>
 #include <cstring>
 #include <regex>
-#include <set>
 
 namespace fs = std::filesystem;
 
@@ -124,6 +123,7 @@ void ValidateLibraryEntry(const fs::path& root,
                           const std::string& platform,
                           const std::string& architecture,
                           const std::string& relativePath,
+                          ValidationMode mode,
                           bool& hasThirdPartyRuntime,
                           ValidationReport& report)
 {
@@ -138,6 +138,9 @@ void ValidateLibraryEntry(const fs::path& root,
     }
 
     const fs::path parent = basePath.parent_path();
+    if (mode == ValidationMode::Source)
+        return;
+
     const fs::path filename = basePath.filename();
     const std::vector<std::string> configurations = { "Debug", "Release" };
     for (const std::string& configuration : configurations)
@@ -163,6 +166,11 @@ void ValidateLibraryEntry(const fs::path& root,
 } // namespace
 
 ValidationReport Validate(const fs::path& packageRoot)
+{
+    return Validate(packageRoot, ValidationMode::Artifact);
+}
+
+ValidationReport Validate(const fs::path& packageRoot, ValidationMode mode)
 {
     ValidationReport report;
     std::error_code ec;
@@ -206,13 +214,19 @@ ValidationReport Validate(const fs::path& packageRoot)
         Error(report, "lode.json.version must be a valid SemVer string.");
 
     if (!fs::is_regular_file(root / "init.luau"))
-        Error(report, "Native packages must contain a root init.luau file.");
+        Error(report, "Packages must contain a root init.luau file.");
+
+    if (!fs::is_regular_file(root / "LICENSE"))
+        Error(report, "Packages must contain a root LICENSE file.");
 
     if (!manifest.contains("libraries") || !manifest["libraries"].is_object())
     {
         Warning(report, "Package has no native libraries; native ABI validation was skipped.");
         return report;
     }
+
+    if (mode == ValidationMode::Source && !fs::is_regular_file(root / "CMakeLists.txt"))
+        Error(report, "Native source packages must contain a root CMakeLists.txt file.");
 
     bool hasThirdPartyRuntime = false;
     for (auto platformIt = manifest["libraries"].begin(); platformIt != manifest["libraries"].end(); ++platformIt)
@@ -231,7 +245,7 @@ ValidationReport Validate(const fs::path& packageRoot)
                 continue;
             }
 
-            ValidateLibraryEntry(root, platformIt.key(), architectureIt.key(), architectureIt.value().get<std::string>(),
+            ValidateLibraryEntry(root, platformIt.key(), architectureIt.key(), architectureIt.value().get<std::string>(), mode,
                 hasThirdPartyRuntime, report);
         }
     }

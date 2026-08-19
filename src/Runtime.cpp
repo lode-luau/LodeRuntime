@@ -35,7 +35,7 @@ int main(int argc, char* argv[])
     {
         Lode::Logger::Info("Lode (lode) v1.0.0");
         Lode::Logger::Info("Usage: lode <file.luac | file.luau>");
-        Lode::Logger::Info("       lode ci validate [package-root]");
+        Lode::Logger::Info("       lode ci validate [--source|--artifact] [package-root]");
         return 1;
     }
 
@@ -44,14 +44,41 @@ int main(int argc, char* argv[])
     {
         if (argc < 3 || PathToUtf8(fs::path(argv[2])) != "validate")
         {
-            Lode::Logger::Error("Usage: lode ci validate [package-root]");
+            Lode::Logger::Error("Usage: lode ci validate [--source|--artifact] [package-root]");
             return 1;
         }
 
-        fs::path packageRoot = argc >= 4
-            ? fs::path(argv[3])
+        Lode::Package::ValidationMode mode = Lode::Package::ValidationMode::Artifact;
+        int packageRootArgument = 3;
+        if (argc >= 4)
+        {
+            const std::string modeArgument = PathToUtf8(fs::path(argv[3]));
+            if (modeArgument == "--source")
+            {
+                mode = Lode::Package::ValidationMode::Source;
+                packageRootArgument = 4;
+            }
+            else if (modeArgument == "--artifact")
+            {
+                packageRootArgument = 4;
+            }
+            else if (modeArgument.rfind("--", 0) == 0)
+            {
+                Lode::Logger::Error("Usage: lode ci validate [--source|--artifact] [package-root]");
+                return 1;
+            }
+        }
+
+        if (argc > packageRootArgument + 1)
+        {
+            Lode::Logger::Error("Usage: lode ci validate [--source|--artifact] [package-root]");
+            return 1;
+        }
+
+        fs::path packageRoot = argc > packageRootArgument
+            ? fs::path(argv[packageRootArgument])
             : fs::current_path();
-        Lode::Package::ValidationReport report = Lode::Package::Validate(packageRoot);
+        Lode::Package::ValidationReport report = Lode::Package::Validate(packageRoot, mode);
         for (const std::string& warning : report.warnings)
             Lode::Logger::Warn(warning);
         for (const std::string& error : report.errors)
