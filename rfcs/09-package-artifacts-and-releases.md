@@ -39,11 +39,14 @@ package/
 ├── init.luau
 ├── libs/                # native packages, when declared
 ├── Luau sources/types
-└── LICENSE
+├── LICENSE              # package license
+└── NOTICE               # third-party notices, when required
 ```
 
 `LICENSE` is the package's license file at the package root. A `licenses/`
-directory is not part of the initial package layout and is not required.
+directory is not part of the initial package layout and is not required. When
+bundled third-party runtime libraries require notices, those notices are
+placed in the package-root `NOTICE` file.
 
 The package archive must not contain the repository's build directory, CMake
 cache, CI workspace, temporary files, or unrelated private files.
@@ -126,14 +129,12 @@ An incomplete download or extraction must never become an installable package.
 ## Native runtime dependencies
 
 The initial package manager does not install OpenSSL or arbitrary system
-libraries. Native package CI must make the runtime dependency policy explicit:
-
-- bundle the required redistributable libraries;
-- use a supported system/runtime dependency;
-- or reject publication for that target.
-
-The chosen policy must be compatible with the platform license and the Lode
-runtime loader. It must not be hidden in a false manifest dependency.
+libraries. OpenSSL remains a CMake/CI build dependency. A package that uses it
+must include the required runtime libraries in the published target artifact,
+place them where the platform loader can find them relative to the native
+module, and include the required notices. A target that cannot provide this
+package-local runtime is rejected from publication rather than represented by
+an invented manifest dependency.
 
 ## Open decisions
 
@@ -141,5 +142,4 @@ runtime loader. It must not be hidden in a false manifest dependency.
   artifacts.
 - The final release asset naming convention.
 - The release metadata schema.
-- The supported OpenSSL/runtime-library distribution policy.
 - Whether a registry index mirrors GitHub Release metadata.

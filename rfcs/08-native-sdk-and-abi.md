@@ -164,3 +164,17 @@ There is no `lode-tcp-core` package and no `nativeDependencies` or
 A separately published native dependency requires its own exported CMake
 target, artifact layout, runtime policy, and ABI policy before it can be
 introduced.
+
+## OpenSSL runtime policy
+
+OpenSSL is a CMake/CI build dependency, not a Lode package-manager
+dependency. Package CI may provision it for `find_package(OpenSSL REQUIRED)`;
+the package manager must not install OpenSSL into the user's system and
+`lode.json` must not gain a `systemDependencies` field for it.
+
+When a native package uses OpenSSL, its published artifact must include the
+runtime libraries required by the supported target beside the native module.
+Windows uses the package-local DLL directory. Unix-like targets must use a
+package-relative loader path such as `$ORIGIN` or `@loader_path` and include
+the corresponding shared libraries in the artifact. A target that cannot
+deliver a working package-local OpenSSL runtime is not publishable.

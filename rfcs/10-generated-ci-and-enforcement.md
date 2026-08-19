@@ -33,7 +33,8 @@ baseline job performs these operations:
 
 1. Check out the tagged source.
 2. Download and checksum the pinned Lode SDK.
-3. Install the platform's declared system dependencies, such as OpenSSL.
+3. Provision build dependencies required by the package's CMake project, such
+   as OpenSSL. This does not create a Lode manifest dependency.
 4. Configure CMake with `CMAKE_PREFIX_PATH` pointing to the SDK.
 5. Build Debug and Release for each declared target.
 6. Run CTest and the package tests through the matching SDK `lode` runtime.
@@ -47,6 +48,10 @@ The native package CMake must use:
 find_package(Lode CONFIG REQUIRED)
 lode_add_native_module(...)
 ```
+
+The default package test command runs `tests/run.luau` through the matching
+SDK `lode` executable. A maintainer may replace that command in the editable
+workflow or package CTest configuration without changing `lode.json`.
 
 The workflow must fail if a declared target was not built and tested. It must
 not claim support based only on a platform key written in `lode.json`.
