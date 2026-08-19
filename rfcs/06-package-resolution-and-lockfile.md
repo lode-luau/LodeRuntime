@@ -8,8 +8,9 @@ not part of this RFC.
 ## Summary
 
 The package manager resolves package requirements and writes the result into a
-lockfile and Luau configuration. The manifest package name is an identity; it
-does not automatically become a `require` alias.
+lockfile and Luau configuration. The manifest package name identifies the
+package, but it does not automatically become a `require` alias. A resolved
+package is identified by its exact version and source as well as its name.
 
 The existing `.config.luau` format remains in use because it is consumed by the
 Luau compiler and LSP. The package manager may update managed aliases in that
@@ -71,6 +72,41 @@ release tags use `vMAJOR.MINOR.PATCH`, for example `v1.2.0`. A Git branch may be
 used for local development, but release and lockfile resolution must record a
 commit rather than relying on a moving branch or the word `latest`.
 
+## Resolved package identity
+
+Dependency aliases identify edges in the graph, not package records. The
+stable logical identity of a resolved package is the tuple:
+
+```text
+package name
+exact package version
+source kind: stdlib, path, or git
+source reference when the source kind has one
+resolved Git commit when the source kind is git
+```
+
+The alias is intentionally absent from this identity. Two packages may use
+the same alias for different resolved records in their own package contexts.
+Conversely, two aliases that resolve to the same tuple may share one physical
+installation.
+
+The standard library has no external repository identity in this tuple. Its
+source kind is `stdlib`; the selected standard-module artifact is identified
+separately by its Lode release target and checksum as defined by RFC 09.
+
+A selected native artifact extends the logical identity with its target:
+
+```text
+logical package identity
+platform
+architecture
+runtime configuration when applicable
+Lode ABI identifier
+```
+
+This prevents an artifact for one target or ABI from replacing another artifact
+belonging to the same package version.
+
 ## Alias generation
 
 For a dependency key named `<alias>`, the package manager generates a relative
@@ -119,6 +155,13 @@ The decided global cache root is `%USERPROFILE%\\.lode\\global\\lode_modules`.
 Downloaded archives and staging data remain outside the project and must not
 appear in `.config.luau` or determine the project's import paths.
 
+The global installation is deduplicated by the resolved package identity, not
+by the dependency alias. A package with the same logical identity is extracted
+once and may be linked into multiple project or package-local contexts. Two
+incompatible versions, or the same version from different sources, remain
+separate installations. Package-local configuration determines which physical
+installation a dependency alias reaches.
+
 The runtime-owned stdlib is separate from project dependencies. A normal Lode
 distribution contains a complete stdlib bundle and its root `.config.luau`.
 The package manager does not put that bundle in `lode.lock`. When a project or
@@ -142,15 +185,27 @@ resolved aliases
 transitive dependencies
 ```
 
+Each dependency edge in the lockfile records the alias used by the dependent
+package and points to one resolved package identity. The edge must not point
+only to a name or alias, because that would be ambiguous when multiple
+versions or sources coexist.
+
+The lockfile format is versioned. Its package records must be able to express
+the identity tuple above, while artifact records must be able to express the
+selected target and checksum. The exact serialized field layout and the
+command that writes the file remain implementation work; the identity rules
+are fixed by this RFC.
+
 The runtime does not read `lode.lock`. `lode install --locked` and CI use it to
 reproduce the same package graph.
 
 ## Version conflicts
 
 The package manager must not silently replace one incompatible version with
-another. Compatible requirements may share one installation. Incompatible
-requirements must either be isolated in package-local dependency contexts or
-reported as a conflict until contextual resolution is implemented.
+another. Compatible requirements may share one resolved package identity and
+physical installation. Incompatible requirements must either be isolated in
+package-local dependency contexts or reported as a conflict until contextual
+resolution is implemented.
 
 Package-local `.config.luau` files may provide the aliases for a dependency's
 own context. This preserves the existing upward Luau configuration lookup and

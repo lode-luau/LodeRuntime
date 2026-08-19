@@ -56,6 +56,11 @@ The fields have these meanings:
 | `devDependencies` | Package manager/CI | Test and development requirements. |
 | `libraries` | Runtime and package manager | Native artifact map and packaging validation. |
 
+Dependency keys are local aliases only. They are not package identities and do
+not select a version globally. Resolution and lockfile identity are defined by
+RFC 06; native artifact identity is extended with target and ABI information
+as defined by RFC 09.
+
 A native package adds `libraries` to the same manifest:
 
 ```json

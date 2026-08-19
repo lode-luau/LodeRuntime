@@ -75,11 +75,12 @@ current target.
 
 ## Artifact identity
 
-An artifact is selected using the following information:
+RFC 06 defines the logical package identity as the package name, exact version,
+source kind, source reference, and resolved Git commit when applicable. The
+artifact identity extends that tuple with the target information:
 
 ```text
-package identity
-package version
+logical package identity
 platform
 architecture
 runtime build configuration when applicable
@@ -103,6 +104,13 @@ lode-sdk-windows-x64-1.0.0-nightly.YYYYMMDD.N.zip
 Package artifacts carry their package version. The runtime and stdlib bundle
 carry the nightly runtime version. The lockfile records the exact GitHub
 Release tag and SHA-256 for every selected artifact.
+
+The package manager must deduplicate only artifacts with the same logical
+package identity and the same artifact target. A dependency alias is not part
+of artifact identity. Therefore two package contexts may link to one cached
+artifact when their resolved identities match, while different versions,
+sources, platforms, architectures, configurations, or ABIs must remain
+separate.
 
 ## Release requirements
 
