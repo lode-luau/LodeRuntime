@@ -174,6 +174,7 @@ set(LODE_CORE_SOURCES
     src/Registry.cpp
     src/ModuleLoader.cpp
     src/PackageValidator.cpp
+    src/CiGenerator.cpp
     src/State.cpp
     src/StateLifetime.cpp
     src/Compiler.cpp
@@ -211,6 +212,7 @@ set(LODE_CORE_HEADERS
     include/Lode/Logger.hpp
     include/Lode/Json.hpp
     src/PackageValidator.hpp
+    src/CiGenerator.hpp
     src/Platform/Platform.hpp
     src/Platform/CrashHandler.hpp
     src/Platform/WindowsCrashHandler.hpp

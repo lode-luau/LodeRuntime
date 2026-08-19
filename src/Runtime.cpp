@@ -6,6 +6,7 @@
 #include "Lode/Result.hpp"
 #include "Lode/EventLoop.hpp"
 #include "Lode/Task.hpp"
+#include "CiGenerator.hpp"
 #include "PackageValidator.hpp"
 #include "PathUtil.hpp"
 #include "Platform/CrashHandler.hpp"
@@ -36,15 +37,63 @@ int main(int argc, char* argv[])
         Lode::Logger::Info("Lode (lode) v1.0.0");
         Lode::Logger::Info("Usage: lode <file.luac | file.luau>");
         Lode::Logger::Info("       lode ci validate [--source|--artifact] [package-root]");
+        Lode::Logger::Info("       lode ci init [--force] [package-root]");
         return 1;
     }
 
     const std::string firstArgument = PathToUtf8(fs::path(argv[1]));
     if (firstArgument == "ci")
     {
-        if (argc < 3 || PathToUtf8(fs::path(argv[2])) != "validate")
+        if (argc < 3)
         {
             Lode::Logger::Error("Usage: lode ci validate [--source|--artifact] [package-root]");
+            Lode::Logger::Error("       lode ci init [--force] [package-root]");
+            return 1;
+        }
+
+        const std::string ciCommand = PathToUtf8(fs::path(argv[2]));
+        if (ciCommand == "init")
+        {
+            bool force = false;
+            fs::path packageRoot = fs::current_path();
+            bool hasPackageRoot = false;
+            for (int argumentIndex = 3; argumentIndex < argc; ++argumentIndex)
+            {
+                const std::string argument = PathToUtf8(fs::path(argv[argumentIndex]));
+                if (argument == "--force")
+                {
+                    force = true;
+                }
+                else if (argument.rfind("--", 0) == 0 || hasPackageRoot)
+                {
+                    Lode::Logger::Error("Usage: lode ci init [--force] [package-root]");
+                    return 1;
+                }
+                else
+                {
+                    packageRoot = fs::path(argv[argumentIndex]);
+                    hasPackageRoot = true;
+                }
+            }
+
+            Lode::Package::ValidationReport report = Lode::Package::GenerateWorkflow(packageRoot, force);
+            for (const std::string& warning : report.warnings)
+                Lode::Logger::Warn(warning);
+            for (const std::string& error : report.errors)
+                Lode::Logger::Error(error);
+
+            if (!report.IsValid())
+                return 1;
+
+            Lode::Logger::Success("Generated GitHub Actions workflow: " +
+                PathToUtf8(fs::absolute(packageRoot) / ".github/workflows/lode.yml"));
+            return 0;
+        }
+
+        if (ciCommand != "validate")
+        {
+            Lode::Logger::Error("Usage: lode ci validate [--source|--artifact] [package-root]");
+            Lode::Logger::Error("       lode ci init [--force] [package-root]");
             return 1;
         }
 
