@@ -28,25 +28,64 @@ void AddError(InstallResult& result, std::string message)
     result.errors.push_back(std::move(message));
 }
 
+std::vector<bool> CollectInstallablePackages(const DependencyGraph& graph,
+                                              bool includeDevelopmentDependencies)
+{
+    std::vector<bool> installable(graph.packages.size(), false);
+    if (graph.root >= graph.packages.size())
+        return installable;
+
+    installable[graph.root] = true;
+    bool changed = true;
+    while (changed)
+    {
+        changed = false;
+        for (size_t packageIndex = 0; packageIndex < graph.packages.size(); ++packageIndex)
+        {
+            if (!installable[packageIndex])
+                continue;
+
+            for (const DependencyEdge& edge : graph.packages[packageIndex].dependencies)
+            {
+                if (edge.scope == DependencyScope::Development &&
+                    (!includeDevelopmentDependencies || packageIndex != graph.root))
+                    continue;
+                if (edge.target && *edge.target < graph.packages.size() &&
+                    !installable[*edge.target])
+                {
+                    installable[*edge.target] = true;
+                    changed = true;
+                }
+            }
+        }
+    }
+
+    return installable;
+}
+
 bool IsInstallEdge(const DependencyGraph& graph,
                    size_t packageIndex,
                    const DependencyEdge& edge,
+                   const std::vector<bool>& installablePackages,
                    bool includeDevelopmentDependencies)
 {
+    if (packageIndex >= installablePackages.size() || !installablePackages[packageIndex])
+        return false;
     if (edge.scope == DependencyScope::Development)
         return includeDevelopmentDependencies && packageIndex == graph.root;
-    if (!edge.target || *edge.target >= graph.packages.size())
-        return true;
     return true;
 }
 
-bool HasInstallEdges(const DependencyGraph& graph, bool includeDevelopmentDependencies)
+bool HasInstallEdges(const DependencyGraph& graph,
+                     const std::vector<bool>& installablePackages,
+                     bool includeDevelopmentDependencies)
 {
     for (size_t packageIndex = 0; packageIndex < graph.packages.size(); ++packageIndex)
     {
         for (const DependencyEdge& edge : graph.packages[packageIndex].dependencies)
         {
-            if (IsInstallEdge(graph, packageIndex, edge, includeDevelopmentDependencies))
+            if (IsInstallEdge(graph, packageIndex, edge, installablePackages,
+                              includeDevelopmentDependencies))
                 return true;
         }
     }
@@ -99,7 +138,9 @@ InstallResult InstallLocked(const fs::path& packageRoot,
     const DependencyGraph& graph = validation.dependencyGraph;
     const fs::path root = graph.packages[graph.root].root;
     const fs::path lockfilePath = root / "lode.lock";
-    if (HasInstallEdges(graph, includeDevelopmentDependencies))
+    const std::vector<bool> installablePackages = CollectInstallablePackages(
+        graph, includeDevelopmentDependencies);
+    if (HasInstallEdges(graph, installablePackages, includeDevelopmentDependencies))
     {
         const LockfileResult lock = ValidateLockfile(lockfilePath, graph);
         if (!lock.IsValid())
@@ -109,7 +150,7 @@ InstallResult InstallLocked(const fs::path& packageRoot,
         }
     }
 
-    if (!HasInstallEdges(graph, includeDevelopmentDependencies))
+    if (!HasInstallEdges(graph, installablePackages, includeDevelopmentDependencies))
         return result;
 
     const CacheLayoutResult cache = ResolvePackageCacheLayout();
@@ -125,7 +166,8 @@ InstallResult InstallLocked(const fs::path& packageRoot,
     {
         for (const DependencyEdge& edge : graph.packages[packageIndex].dependencies)
         {
-            if (!IsInstallEdge(graph, packageIndex, edge, includeDevelopmentDependencies))
+            if (!IsInstallEdge(graph, packageIndex, edge, installablePackages,
+                               includeDevelopmentDependencies))
                 continue;
             if (!edge.target)
             {

@@ -112,6 +112,17 @@ add_test(
 )
 set_tests_properties(package_validator_rejects_missing_lockfile PROPERTIES WILL_FAIL TRUE)
 
+add_test(
+    NAME package_installer_locked
+    COMMAND ${CMAKE_COMMAND}
+        -DLODE_EXECUTABLE=$<TARGET_FILE:lode>
+        -DPROJECT_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DTEST_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}
+        -P "${CMAKE_SOURCE_DIR}/tests/package/installer_test.cmake"
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+)
+set_tests_properties(package_installer_locked PROPERTIES RUN_SERIAL TRUE)
+
 # Exercises State destruction while filesystem resources are still active.
 # The script deliberately raises after opening them, so the runtime must run
 # module shutdown hooks without hanging or crashing.
