@@ -9,6 +9,7 @@
 #include "CiGenerator.hpp"
 #include "PackageValidator.hpp"
 #include "PackageLockfile.hpp"
+#include "PackageInstaller.hpp"
 #include "PathUtil.hpp"
 #include "Platform/CrashHandler.hpp"
 
@@ -61,6 +62,7 @@ int main(int argc, char* argv[])
     {
         Lode::Logger::Info("Lode (lode) v1.0.0");
         Lode::Logger::Info("Usage: lode <file.luac | file.luau>");
+        Lode::Logger::Info("       lode install --locked [--dev] [package-root]");
         Lode::Logger::Info("       lode ci validate [--source|--artifact] [--locked] [package-root]");
         Lode::Logger::Info("       lode ci init [--force] [package-root]");
         Lode::Logger::Info("       lode ci update [package-root]");
@@ -68,6 +70,54 @@ int main(int argc, char* argv[])
     }
 
     const std::string firstArgument = PathToUtf8(fs::path(argv[1]));
+    if (firstArgument == "install")
+    {
+        bool locked = false;
+        bool includeDevelopmentDependencies = false;
+        fs::path packageRoot = fs::current_path();
+        bool hasPackageRoot = false;
+        for (int argumentIndex = 2; argumentIndex < argc; ++argumentIndex)
+        {
+            const std::string argument = PathToUtf8(fs::path(argv[argumentIndex]));
+            if (argument == "--locked")
+            {
+                locked = true;
+            }
+            else if (argument == "--dev")
+            {
+                includeDevelopmentDependencies = true;
+            }
+            else if (argument.rfind("--", 0) == 0 || hasPackageRoot)
+            {
+                Lode::Logger::Error("Usage: lode install --locked [--dev] [package-root]");
+                return 1;
+            }
+            else
+            {
+                packageRoot = fs::path(argv[argumentIndex]);
+                hasPackageRoot = true;
+            }
+        }
+
+        if (!locked)
+        {
+            Lode::Logger::Error(
+                "The initial installer only supports locked graphs. Use: lode install --locked [--dev] [package-root]");
+            return 1;
+        }
+
+        Lode::Package::InstallResult result = Lode::Package::InstallLocked(
+            packageRoot, standardLibraryPath, includeDevelopmentDependencies);
+        for (const std::string& error : result.errors)
+            Lode::Logger::Error(error);
+        if (!result.IsValid())
+            return 1;
+
+        Lode::Logger::Success("Locked package installation completed: " +
+            PathToUtf8(fs::absolute(packageRoot)));
+        return 0;
+    }
+
     if (firstArgument == "ci")
     {
         if (argc < 3)

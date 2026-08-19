@@ -178,6 +178,7 @@ set(LODE_CORE_SOURCES
     src/PackageLockfile.cpp
     src/PackageCache.cpp
     src/PackageConfig.cpp
+    src/PackageInstaller.cpp
     src/CiGenerator.cpp
     src/State.cpp
     src/StateLifetime.cpp
@@ -221,6 +222,7 @@ set(LODE_CORE_HEADERS
     src/PackageLockfile.hpp
     src/PackageCache.hpp
     src/PackageConfig.hpp
+    src/PackageInstaller.hpp
     src/CiGenerator.hpp
     src/Platform/Platform.hpp
     src/Platform/CrashHandler.hpp
