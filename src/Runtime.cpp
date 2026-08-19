@@ -8,6 +8,7 @@
 #include "Lode/Task.hpp"
 #include "CiGenerator.hpp"
 #include "PackageValidator.hpp"
+#include "PackageLockfile.hpp"
 #include "PathUtil.hpp"
 #include "Platform/CrashHandler.hpp"
 
@@ -59,7 +60,7 @@ int main(int argc, char* argv[])
     {
         Lode::Logger::Info("Lode (lode) v1.0.0");
         Lode::Logger::Info("Usage: lode <file.luac | file.luau>");
-        Lode::Logger::Info("       lode ci validate [--source|--artifact] [package-root]");
+        Lode::Logger::Info("       lode ci validate [--source|--artifact] [--locked] [package-root]");
         Lode::Logger::Info("       lode ci init [--force] [package-root]");
         Lode::Logger::Info("       lode ci update [package-root]");
         return 1;
@@ -70,7 +71,7 @@ int main(int argc, char* argv[])
     {
         if (argc < 3)
         {
-            Lode::Logger::Error("Usage: lode ci validate [--source|--artifact] [package-root]");
+            Lode::Logger::Error("Usage: lode ci validate [--source|--artifact] [--locked] [package-root]");
             Lode::Logger::Error("       lode ci init [--force] [package-root]");
             Lode::Logger::Error("       lode ci update [package-root]");
             return 1;
@@ -142,42 +143,43 @@ int main(int argc, char* argv[])
 
         if (ciCommand != "validate")
         {
-            Lode::Logger::Error("Usage: lode ci validate [--source|--artifact] [package-root]");
+            Lode::Logger::Error("Usage: lode ci validate [--source|--artifact] [--locked] [package-root]");
             Lode::Logger::Error("       lode ci init [--force] [package-root]");
             Lode::Logger::Error("       lode ci update [package-root]");
             return 1;
         }
 
         Lode::Package::ValidationMode mode = Lode::Package::ValidationMode::Artifact;
-        int packageRootArgument = 3;
-        if (argc >= 4)
+        bool locked = false;
+        fs::path packageRoot = fs::current_path();
+        bool hasPackageRoot = false;
+        for (int argumentIndex = 3; argumentIndex < argc; ++argumentIndex)
         {
-            const std::string modeArgument = PathToUtf8(fs::path(argv[3]));
-            if (modeArgument == "--source")
+            const std::string argument = PathToUtf8(fs::path(argv[argumentIndex]));
+            if (argument == "--source")
             {
                 mode = Lode::Package::ValidationMode::Source;
-                packageRootArgument = 4;
             }
-            else if (modeArgument == "--artifact")
+            else if (argument == "--artifact")
             {
-                packageRootArgument = 4;
+                mode = Lode::Package::ValidationMode::Artifact;
             }
-            else if (modeArgument.rfind("--", 0) == 0)
+            else if (argument == "--locked")
             {
-                Lode::Logger::Error("Usage: lode ci validate [--source|--artifact] [package-root]");
+                locked = true;
+            }
+            else if (argument.rfind("--", 0) == 0 || hasPackageRoot)
+            {
+                Lode::Logger::Error("Usage: lode ci validate [--source|--artifact] [--locked] [package-root]");
                 return 1;
             }
+            else
+            {
+                packageRoot = fs::path(argv[argumentIndex]);
+                hasPackageRoot = true;
+            }
         }
 
-        if (argc > packageRootArgument + 1)
-        {
-            Lode::Logger::Error("Usage: lode ci validate [--source|--artifact] [package-root]");
-            return 1;
-        }
-
-        fs::path packageRoot = argc > packageRootArgument
-            ? fs::path(argv[packageRootArgument])
-            : fs::current_path();
         Lode::Package::ValidationReport report = Lode::Package::Validate(packageRoot, mode);
         for (const std::string& warning : report.warnings)
             Lode::Logger::Warn(warning);
@@ -186,6 +188,27 @@ int main(int argc, char* argv[])
 
         if (!report.IsValid())
             return 1;
+
+        if (locked)
+        {
+            const bool hasDependencies = report.dependencyGraph.packages.size() > 1 ||
+                (!report.dependencyGraph.packages.empty() &&
+                    !report.dependencyGraph.packages[report.dependencyGraph.root].dependencies.empty());
+            const fs::path lockfilePath = fs::absolute(packageRoot) / "lode.lock";
+            if (hasDependencies || fs::is_regular_file(lockfilePath))
+            {
+                Lode::Package::LockfileResult lockfile =
+                    Lode::Package::ValidateLockfile(lockfilePath, report.dependencyGraph);
+                for (const std::string& error : lockfile.errors)
+                    Lode::Logger::Error(error);
+
+                if (!lockfile.IsValid())
+                    return 1;
+
+                Lode::Logger::Success("Package lockfile validation passed: " +
+                    PathToUtf8(lockfilePath));
+            }
+        }
 
         Lode::Logger::Success("Package validation passed: " + PathToUtf8(fs::absolute(packageRoot)));
         return 0;

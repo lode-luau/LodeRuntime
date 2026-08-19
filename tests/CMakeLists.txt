@@ -93,6 +93,19 @@ add_test(
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
 )
 
+add_test(
+    NAME package_validator_accepts_root_dev_lockfile
+    COMMAND lode ci validate --source --locked "${CMAKE_CURRENT_SOURCE_DIR}/package/dev_path_consumer"
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+)
+
+add_test(
+    NAME package_validator_rejects_missing_lockfile
+    COMMAND lode ci validate --source --locked "${CMAKE_CURRENT_SOURCE_DIR}/package/path_consumer"
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+)
+set_tests_properties(package_validator_rejects_missing_lockfile PROPERTIES WILL_FAIL TRUE)
+
 # Exercises State destruction while filesystem resources are still active.
 # The script deliberately raises after opening them, so the runtime must run
 # module shutdown hooks without hanging or crashing.
