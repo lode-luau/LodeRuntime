@@ -10,5 +10,6 @@ namespace Lode::Package
 {
 
 LODE_API ValidationReport GenerateWorkflow(const std::filesystem::path& packageRoot, bool force);
+LODE_API ValidationReport UpdateWorkflow(const std::filesystem::path& packageRoot);
 
 } // namespace Lode::Package

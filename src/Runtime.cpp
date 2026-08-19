@@ -38,6 +38,7 @@ int main(int argc, char* argv[])
         Lode::Logger::Info("Usage: lode <file.luac | file.luau>");
         Lode::Logger::Info("       lode ci validate [--source|--artifact] [package-root]");
         Lode::Logger::Info("       lode ci init [--force] [package-root]");
+        Lode::Logger::Info("       lode ci update [package-root]");
         return 1;
     }
 
@@ -48,6 +49,7 @@ int main(int argc, char* argv[])
         {
             Lode::Logger::Error("Usage: lode ci validate [--source|--artifact] [package-root]");
             Lode::Logger::Error("       lode ci init [--force] [package-root]");
+            Lode::Logger::Error("       lode ci update [package-root]");
             return 1;
         }
 
@@ -90,10 +92,36 @@ int main(int argc, char* argv[])
             return 0;
         }
 
+        if (ciCommand == "update")
+        {
+            fs::path packageRoot = fs::current_path();
+            if (argc > 4)
+            {
+                Lode::Logger::Error("Usage: lode ci update [package-root]");
+                return 1;
+            }
+            if (argc == 4)
+                packageRoot = fs::path(argv[3]);
+
+            Lode::Package::ValidationReport report = Lode::Package::UpdateWorkflow(packageRoot);
+            for (const std::string& warning : report.warnings)
+                Lode::Logger::Warn(warning);
+            for (const std::string& error : report.errors)
+                Lode::Logger::Error(error);
+
+            if (!report.IsValid())
+                return 1;
+
+            Lode::Logger::Success("Updated managed GitHub Actions workflow: " +
+                PathToUtf8(fs::absolute(packageRoot) / ".github/workflows/lode.yml"));
+            return 0;
+        }
+
         if (ciCommand != "validate")
         {
             Lode::Logger::Error("Usage: lode ci validate [--source|--artifact] [package-root]");
             Lode::Logger::Error("       lode ci init [--force] [package-root]");
+            Lode::Logger::Error("       lode ci update [package-root]");
             return 1;
         }
 

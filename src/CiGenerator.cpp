@@ -244,6 +244,102 @@ jobs:
     return workflow.str();
 }
 
+bool BuildWorkflowText(const fs::path& root, ValidationReport& report, std::string& workflow)
+{
+    ValidationReport sourceReport = Validate(root, ValidationMode::Source);
+    report.errors.insert(report.errors.end(), sourceReport.errors.begin(), sourceReport.errors.end());
+    report.warnings.insert(report.warnings.end(), sourceReport.warnings.begin(), sourceReport.warnings.end());
+    if (!sourceReport.IsValid())
+        return false;
+
+    json manifest;
+    try
+    {
+        std::ifstream file(root / "lode.json");
+        manifest = json::parse(file);
+    }
+    catch (const std::exception& exception)
+    {
+        Error(report, "Failed to parse lode.json while generating CI: " + std::string(exception.what()));
+        return false;
+    }
+
+    const bool isNative = manifest.contains("libraries") && manifest["libraries"].is_object();
+    if (isNative)
+    {
+        for (auto platformIt = manifest["libraries"].begin(); platformIt != manifest["libraries"].end(); ++platformIt)
+        {
+            if (platformIt.key() != "windows" || !platformIt.value().is_object())
+            {
+                Error(report, "lode ci currently supports only native windows/x64 package targets.");
+                return false;
+            }
+
+            for (auto architectureIt = platformIt.value().begin(); architectureIt != platformIt.value().end(); ++architectureIt)
+            {
+                if (architectureIt.key() != "x64")
+                {
+                    Error(report, "lode ci currently supports only native windows/x64 package targets.");
+                    return false;
+                }
+            }
+        }
+    }
+
+    workflow = isNative ? NativeWorkflow() : PureLuauWorkflow();
+    return true;
+}
+
+bool ReplaceManagedWorkflowBlock(const fs::path& workflowPath, const std::string& generated, ValidationReport& report)
+{
+    constexpr const char* beginMarker = "# BEGIN LODE MANAGED: v1";
+    constexpr const char* endMarker = "# END LODE MANAGED";
+
+    std::ifstream input(workflowPath, std::ios::binary);
+    if (!input.is_open())
+    {
+        Error(report, "Failed to read workflow: " + PathToUtf8(workflowPath));
+        return false;
+    }
+
+    const std::string existing((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+    const std::size_t begin = existing.find(beginMarker);
+    const std::size_t end = existing.find(endMarker);
+    if (begin == std::string::npos || end == std::string::npos || end < begin)
+    {
+        Error(report, "Workflow does not contain a valid Lode managed block: " + PathToUtf8(workflowPath));
+        return false;
+    }
+
+    const std::size_t generatedBegin = generated.find(beginMarker);
+    const std::size_t generatedEnd = generated.find(endMarker);
+    if (generatedBegin == std::string::npos || generatedEnd == std::string::npos || generatedEnd < generatedBegin)
+    {
+        Error(report, "Internal error: generated workflow does not contain a valid Lode managed block.");
+        return false;
+    }
+
+    const std::size_t managedEnd = end + std::char_traits<char>::length(endMarker);
+    const std::string managed = generated.substr(generatedBegin, generatedEnd + std::char_traits<char>::length(endMarker) - generatedBegin);
+    std::string updated = existing.substr(0, begin) + managed + existing.substr(managedEnd);
+
+    std::ofstream output(workflowPath, std::ios::binary | std::ios::trunc);
+    if (!output.is_open())
+    {
+        Error(report, "Failed to write workflow: " + PathToUtf8(workflowPath));
+        return false;
+    }
+
+    output << updated;
+    if (!output.good())
+    {
+        Error(report, "Failed while writing workflow: " + PathToUtf8(workflowPath));
+        return false;
+    }
+
+    return true;
+}
+
 } // namespace
 
 ValidationReport GenerateWorkflow(const fs::path& packageRoot, bool force)
@@ -264,45 +360,9 @@ ValidationReport GenerateWorkflow(const fs::path& packageRoot, bool force)
         return report;
     }
 
-    ValidationReport sourceReport = Validate(root, ValidationMode::Source);
-    report.errors.insert(report.errors.end(), sourceReport.errors.begin(), sourceReport.errors.end());
-    report.warnings.insert(report.warnings.end(), sourceReport.warnings.begin(), sourceReport.warnings.end());
-    if (!sourceReport.IsValid())
+    std::string workflow;
+    if (!BuildWorkflowText(root, report, workflow))
         return report;
-
-    json manifest;
-    try
-    {
-        std::ifstream file(root / "lode.json");
-        manifest = json::parse(file);
-    }
-    catch (const std::exception& exception)
-    {
-        Error(report, "Failed to parse lode.json while generating CI: " + std::string(exception.what()));
-        return report;
-    }
-
-    const bool isNative = manifest.contains("libraries") && manifest["libraries"].is_object();
-    if (isNative)
-    {
-        for (auto platformIt = manifest["libraries"].begin(); platformIt != manifest["libraries"].end(); ++platformIt)
-        {
-            if (platformIt.key() != "windows" || !platformIt.value().is_object())
-            {
-                Error(report, "lode ci init currently supports only native windows/x64 package targets.");
-                return report;
-            }
-
-            for (auto architectureIt = platformIt.value().begin(); architectureIt != platformIt.value().end(); ++architectureIt)
-            {
-                if (architectureIt.key() != "x64")
-                {
-                    Error(report, "lode ci init currently supports only native windows/x64 package targets.");
-                    return report;
-                }
-            }
-        }
-    }
 
     std::error_code createError;
     fs::create_directories(workflowPath.parent_path(), createError);
@@ -319,10 +379,36 @@ ValidationReport GenerateWorkflow(const fs::path& packageRoot, bool force)
         return report;
     }
 
-    output << (isNative ? NativeWorkflow() : PureLuauWorkflow());
+    output << workflow;
     if (!output.good())
         Error(report, "Failed while writing workflow: " + PathToUtf8(workflowPath));
 
+    return report;
+}
+
+ValidationReport UpdateWorkflow(const fs::path& packageRoot)
+{
+    ValidationReport report;
+    std::error_code ec;
+    const fs::path root = fs::weakly_canonical(fs::absolute(packageRoot, ec), ec);
+    if (ec || !fs::is_directory(root))
+    {
+        Error(report, "Package root is not a directory: " + PathToUtf8(packageRoot));
+        return report;
+    }
+
+    const fs::path workflowPath = root / ".github" / "workflows" / "lode.yml";
+    if (!fs::is_regular_file(workflowPath))
+    {
+        Error(report, "Managed workflow does not exist: " + PathToUtf8(workflowPath) + ". Run `lode ci init` first.");
+        return report;
+    }
+
+    std::string generated;
+    if (!BuildWorkflowText(root, report, generated))
+        return report;
+
+    ReplaceManagedWorkflowBlock(workflowPath, generated, report);
     return report;
 }
 
