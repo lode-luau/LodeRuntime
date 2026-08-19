@@ -1,9 +1,9 @@
 # Changelog
 
-All notable changes to LodeRuntime are documented here. This project is
-pre-1.0 and currently ships only nightly builds (`0.1.0-nightly.YYYYMMDD.N`);
-entries are grouped by date rather than by version until the first stable
-release.
+All notable changes to LodeRuntime are documented here. The current
+runtime/SDK line is `1.0.0`, but the project still ships only nightly builds
+(`1.0.0-nightly.YYYYMMDD.N`); this does not represent a stable release.
+Entries are grouped by date until a stable release is declared.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
 
