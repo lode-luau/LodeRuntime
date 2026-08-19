@@ -180,6 +180,7 @@ set(LODE_CORE_SOURCES
     src/State.cpp
     src/StateLifetime.cpp
     src/Compiler.cpp
+    src/Sha256.cpp
     src/Gc.cpp
     src/Logger.cpp
     src/Json.cpp
@@ -221,6 +222,7 @@ set(LODE_CORE_HEADERS
     src/Platform/CrashHandler.hpp
     src/Platform/WindowsCrashHandler.hpp
     src/PathUtil.hpp
+    src/Sha256.hpp
 )
 
 # LodeCore SHARED Library Target (Shared DLL linked dynamically by runtime and native modules)
