@@ -100,6 +100,12 @@ add_test(
 )
 
 add_test(
+    NAME package_validator_accepts_stdlib_lockfile
+    COMMAND lode ci validate --source --locked "${CMAKE_CURRENT_SOURCE_DIR}/package/stdlib_dependency_consumer"
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+)
+
+add_test(
     NAME package_validator_rejects_missing_lockfile
     COMMAND lode ci validate --source --locked "${CMAKE_CURRENT_SOURCE_DIR}/package/path_consumer"
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"

@@ -150,6 +150,10 @@ std::optional<fs::path> FindStdlibRoot(const fs::path& packageRoot)
         if (current.filename() == "modules" && fs::is_directory(current))
             return current;
 
+        const fs::path siblingModules = current / "modules";
+        if (fs::is_directory(siblingModules))
+            return siblingModules;
+
         const fs::path parent = current.parent_path();
         if (parent == current)
             break;
