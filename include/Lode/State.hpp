@@ -91,6 +91,9 @@ public:
 
     void AddModulePath(std::string_view path);
 
+    /** @brief Sets the runtime-owned standard library root used as a module fallback. */
+    void SetStandardLibraryPath(std::string_view path);
+
     void SetCliArgs(const std::vector<std::string>& args);
     [[nodiscard]] std::vector<std::string> GetCliArgs() const;
 

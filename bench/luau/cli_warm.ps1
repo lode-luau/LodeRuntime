@@ -1,9 +1,9 @@
-# Measures the warm-run wall time of lode_runtime on a cached .luau fixture.
+# Measures the warm-run wall time of lode on a cached .luau fixture.
 # Usage:
 #   powershell -ExecutionPolicy Bypass -File bench/luau/cli_warm.ps1
-#   powershell -ExecutionPolicy Bypass -File bench/luau/cli_warm.ps1 -Runtime build/bin/Release/lode_runtime.exe -Runs 20
+#   powershell -ExecutionPolicy Bypass -File bench/luau/cli_warm.ps1 -Runtime build/bin/Release/lode.exe -Runs 20
 param(
-    [string]$Runtime = "build/bin/Release/lode_runtime.exe",
+    [string]$Runtime = "build/bin/Release/lode.exe",
     [int]$Runs = 20,
     [string]$Script = "bench/fixtures/big.luau"
 )

@@ -38,6 +38,18 @@
 #define LODE_BUILD_CONFIG_NAME LODE_BUILD_CONFIG_UNSET
 #endif
 
+/**
+ * @def LODE_ABI_ID
+ * @brief Opaque ABI identifier shared by a Lode runtime and its native SDK.
+ *
+ * The identifier changes when the native module contract is incompatible.
+ * It is intentionally a C string literal so it can be exported without
+ * crossing the DLL boundary with a C++ object.
+ */
+#ifndef LODE_ABI_ID
+#define LODE_ABI_ID "lode-abi-1"
+#endif
+
 #define LODE_STRINGIFY_INNER(x) #x
 #define LODE_STRINGIFY(x) LODE_STRINGIFY_INNER(x)
 
@@ -49,4 +61,9 @@ inline const char* LodeBuildConfigName()
 {
     const char* name = LODE_STRINGIFY(LODE_BUILD_CONFIG_NAME);
     return name;
+}
+
+inline const char* LodeAbiId()
+{
+    return LODE_ABI_ID;
 }

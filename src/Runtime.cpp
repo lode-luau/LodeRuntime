@@ -6,6 +6,10 @@
 #include "Lode/Result.hpp"
 #include "Lode/EventLoop.hpp"
 #include "Lode/Task.hpp"
+#include "CiGenerator.hpp"
+#include "PackageValidator.hpp"
+#include "PackageLockfile.hpp"
+#include "PackageInstaller.hpp"
 #include "PathUtil.hpp"
 #include "Platform/CrashHandler.hpp"
 
@@ -15,10 +19,34 @@
 #include <filesystem>
 #include <algorithm>
 #include <cctype>
+#include <array>
 
 namespace fs = std::filesystem;
 
 using Lode::Detail::PathToUtf8;
+
+static fs::path FindStandardLibraryPath(const fs::path& executablePath)
+{
+    std::error_code ec;
+    const fs::path executable = fs::weakly_canonical(fs::absolute(executablePath, ec), ec);
+    if (ec)
+        return {};
+
+    const fs::path executableDirectory = executable.parent_path();
+    const std::array<fs::path, 3> candidates = {
+        executableDirectory.parent_path() / "stdlib",
+        executableDirectory.parent_path().parent_path() / "stdlib",
+        executableDirectory / "stdlib"
+    };
+
+    for (const fs::path& candidate : candidates)
+    {
+        if (fs::is_directory(candidate) && fs::is_regular_file(candidate / ".config.luau"))
+            return fs::weakly_canonical(candidate, ec);
+    }
+
+    return {};
+}
 
 #if defined(_WIN32)
 int wmain(int argc, wchar_t* argv[])
@@ -29,12 +57,213 @@ int main(int argc, char* argv[])
     // Initialize cross-platform CrashHandler and Logger ANSI support
     Lode::Platform::CrashHandler::Initialize();
     Lode::Logger::Initialize();
+    const fs::path standardLibraryPath = FindStandardLibraryPath(fs::path(argv[0]));
 
     if (argc < 2)
     {
-        Lode::Logger::Info("LodeRuntime (lode_runtime) v1.0.0");
-        Lode::Logger::Info("Usage: lode_runtime <file.luac | file.luau>");
+        Lode::Logger::Info("Lode (lode) v1.0.0");
+        Lode::Logger::Info("Usage: lode <file.luac | file.luau>");
+        Lode::Logger::Info("       lode install [--locked] [--dev] [package-root]");
+        Lode::Logger::Info("       lode ci validate [--source|--artifact] [--locked] [package-root]");
+        Lode::Logger::Info("       lode ci init [--force] [package-root]");
+        Lode::Logger::Info("       lode ci update [package-root]");
         return 1;
+    }
+
+    const std::string firstArgument = PathToUtf8(fs::path(argv[1]));
+    if (firstArgument == "install")
+    {
+        bool locked = false;
+        bool includeDevelopmentDependencies = false;
+        fs::path packageRoot = fs::current_path();
+        bool hasPackageRoot = false;
+        for (int argumentIndex = 2; argumentIndex < argc; ++argumentIndex)
+        {
+            const std::string argument = PathToUtf8(fs::path(argv[argumentIndex]));
+            if (argument == "--locked")
+            {
+                locked = true;
+            }
+            else if (argument == "--dev")
+            {
+                includeDevelopmentDependencies = true;
+            }
+            else if (argument.rfind("--", 0) == 0 || hasPackageRoot)
+            {
+                Lode::Logger::Error("Usage: lode install [--locked] [--dev] [package-root]");
+                return 1;
+            }
+            else
+            {
+                packageRoot = fs::path(argv[argumentIndex]);
+                hasPackageRoot = true;
+            }
+        }
+
+        Lode::Package::InstallResult result = locked
+            ? Lode::Package::InstallLocked(
+                packageRoot, standardLibraryPath, includeDevelopmentDependencies)
+            : Lode::Package::InstallLocal(
+                packageRoot, standardLibraryPath, includeDevelopmentDependencies);
+        for (const std::string& error : result.errors)
+            Lode::Logger::Error(error);
+        if (!result.IsValid())
+            return 1;
+
+        Lode::Logger::Success(std::string(locked ? "Locked" : "Local") +
+            " package installation completed: " +
+            PathToUtf8(fs::absolute(packageRoot)));
+        return 0;
+    }
+
+    if (firstArgument == "ci")
+    {
+        if (argc < 3)
+        {
+            Lode::Logger::Error("Usage: lode ci validate [--source|--artifact] [--locked] [package-root]");
+            Lode::Logger::Error("       lode ci init [--force] [package-root]");
+            Lode::Logger::Error("       lode ci update [package-root]");
+            return 1;
+        }
+
+        const std::string ciCommand = PathToUtf8(fs::path(argv[2]));
+        if (ciCommand == "init")
+        {
+            bool force = false;
+            fs::path packageRoot = fs::current_path();
+            bool hasPackageRoot = false;
+            for (int argumentIndex = 3; argumentIndex < argc; ++argumentIndex)
+            {
+                const std::string argument = PathToUtf8(fs::path(argv[argumentIndex]));
+                if (argument == "--force")
+                {
+                    force = true;
+                }
+                else if (argument.rfind("--", 0) == 0 || hasPackageRoot)
+                {
+                    Lode::Logger::Error("Usage: lode ci init [--force] [package-root]");
+                    return 1;
+                }
+                else
+                {
+                    packageRoot = fs::path(argv[argumentIndex]);
+                    hasPackageRoot = true;
+                }
+            }
+
+            Lode::Package::ValidationReport report = Lode::Package::GenerateWorkflow(
+                packageRoot, force, standardLibraryPath);
+            for (const std::string& warning : report.warnings)
+                Lode::Logger::Warn(warning);
+            for (const std::string& error : report.errors)
+                Lode::Logger::Error(error);
+
+            if (!report.IsValid())
+                return 1;
+
+            Lode::Logger::Success("Generated GitHub Actions workflow: " +
+                PathToUtf8(fs::absolute(packageRoot) / ".github/workflows/lode.yml"));
+            return 0;
+        }
+
+        if (ciCommand == "update")
+        {
+            fs::path packageRoot = fs::current_path();
+            if (argc > 4)
+            {
+                Lode::Logger::Error("Usage: lode ci update [package-root]");
+                return 1;
+            }
+            if (argc == 4)
+                packageRoot = fs::path(argv[3]);
+
+            Lode::Package::ValidationReport report = Lode::Package::UpdateWorkflow(
+                packageRoot, standardLibraryPath);
+            for (const std::string& warning : report.warnings)
+                Lode::Logger::Warn(warning);
+            for (const std::string& error : report.errors)
+                Lode::Logger::Error(error);
+
+            if (!report.IsValid())
+                return 1;
+
+            Lode::Logger::Success("Updated managed GitHub Actions workflow: " +
+                PathToUtf8(fs::absolute(packageRoot) / ".github/workflows/lode.yml"));
+            return 0;
+        }
+
+        if (ciCommand != "validate")
+        {
+            Lode::Logger::Error("Usage: lode ci validate [--source|--artifact] [--locked] [package-root]");
+            Lode::Logger::Error("       lode ci init [--force] [package-root]");
+            Lode::Logger::Error("       lode ci update [package-root]");
+            return 1;
+        }
+
+        Lode::Package::ValidationMode mode = Lode::Package::ValidationMode::Artifact;
+        bool locked = false;
+        fs::path packageRoot = fs::current_path();
+        bool hasPackageRoot = false;
+        for (int argumentIndex = 3; argumentIndex < argc; ++argumentIndex)
+        {
+            const std::string argument = PathToUtf8(fs::path(argv[argumentIndex]));
+            if (argument == "--source")
+            {
+                mode = Lode::Package::ValidationMode::Source;
+            }
+            else if (argument == "--artifact")
+            {
+                mode = Lode::Package::ValidationMode::Artifact;
+            }
+            else if (argument == "--locked")
+            {
+                locked = true;
+            }
+            else if (argument.rfind("--", 0) == 0 || hasPackageRoot)
+            {
+                Lode::Logger::Error("Usage: lode ci validate [--source|--artifact] [--locked] [package-root]");
+                return 1;
+            }
+            else
+            {
+                packageRoot = fs::path(argv[argumentIndex]);
+                hasPackageRoot = true;
+            }
+        }
+
+        Lode::Package::ValidationReport report = Lode::Package::Validate(
+            packageRoot, mode, standardLibraryPath);
+        for (const std::string& warning : report.warnings)
+            Lode::Logger::Warn(warning);
+        for (const std::string& error : report.errors)
+            Lode::Logger::Error(error);
+
+        if (!report.IsValid())
+            return 1;
+
+        if (locked)
+        {
+            const bool hasDependencies = report.dependencyGraph.packages.size() > 1 ||
+                (!report.dependencyGraph.packages.empty() &&
+                    !report.dependencyGraph.packages[report.dependencyGraph.root].dependencies.empty());
+            const fs::path lockfilePath = fs::absolute(packageRoot) / "lode.lock";
+            if (hasDependencies || fs::is_regular_file(lockfilePath))
+            {
+                Lode::Package::LockfileResult lockfile =
+                    Lode::Package::ValidateLockfile(lockfilePath, report.dependencyGraph);
+                for (const std::string& error : lockfile.errors)
+                    Lode::Logger::Error(error);
+
+                if (!lockfile.IsValid())
+                    return 1;
+
+                Lode::Logger::Success("Package lockfile validation passed: " +
+                    PathToUtf8(lockfilePath));
+            }
+        }
+
+        Lode::Logger::Success("Package validation passed: " + PathToUtf8(fs::absolute(packageRoot)));
+        return 0;
     }
 
     fs::path filePath = fs::path(argv[1]);
@@ -123,6 +352,9 @@ int main(int argc, char* argv[])
     }
 
     Lode::State vm = std::move(stateResult.GetValue());
+
+    if (!standardLibraryPath.empty())
+        vm.SetStandardLibraryPath(PathToUtf8(standardLibraryPath));
 
     std::vector<std::string> scriptArgs;
     for (int i = 2; i < argc; ++i)

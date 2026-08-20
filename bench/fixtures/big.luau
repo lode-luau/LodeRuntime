@@ -1,6 +1,6 @@
 --!strict
 -- Deterministic generated workload for CLI warm benchmarks (see bench/README.md).
--- Regenerate with: build/bin/Release/lode_runtime.exe bench/fixtures/gen_big.luau
+-- Regenerate with: build/bin/Release/lode.exe bench/fixtures/gen_big.luau
 
 local function mix(a: number, b: number): number
     local h = (a * 374761393 + b * 668265263) % 2147483647

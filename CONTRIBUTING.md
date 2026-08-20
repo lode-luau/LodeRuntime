@@ -13,7 +13,7 @@ small and all contributions are valued.
 
 Lode is a runtime for Luau, built so that developers coming from Roblox
 Studio can use the language they already know with almost no extra learning:
-no sandboxing ceremony, no toolchain magic, just `lode_runtime script.luau`.
+no sandboxing ceremony, no toolchain magic, just `lode script.luau`.
 Keep that in mind when you contribute — if something feels like it only makes
 sense inside a big company's build system, it probably does not belong here.
 
@@ -112,15 +112,15 @@ Configure and build:
 
 Run the full validation flow, Debug and Release sequentially:
 
-* `build/bin/Debug/lode_runtime.exe modules/sanity/run.luau`
-* `build/bin/Release/lode_runtime.exe modules/sanity/run.luau`
+* `build/bin/Debug/lode.exe modules/sanity/run.luau`
+* `build/bin/Release/lode.exe modules/sanity/run.luau`
 * `ctest --test-dir build -C Debug --output-on-failure`
 
 The sanity suite currently contains 33 tests; treat the reported count as
 authoritative if it changes. The `ctest` run covers the native module
 fixtures and integration scripts under `tests/native/` and the diagnostic
 regression scripts under `tests/diagnostics/`. Validation must go through the
-real runtime path (`lode_runtime` + `.luau`) — do not keep temporary probe
+real runtime path (`lode` + `.luau`) — do not keep temporary probe
 executables in the repo.
 repository.
 

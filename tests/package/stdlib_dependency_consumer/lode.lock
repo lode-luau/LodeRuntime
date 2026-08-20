@@ -1,0 +1,36 @@
+{
+  "lockfileVersion": 1,
+  "root": 0,
+  "packages": [
+    {
+      "name": "stdlib_dependency_consumer",
+      "version": "1.0.0",
+      "source": "root",
+      "dependencies": [
+        {
+          "alias": "signal",
+          "requirement": "1.0.0",
+          "target": 1
+        }
+      ]
+    },
+    {
+      "name": "signal",
+      "version": "1.0.0",
+      "source": "stdlib",
+      "dependencies": [
+        {
+          "alias": "task",
+          "requirement": "1.0.0",
+          "target": 2
+        }
+      ]
+    },
+    {
+      "name": "task",
+      "version": "1.0.0",
+      "source": "stdlib",
+      "dependencies": []
+    }
+  ]
+}

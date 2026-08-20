@@ -1,7 +1,7 @@
 --!strict
 
 -- Regenerates bench/fixtures/big.luau deterministically (no RNG).
--- Usage: build/bin/Release/lode_runtime.exe bench/fixtures/gen_big.luau
+-- Usage: build/bin/Release/lode.exe bench/fixtures/gen_big.luau
 --
 -- The output path is resolved relative to this script via @self, so the
 -- generator works regardless of the current working directory. Uses only
@@ -39,7 +39,7 @@ end
 
 push("--!strict")
 push("-- Deterministic generated workload for CLI warm benchmarks (see bench/README.md).")
-push("-- Regenerate with: build/bin/Release/lode_runtime.exe bench/fixtures/gen_big.luau")
+push("-- Regenerate with: build/bin/Release/lode.exe bench/fixtures/gen_big.luau")
 push("")
 
 push("local function mix(a: number, b: number): number")

@@ -122,7 +122,7 @@ meaningless.
 using only Lode's own modules:
 
 ```bash
-build/bin/Release/lode_runtime.exe bench/fixtures/gen_big.luau
+build/bin/Release/lode.exe bench/fixtures/gen_big.luau
 ```
 
 It resolves the output path via `path.resolve("@self", "big.luau")` (the

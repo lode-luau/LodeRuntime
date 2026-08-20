@@ -1,0 +1,38 @@
+{
+  "lockfileVersion": 1,
+  "root": 0,
+  "packages": [
+    {
+      "name": "dev_path_consumer",
+      "version": "1.0.0",
+      "source": "root",
+      "dependencies": [],
+      "devDependencies": [
+        {
+          "alias": "local_signal",
+          "requirement": "1.0.0",
+          "target": 2
+        }
+      ]
+    },
+    {
+      "name": "task",
+      "version": "1.0.0",
+      "source": "stdlib",
+      "dependencies": []
+    },
+    {
+      "name": "signal",
+      "version": "1.0.0",
+      "source": "path",
+      "reference": "../../../modules/signal",
+      "dependencies": [
+        {
+          "alias": "task",
+          "requirement": "1.0.0",
+          "target": 1
+        }
+      ]
+    }
+  ]
+}

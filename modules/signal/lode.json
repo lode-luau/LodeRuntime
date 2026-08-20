@@ -5,6 +5,6 @@
   "author": "Lode Team",
   "license": "MIT",
   "dependencies": {
-    "task": "modules/task"
+    "task": "1.0.0"
   }
 }

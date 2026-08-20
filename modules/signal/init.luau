@@ -2,7 +2,7 @@
 --!native
 --!optimize 2
 
-local task = require("../task")
+local task = require("@task")
 
 -- Public interface types
 export type Connection = {

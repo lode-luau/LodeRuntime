@@ -1,0 +1,13 @@
+{
+  "name": "dev_path_consumer",
+  "version": "1.0.0",
+  "description": "Root development dependency graph regression fixture",
+  "author": "Lode Tests",
+  "license": "MIT",
+  "devDependencies": {
+    "local_signal": {
+      "path": "../../../modules/signal",
+      "version": "1.0.0"
+    }
+  }
+}
