@@ -877,6 +877,96 @@ bool ResolveStandardLibraryDependencies(DependencyGraph& graph,
     return true;
 }
 
+struct LockedGraphResult
+{
+    DependencyGraph graph;
+    fs::path stagingDirectory;
+    std::vector<std::string> errors;
+
+    bool IsValid() const
+    {
+        return errors.empty();
+    }
+};
+
+LockedGraphResult ResolveLockedGraph(const fs::path& packageRoot,
+                                     const fs::path& standardLibraryRoot,
+                                     const PackageCacheLayout& cacheLayout,
+                                     bool includeDevelopmentDependencies)
+{
+    LockedGraphResult result;
+    const ValidationReport validation = Validate(
+        packageRoot, ValidationMode::InstallSource, standardLibraryRoot);
+    if (!validation.IsValid())
+    {
+        result.errors = validation.errors;
+        return result;
+    }
+
+    result.graph = validation.dependencyGraph;
+    const fs::path root = result.graph.packages[result.graph.root].root;
+    const std::vector<bool> initialInstallablePackages = CollectInstallablePackages(
+        result.graph, includeDevelopmentDependencies);
+    if (!HasInstallEdges(result.graph, initialInstallablePackages,
+                         includeDevelopmentDependencies))
+        return result;
+
+    std::string lockContent;
+    if (!ReadFile(root / "lode.lock", lockContent))
+    {
+        result.errors.push_back("Cannot open lockfile: " + PathToUtf8(root / "lode.lock"));
+        return result;
+    }
+
+    json lockDocument;
+    try
+    {
+        lockDocument = json::parse(lockContent);
+    }
+    catch (const std::exception& error)
+    {
+        result.errors.push_back("Failed to parse lockfile " +
+            PathToUtf8(root / "lode.lock") + ": " + error.what());
+        return result;
+    }
+
+    const auto timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    const fs::path stagingDirectory = cacheLayout.stagingDirectory /
+        ("git-locked-" + std::to_string(timestamp));
+    InstallResult resolution;
+    auto cleanup = [&]() {
+        std::error_code ec;
+        fs::remove_all(stagingDirectory, ec);
+    };
+
+    if (!ResolveGitDependencies(result.graph, standardLibraryRoot, cacheLayout,
+                                stagingDirectory, &lockDocument, resolution))
+    {
+        cleanup();
+        result.errors = std::move(resolution.errors);
+        return result;
+    }
+
+    if (!ResolveStandardLibraryDependencies(result.graph, standardLibraryRoot, cacheLayout,
+                                            stagingDirectory, &lockDocument, resolution))
+    {
+        cleanup();
+        result.errors = std::move(resolution.errors);
+        return result;
+    }
+
+    const LockfileResult lock = ValidateLockfile(root / "lode.lock", result.graph);
+    if (!lock.IsValid())
+    {
+        cleanup();
+        result.errors = lock.errors;
+        return result;
+    }
+
+    result.stagingDirectory = stagingDirectory;
+    return result;
+}
+
 } // namespace
 
 InstallResult InstallResolvedGraph(const DependencyGraph& graph,
@@ -1016,18 +1106,6 @@ InstallResult InstallLocked(const fs::path& packageRoot,
                             bool includeDevelopmentDependencies)
 {
     InstallResult result;
-    const ValidationReport validation = Validate(
-        packageRoot, ValidationMode::InstallSource, standardLibraryRoot);
-    if (!validation.IsValid())
-    {
-        result.errors = validation.errors;
-        return result;
-    }
-
-    DependencyGraph graph = validation.dependencyGraph;
-    const fs::path root = graph.packages[graph.root].root;
-    const std::vector<bool> initialInstallablePackages = CollectInstallablePackages(
-        graph, includeDevelopmentDependencies);
 
     const CacheLayoutResult cache = ResolvePackageCacheLayout();
     if (!cache.IsValid())
@@ -1036,65 +1114,43 @@ InstallResult InstallLocked(const fs::path& packageRoot,
         return result;
     }
 
-    const bool hasInstallEdges = HasInstallEdges(
-        graph, initialInstallablePackages, includeDevelopmentDependencies);
-    fs::path gitStaging;
-    if (hasInstallEdges)
+    LockedGraphResult resolution = ResolveLockedGraph(
+        packageRoot, standardLibraryRoot, *cache.layout, includeDevelopmentDependencies);
+    if (!resolution.IsValid())
     {
-        std::string lockContent;
-        if (!ReadFile(root / "lode.lock", lockContent))
-        {
-            result.errors.push_back("Cannot open lockfile: " + PathToUtf8(root / "lode.lock"));
-            return result;
-        }
-
-        json lockDocument;
-        try
-        {
-            lockDocument = json::parse(lockContent);
-        }
-        catch (const std::exception& error)
-        {
-            result.errors.push_back("Failed to parse lockfile " +
-                PathToUtf8(root / "lode.lock") + ": " + error.what());
-            return result;
-        }
-
-        const auto timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
-        gitStaging = cache.layout->stagingDirectory /
-            ("git-locked-" + std::to_string(timestamp));
-        if (!ResolveGitDependencies(graph, standardLibraryRoot, *cache.layout,
-                                    gitStaging, &lockDocument, result))
-        {
-            std::error_code ec;
-            fs::remove_all(gitStaging, ec);
-            return result;
-        }
-
-        if (!ResolveStandardLibraryDependencies(graph, standardLibraryRoot, *cache.layout,
-                                                gitStaging, &lockDocument, result))
-        {
-            std::error_code ec;
-            fs::remove_all(gitStaging, ec);
-            return result;
-        }
-
-        const LockfileResult lock = ValidateLockfile(root / "lode.lock", graph);
-        if (!lock.IsValid())
-        {
-            result.errors = lock.errors;
-            std::error_code ec;
-            fs::remove_all(gitStaging, ec);
-            return result;
-        }
+        result.errors = std::move(resolution.errors);
+        return result;
     }
 
-    result = InstallResolvedGraph(graph, root, *cache.layout,
+    const fs::path root = resolution.graph.packages[resolution.graph.root].root;
+    result = InstallResolvedGraph(resolution.graph, root, *cache.layout,
                                   includeDevelopmentDependencies);
     std::error_code ec;
-    if (!gitStaging.empty())
-        fs::remove_all(gitStaging, ec);
+    if (!resolution.stagingDirectory.empty())
+        fs::remove_all(resolution.stagingDirectory, ec);
     return result;
+}
+
+ValidationReport ValidateLockedPackage(const fs::path& packageRoot,
+                                       const fs::path& standardLibraryRoot,
+                                       bool includeDevelopmentDependencies)
+{
+    ValidationReport report;
+    const CacheLayoutResult cache = ResolvePackageCacheLayout();
+    if (!cache.IsValid())
+    {
+        report.errors = cache.errors;
+        return report;
+    }
+
+    LockedGraphResult resolution = ResolveLockedGraph(
+        packageRoot, standardLibraryRoot, *cache.layout, includeDevelopmentDependencies);
+    report.errors = std::move(resolution.errors);
+    report.dependencyGraph = std::move(resolution.graph);
+    std::error_code ec;
+    if (!resolution.stagingDirectory.empty())
+        fs::remove_all(resolution.stagingDirectory, ec);
+    return report;
 }
 
 InstallResult InstallLocal(const fs::path& packageRoot,

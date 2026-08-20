@@ -553,8 +553,20 @@ int main(int argc, char* argv[])
             }
         }
 
-        Lode::Package::ValidationReport report = Lode::Package::Validate(
-            packageRoot, mode, standardLibraryPath);
+        Lode::Package::ValidationReport report;
+        if (locked && mode == Lode::Package::ValidationMode::Source)
+        {
+            // A locked install may select a standard-module artifact that is
+            // not present in the bundled catalog. Reuse the exact locked
+            // graph validation instead of resolving only against that catalog.
+            report = Lode::Package::ValidateLockedPackage(
+                packageRoot, standardLibraryPath, true);
+        }
+        else
+        {
+            report = Lode::Package::Validate(
+                packageRoot, mode, standardLibraryPath);
+        }
         for (const std::string& warning : report.warnings)
             Lode::Logger::Warn(warning);
         for (const std::string& error : report.errors)

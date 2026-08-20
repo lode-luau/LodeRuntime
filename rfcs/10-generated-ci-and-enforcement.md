@@ -35,9 +35,15 @@ dependencies. With `--locked`, it additionally verifies that the existing
 `lode.lock` exactly describes the validated dependency graph. A dependency-
 bearing package with a missing or stale lockfile fails this check rather than
 regenerating the file. A package with no dependencies may pass without a
-lockfile, as defined by RFC 06. This check does not download artifacts or
-materialize aliases; dependency-bearing CI must still run
+lockfile, as defined by RFC 06. The regular validation path does not download
+artifacts or materialize aliases; dependency-bearing CI must still run
 `lode install --dev --locked` after validation once the installer is available.
+
+The `--source --locked` form is the CI handoff after that install step. It
+replays the exact locked graph, including selected stdlib and GitHub Release
+artifacts, without materializing packages or changing `.config.luau`. A
+locked artifact may be populated into the global cache when it is missing;
+the project graph and lockfile remain unchanged.
 
 `lode ci validate --artifact` validates the publishable tree: the source
 contract plus the Debug/Release native libraries, required exports, ABI,
