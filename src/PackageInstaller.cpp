@@ -12,8 +12,10 @@
 #include "nlohmann/json.hpp"
 
 #include <chrono>
+#include <cctype>
 #include <fstream>
 #include <map>
+#include <optional>
 #include <set>
 #include <system_error>
 #include <utility>
@@ -323,7 +325,7 @@ bool ResolveGitDependencies(DependencyGraph& graph,
                 }
 
                 const ValidationReport packageValidation = Validate(
-                    checkout.packageRoot, ValidationMode::Source, standardLibraryRoot);
+                    checkout.packageRoot, ValidationMode::InstallSource, standardLibraryRoot);
                 if (!packageValidation.IsValid())
                 {
                     result.errors.insert(result.errors.end(),
@@ -395,7 +397,7 @@ bool ResolveGitDependencies(DependencyGraph& graph,
                     }
 
                     const ValidationReport artifactValidation = Validate(
-                        artifact.packageRoot, ValidationMode::Artifact, standardLibraryRoot);
+                        artifact.packageRoot, ValidationMode::InstallArtifact, standardLibraryRoot);
                     if (!artifactValidation.IsValid())
                     {
                         result.errors.insert(result.errors.end(),
@@ -510,6 +512,365 @@ bool ResolveGitDependencies(DependencyGraph& graph,
             }
 
             graph.packages[packageIndex].dependencies[edgeIndex].target = targetIndex;
+        }
+    }
+
+    return true;
+}
+
+struct LockedStdlibRecord
+{
+    std::string name;
+    std::string version;
+    PackageArtifact artifact;
+};
+
+bool IsExactVersion(const std::string& value)
+{
+    return PackageVersionSatisfies(value, value);
+}
+
+std::optional<std::string> ReadStdlibRelease(const fs::path& standardLibraryRoot,
+                                             InstallResult& result)
+{
+    if (standardLibraryRoot.empty())
+    {
+        AddError(result, "Cannot resolve an official standard-library artifact without the installed stdlib catalog.");
+        return std::nullopt;
+    }
+
+    std::ifstream file(standardLibraryRoot / "VERSION");
+    if (!file.is_open())
+    {
+        AddError(result, "The installed stdlib catalog has no VERSION release marker: " +
+            PathToUtf8(standardLibraryRoot));
+        return std::nullopt;
+    }
+
+    std::string release;
+    std::getline(file, release);
+    while (!release.empty() && std::isspace(static_cast<unsigned char>(release.back())))
+        release.pop_back();
+    if (release.empty() || release.find_first_of("/\\\"'") != std::string::npos)
+    {
+        AddError(result, "The installed stdlib VERSION marker is invalid: " +
+            PathToUtf8(standardLibraryRoot / "VERSION"));
+        return std::nullopt;
+    }
+    return release;
+}
+
+bool FindLockedStdlibRecord(const json& document,
+                            const PackageNode& package,
+                            const DependencyEdge& dependency,
+                            LockedStdlibRecord& result,
+                            InstallResult& installResult)
+{
+    if (!document.is_object() || !document.contains("packages") ||
+        !document["packages"].is_array())
+    {
+        AddError(installResult, "Locked package installation requires a valid lode.lock packages array.");
+        return false;
+    }
+
+    const std::string key = package.name + "\n" + package.version + "\n" +
+        dependency.alias + "\n" + dependency.requestedVersion;
+    const json& packages = document["packages"];
+    for (const json& lockPackage : packages)
+    {
+        if (!lockPackage.is_object())
+            continue;
+        for (const char* field : { "dependencies", "devDependencies" })
+        {
+            if (!lockPackage.contains(field) || !lockPackage[field].is_array())
+                continue;
+            for (const json& lockDependency : lockPackage[field])
+            {
+                if (!lockDependency.is_object() ||
+                    LockedEdgeKey(lockPackage, lockDependency) != key ||
+                    !lockDependency.contains("target") ||
+                    !lockDependency["target"].is_number_unsigned())
+                    continue;
+
+                const size_t target = lockDependency["target"].get<size_t>();
+                if (target >= packages.size() || !packages[target].is_object() ||
+                    packages[target].value("source", "") != "stdlib")
+                    continue;
+
+                const json& targetPackage = packages[target];
+                result.name = targetPackage.value("name", "");
+                result.version = targetPackage.value("version", "");
+                if (result.name.empty() || result.version.empty() ||
+                    !targetPackage.contains("artifacts") ||
+                    !targetPackage["artifacts"].is_array())
+                {
+                    AddError(installResult, "Locked stdlib package record for '" +
+                        dependency.alias + "' has no artifact record.");
+                    return false;
+                }
+
+                for (const json& artifactDocument : targetPackage["artifacts"])
+                {
+                    if (!artifactDocument.is_object())
+                        continue;
+                    PackageArtifact artifact;
+                    artifact.platform = artifactDocument.value("platform", "");
+                    artifact.architecture = artifactDocument.value("architecture", "");
+                    artifact.configuration = artifactDocument.value("configuration", "");
+                    artifact.abi = artifactDocument.value("abi", "");
+                    artifact.release = artifactDocument.value("release", "");
+                    artifact.asset = artifactDocument.value("asset", "");
+                    artifact.sha256 = artifactDocument.value("sha256", "");
+                    if (artifact.platform == "windows" &&
+                        artifact.architecture == "x64" &&
+                        artifact.abi == LodeAbiId())
+                    {
+                        result.artifact = std::move(artifact);
+                        return true;
+                    }
+                }
+
+                AddError(installResult, "Locked stdlib package '" + dependency.alias +
+                    "' has no Windows x64 artifact for ABI " + LodeAbiId() + ".");
+                return false;
+            }
+        }
+    }
+
+    AddError(installResult, "lode.lock has no stdlib target for dependency '" +
+        dependency.alias + "'.");
+    return false;
+}
+
+bool MergeResolvedPackageGraph(DependencyGraph& graph,
+                               std::map<fs::path, size_t>& packageIndexes,
+                               const DependencyGraph& resolvedGraph,
+                               const PackageNode& resolvedRoot,
+                               size_t& targetIndex)
+{
+    if (resolvedGraph.root >= resolvedGraph.packages.size())
+        return false;
+
+    const fs::path canonicalRoot = fs::weakly_canonical(resolvedRoot.root);
+    auto existingPackage = packageIndexes.find(canonicalRoot);
+    if (existingPackage != packageIndexes.end())
+    {
+        targetIndex = existingPackage->second;
+        graph.packages[targetIndex] = resolvedRoot;
+    }
+    else
+    {
+        targetIndex = graph.packages.size();
+        graph.packages.push_back(resolvedRoot);
+        packageIndexes.emplace(canonicalRoot, targetIndex);
+    }
+
+    std::vector<size_t> remapped(resolvedGraph.packages.size());
+    remapped[resolvedGraph.root] = targetIndex;
+    for (size_t resolvedIndex = 0;
+         resolvedIndex < resolvedGraph.packages.size();
+         ++resolvedIndex)
+    {
+        if (resolvedIndex == resolvedGraph.root)
+            continue;
+
+        const PackageNode& resolvedPackage = resolvedGraph.packages[resolvedIndex];
+        const fs::path resolvedPath = fs::weakly_canonical(resolvedPackage.root);
+        auto package = packageIndexes.find(resolvedPath);
+        if (package != packageIndexes.end())
+        {
+            remapped[resolvedIndex] = package->second;
+            continue;
+        }
+
+        remapped[resolvedIndex] = graph.packages.size();
+        graph.packages.push_back(PackageNode{
+            resolvedPackage.name,
+            resolvedPackage.version,
+            resolvedPath,
+            resolvedPackage.source,
+            resolvedPackage.sourceReference,
+            resolvedPackage.resolvedCommit,
+            resolvedPackage.artifacts,
+            {}
+        });
+        packageIndexes.emplace(resolvedPath, remapped[resolvedIndex]);
+    }
+
+    for (size_t resolvedIndex = 0;
+         resolvedIndex < resolvedGraph.packages.size();
+         ++resolvedIndex)
+    {
+        const PackageNode& resolvedPackage = resolvedGraph.packages[resolvedIndex];
+        PackageNode& destination = graph.packages[remapped[resolvedIndex]];
+        if (!destination.dependencies.empty())
+            continue;
+
+        for (const DependencyEdge& resolvedEdge : resolvedPackage.dependencies)
+        {
+            if (resolvedEdge.scope == DependencyScope::Development)
+                continue;
+
+            DependencyEdge edge = resolvedEdge;
+            if (edge.target)
+                edge.target = remapped[*edge.target];
+            destination.dependencies.push_back(std::move(edge));
+        }
+    }
+    return true;
+}
+
+bool ResolveStandardLibraryDependencies(DependencyGraph& graph,
+                                         const fs::path& standardLibraryRoot,
+                                         const PackageCacheLayout& cacheLayout,
+                                         const fs::path& stagingDirectory,
+                                         const json* lockedDocument,
+                                         InstallResult& result)
+{
+    constexpr const char* officialRepository = "github:lode-luau/LodeRuntime";
+    bool needsResolution = false;
+    for (const PackageNode& package : graph.packages)
+    {
+        for (const DependencyEdge& dependency : package.dependencies)
+        {
+            if (dependency.source == DependencySource::StandardLibrary && !dependency.target)
+            {
+                needsResolution = true;
+                break;
+            }
+        }
+        if (needsResolution)
+            break;
+    }
+    if (!needsResolution)
+        return true;
+
+    std::map<fs::path, size_t> packageIndexes;
+    std::map<std::string, size_t> resolvedPackages;
+    for (size_t index = 0; index < graph.packages.size(); ++index)
+        packageIndexes.emplace(fs::weakly_canonical(graph.packages[index].root), index);
+
+    std::optional<std::string> release;
+    if (!lockedDocument)
+        release = ReadStdlibRelease(standardLibraryRoot, result);
+    if (!lockedDocument && !release)
+        return false;
+
+    for (size_t packageIndex = 0; packageIndex < graph.packages.size(); ++packageIndex)
+    {
+        for (size_t edgeIndex = 0;
+             edgeIndex < graph.packages[packageIndex].dependencies.size();
+             ++edgeIndex)
+        {
+            DependencyEdge& dependency = graph.packages[packageIndex].dependencies[edgeIndex];
+            if (dependency.source != DependencySource::StandardLibrary || dependency.target)
+                continue;
+
+            LockedStdlibRecord locked;
+            std::string packageName = dependency.alias;
+            std::string packageVersion = dependency.requestedVersion;
+            std::string packageRelease;
+            if (lockedDocument)
+            {
+                if (!FindLockedStdlibRecord(*lockedDocument,
+                                             graph.packages[packageIndex],
+                                             dependency,
+                                             locked,
+                                             result))
+                    return false;
+                packageName = locked.name;
+                packageVersion = locked.version;
+                packageRelease = locked.artifact.release;
+                if (locked.artifact.asset != "lode-stdlib-" + packageName + "-" +
+                    packageVersion + "-windows-x64.zip")
+                {
+                    AddError(result, "Locked stdlib artifact name does not match package '" +
+                        packageName + "'.");
+                    return false;
+                }
+            }
+            else
+            {
+                if (!IsExactVersion(packageVersion))
+                {
+                    AddError(result, "Standard library dependency '" + dependency.alias +
+                        "' requires an exact SemVer to select an official artifact.");
+                    return false;
+                }
+                packageRelease = *release;
+            }
+
+            const std::string resolutionKey = packageName + "\n" + packageVersion +
+                "\n" + packageRelease;
+            auto resolved = resolvedPackages.find(resolutionKey);
+            size_t targetIndex = 0;
+            if (resolved != resolvedPackages.end())
+            {
+                targetIndex = resolved->second;
+            }
+            else
+            {
+                const PackageArtifactResult artifact = DownloadGitHubStdlibArtifact(
+                    officialRepository,
+                    packageName,
+                    packageVersion,
+                    packageRelease,
+                    cacheLayout,
+                    stagingDirectory);
+                if (!artifact.IsValid())
+                {
+                    result.errors.insert(result.errors.end(),
+                        artifact.errors.begin(), artifact.errors.end());
+                    return false;
+                }
+                if (lockedDocument && !SameArtifact(locked.artifact, artifact.artifact))
+                {
+                    AddError(result, "Downloaded stdlib artifact does not match the locked "
+                        "release, asset, ABI, or SHA-256.");
+                    return false;
+                }
+
+                const ValidationReport validation = Validate(
+                    artifact.packageRoot, ValidationMode::InstallArtifact, standardLibraryRoot);
+                if (!validation.IsValid())
+                {
+                    result.errors.insert(result.errors.end(),
+                        validation.errors.begin(), validation.errors.end());
+                    return false;
+                }
+                if (validation.dependencyGraph.root >= validation.dependencyGraph.packages.size())
+                {
+                    AddError(result, "Downloaded stdlib artifact produced an invalid dependency graph.");
+                    return false;
+                }
+
+                PackageNode resolvedRoot = validation.dependencyGraph.packages[
+                    validation.dependencyGraph.root];
+                if (resolvedRoot.name != packageName || resolvedRoot.version != packageVersion ||
+                    !PackageVersionSatisfies(resolvedRoot.version, dependency.requestedVersion))
+                {
+                    AddError(result, "Downloaded stdlib artifact identity does not match dependency '" +
+                        dependency.alias + "'.");
+                    return false;
+                }
+                resolvedRoot.source = DependencySource::StandardLibrary;
+                resolvedRoot.sourceReference.clear();
+                resolvedRoot.resolvedCommit.clear();
+                resolvedRoot.artifacts.push_back(artifact.artifact);
+
+                if (!MergeResolvedPackageGraph(graph, packageIndexes,
+                                                validation.dependencyGraph,
+                                                resolvedRoot,
+                                                targetIndex))
+                {
+                    AddError(result, "Failed to merge the dependency graph for stdlib package '" +
+                        packageName + "'.");
+                    return false;
+                }
+                resolvedPackages.emplace(resolutionKey, targetIndex);
+            }
+
+            dependency.target = targetIndex;
         }
     }
 
@@ -656,7 +1017,7 @@ InstallResult InstallLocked(const fs::path& packageRoot,
 {
     InstallResult result;
     const ValidationReport validation = Validate(
-        packageRoot, ValidationMode::Source, standardLibraryRoot);
+        packageRoot, ValidationMode::InstallSource, standardLibraryRoot);
     if (!validation.IsValid())
     {
         result.errors = validation.errors;
@@ -710,6 +1071,14 @@ InstallResult InstallLocked(const fs::path& packageRoot,
             return result;
         }
 
+        if (!ResolveStandardLibraryDependencies(graph, standardLibraryRoot, *cache.layout,
+                                                gitStaging, &lockDocument, result))
+        {
+            std::error_code ec;
+            fs::remove_all(gitStaging, ec);
+            return result;
+        }
+
         const LockfileResult lock = ValidateLockfile(root / "lode.lock", graph);
         if (!lock.IsValid())
         {
@@ -734,7 +1103,7 @@ InstallResult InstallLocal(const fs::path& packageRoot,
 {
     InstallResult result;
     const ValidationReport validation = Validate(
-        packageRoot, ValidationMode::Source, standardLibraryRoot);
+        packageRoot, ValidationMode::InstallSource, standardLibraryRoot);
     if (!validation.IsValid())
     {
         result.errors = validation.errors;
@@ -756,6 +1125,14 @@ InstallResult InstallLocal(const fs::path& packageRoot,
         ("git-" + std::to_string(timestamp));
     if (!ResolveGitDependencies(graph, standardLibraryRoot, *cache.layout,
                                 gitStaging, nullptr, result))
+    {
+        std::error_code ec;
+        fs::remove_all(gitStaging, ec);
+        return result;
+    }
+
+    if (!ResolveStandardLibraryDependencies(graph, standardLibraryRoot, *cache.layout,
+                                            gitStaging, nullptr, result))
     {
         std::error_code ec;
         fs::remove_all(gitStaging, ec);

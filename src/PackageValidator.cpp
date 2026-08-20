@@ -141,7 +141,14 @@ struct DependencyGraphContext
     std::set<fs::path> activePackages;
     std::map<fs::path, size_t> packageIndexes;
     fs::path standardLibraryRoot;
+    ValidationMode mode = ValidationMode::Source;
 };
+
+bool AllowsUnresolvedStdlib(ValidationMode mode)
+{
+    return mode == ValidationMode::InstallSource ||
+        mode == ValidationMode::InstallArtifact;
+}
 
 std::optional<fs::path> FindStdlibRoot(const fs::path& packageRoot,
                                        const fs::path& standardLibraryRoot)
@@ -402,6 +409,11 @@ void ResolveDependencyTable(const fs::path& packageRoot,
         const auto stdlibRoot = FindStdlibRoot(packageRoot, context.standardLibraryRoot);
         if (!stdlibRoot)
         {
+            if (!AllowsUnresolvedStdlib(context.mode))
+            {
+                Error(report, "Standard library dependency '" + alias +
+                    "' cannot be resolved because no standard library catalog was found.");
+            }
             context.graph.packages[packageIndex].dependencies.push_back(std::move(edge));
             continue;
         }
@@ -410,8 +422,23 @@ void ResolveDependencyTable(const fs::path& packageRoot,
         json dependencyManifest;
         if (!FindStdlibManifest(*stdlibRoot, alias, dependencyRoot, dependencyManifest))
         {
-            Error(report, "Standard library dependency '" + alias + "' was not found in " +
-                PathToUtf8(*stdlibRoot) + ".");
+            if (!AllowsUnresolvedStdlib(context.mode))
+            {
+                Error(report, "Standard library dependency '" + alias + "' was not found in " +
+                    PathToUtf8(*stdlibRoot) + ".");
+            }
+            context.graph.packages[packageIndex].dependencies.push_back(std::move(edge));
+            continue;
+        }
+
+        const std::string availableVersion = dependencyManifest.value("version", "");
+        if (!VersionSatisfies(availableVersion, requestedVersion))
+        {
+            if (!AllowsUnresolvedStdlib(context.mode))
+            {
+                Error(report, "Standard library dependency '" + alias + "' requires version " +
+                    requestedVersion + ", but the repository contains " + availableVersion + ".");
+            }
             context.graph.packages[packageIndex].dependencies.push_back(std::move(edge));
             continue;
         }
@@ -420,14 +447,6 @@ void ResolveDependencyTable(const fs::path& packageRoot,
             dependencyRoot, dependencyManifest, DependencySource::StandardLibrary, context);
         edge.target = dependencyIndex;
         context.graph.packages[packageIndex].dependencies.push_back(edge);
-
-        const std::string availableVersion = dependencyManifest.value("version", "");
-        if (availableVersion != requestedVersion)
-        {
-            Error(report, "Standard library dependency '" + alias + "' requires version " +
-                requestedVersion + ", but the repository contains " + availableVersion + ".");
-            continue;
-        }
 
         if (context.activePackages.find(dependencyRoot) == context.activePackages.end() &&
             context.graph.packages[dependencyIndex].dependencies.empty())
@@ -552,11 +571,21 @@ void ValidateLibraryEntry(const fs::path& root,
     }
 
     const fs::path parent = basePath.parent_path();
-    if (mode == ValidationMode::Source)
+    if (mode == ValidationMode::Source || mode == ValidationMode::InstallSource)
+        return;
+
+    // Published package archives are validated against the complete matrix
+    // declared in lode.json. An installed artifact is different: the current
+    // Windows x64 release archive contains only the target and configuration
+    // consumed by the released Lode runtime.
+    if (mode == ValidationMode::InstallArtifact &&
+        (platform != "windows" || architecture != "x64"))
         return;
 
     const fs::path filename = basePath.filename();
-    const std::vector<std::string> configurations = { "Debug", "Release" };
+    const std::vector<std::string> configurations = mode == ValidationMode::InstallArtifact
+        ? std::vector<std::string>{ "Release" }
+        : std::vector<std::string>{ "Debug", "Release" };
     for (const std::string& configuration : configurations)
     {
         fs::path artifact = parent / configuration / filename;
@@ -640,6 +669,7 @@ ValidationReport Validate(const fs::path& packageRoot,
 
     DependencyGraphContext context;
     context.standardLibraryRoot = standardLibraryRoot;
+    context.mode = mode;
     ResolveDependencyGraph(root, manifest, DependencySource::Root, context, report);
     report.dependencyGraph = std::move(context.graph);
 
@@ -662,8 +692,12 @@ ValidationReport Validate(const fs::path& packageRoot,
         return report;
     }
 
-    if (mode == ValidationMode::Source && !fs::is_regular_file(root / "CMakeLists.txt"))
-        Error(report, "Native source packages must contain a root CMakeLists.txt file.");
+    if (mode == ValidationMode::Source || mode == ValidationMode::InstallSource)
+    {
+        if (!fs::is_regular_file(root / "CMakeLists.txt"))
+            Error(report, "Native source packages must contain a root CMakeLists.txt file.");
+        return report;
+    }
 
     bool hasThirdPartyRuntime = false;
     for (auto platformIt = manifest["libraries"].begin(); platformIt != manifest["libraries"].end(); ++platformIt)

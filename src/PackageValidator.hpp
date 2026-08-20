@@ -16,6 +16,8 @@ enum class ValidationMode
 {
     Source,
     Artifact,
+    InstallSource,
+    InstallArtifact,
 };
 
 struct ValidationReport

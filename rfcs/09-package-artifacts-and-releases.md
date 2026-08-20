@@ -168,12 +168,24 @@ stdlib/modules/<module>/
 VERSION
 ```
 
-The root stdlib configuration exposes the bundled module aliases. The nightly
-also publishes one `lode-stdlib-<name>-<version>-<platform>-<architecture>`
-archive per standard module. A package requesting an exact standard-module
-version can therefore download only that artifact; if the bundled version is
-compatible, no additional download is required.
+The root stdlib configuration exposes the bundled module aliases. The
+`stdlib/VERSION` marker contains the exact nightly release tag used by the
+package manager when it selects a fallback artifact. The nightly also
+publishes one archive and one checksum per standard module for the current
+Windows x64 target:
+
+```text
+lode-stdlib-<name>-<module-version>-windows-x64.zip
+lode-stdlib-<name>-<module-version>-windows-x64.zip.sha256
+```
+
+A package requesting an exact standard-module version can therefore download
+only that artifact; if the bundled version is compatible, no additional
+download is required. The downloaded archive is validated as a Windows
+x64/Release installation artifact. The public `ci validate --artifact` mode
+continues to validate the complete platform/configuration matrix declared by
+an external package.
 
 No new stdlib manifest or Lode-owned registry is required. Existing module
 `lode.json` files provide names, versions, and dependency declarations, while
-the release tag and checksum provide artifact identity.
+the release tag from `stdlib/VERSION` and checksum provide artifact identity.
