@@ -304,13 +304,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ steps.version.outputs.version }}" \
-            "lode-windows-x64-${{ steps.version.outputs.version }}.zip" \
-            "lode-windows-x64-${{ steps.version.outputs.version }}.zip.sha256" \
-            "lode-sdk-windows-x64-${{ steps.version.outputs.version }}.zip" \
-            "lode-sdk-windows-x64-${{ steps.version.outputs.version }}.zip.sha256" \
-            lode-stdlib-*.zip \
-            lode-stdlib-*.zip.sha256 \
-            --title "Nightly ${{ steps.version.outputs.version }}" \
-            --notes "Automated nightly build. Runtime, bundled stdlib, individual stdlib artifacts, SDK, sanity suite, and CTest validated." \
+          gh release create "${{ steps.version.outputs.version }}" `
+            "lode-windows-x64-${{ steps.version.outputs.version }}.zip" `
+            "lode-windows-x64-${{ steps.version.outputs.version }}.zip.sha256" `
+            "lode-sdk-windows-x64-${{ steps.version.outputs.version }}.zip" `
+            "lode-sdk-windows-x64-${{ steps.version.outputs.version }}.zip.sha256" `
+            lode-stdlib-*.zip `
+            lode-stdlib-*.zip.sha256 `
+            --title "Nightly ${{ steps.version.outputs.version }}" `
+            --notes "Automated nightly build. Runtime, bundled stdlib, individual stdlib artifacts, SDK, sanity suite, and CTest validated." `
             --prerelease
