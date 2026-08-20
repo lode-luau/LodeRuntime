@@ -322,7 +322,7 @@ int main(int argc, char* argv[])
         Lode::Logger::Info("       lode install [--locked] [--dev] [package-root]");
         Lode::Logger::Info("       lode add [--dev] owner/repository[@version] [package-root]");
         Lode::Logger::Info("       lode ci validate [--source|--artifact] [--locked] [package-root]");
-        Lode::Logger::Info("       lode ci init [--force] [package-root]");
+        Lode::Logger::Info("       lode ci init [--force] --sdk-version <nightly> --sdk-sha256 <sha256> [package-root]");
         Lode::Logger::Info("       lode ci update [package-root]");
         return 1;
     }
@@ -429,7 +429,7 @@ int main(int argc, char* argv[])
         if (argc < 3)
         {
             Lode::Logger::Error("Usage: lode ci validate [--source|--artifact] [--locked] [package-root]");
-            Lode::Logger::Error("       lode ci init [--force] [package-root]");
+            Lode::Logger::Error("       lode ci init [--force] --sdk-version <nightly> --sdk-sha256 <sha256> [package-root]");
             Lode::Logger::Error("       lode ci update [package-root]");
             return 1;
         }
@@ -438,6 +438,7 @@ int main(int argc, char* argv[])
         if (ciCommand == "init")
         {
             bool force = false;
+            Lode::Package::CiSdkPin sdkPin;
             fs::path packageRoot = fs::current_path();
             bool hasPackageRoot = false;
             for (int argumentIndex = 3; argumentIndex < argc; ++argumentIndex)
@@ -447,9 +448,22 @@ int main(int argc, char* argv[])
                 {
                     force = true;
                 }
+                else if (argument == "--sdk-version" || argument == "--sdk-sha256")
+                {
+                    if (argumentIndex + 1 >= argc)
+                    {
+                        Lode::Logger::Error("Usage: lode ci init [--force] --sdk-version <nightly> --sdk-sha256 <sha256> [package-root]");
+                        return 1;
+                    }
+                    const std::string value = PathToUtf8(fs::path(argv[++argumentIndex]));
+                    if (argument == "--sdk-version")
+                        sdkPin.version = value;
+                    else
+                        sdkPin.sha256 = value;
+                }
                 else if (argument.rfind("--", 0) == 0 || hasPackageRoot)
                 {
-                    Lode::Logger::Error("Usage: lode ci init [--force] [package-root]");
+                    Lode::Logger::Error("Usage: lode ci init [--force] --sdk-version <nightly> --sdk-sha256 <sha256> [package-root]");
                     return 1;
                 }
                 else
@@ -460,7 +474,7 @@ int main(int argc, char* argv[])
             }
 
             Lode::Package::ValidationReport report = Lode::Package::GenerateWorkflow(
-                packageRoot, force, standardLibraryPath);
+                packageRoot, force, sdkPin, standardLibraryPath);
             for (const std::string& warning : report.warnings)
                 Lode::Logger::Warn(warning);
             for (const std::string& error : report.errors)
@@ -503,7 +517,7 @@ int main(int argc, char* argv[])
         if (ciCommand != "validate")
         {
             Lode::Logger::Error("Usage: lode ci validate [--source|--artifact] [--locked] [package-root]");
-            Lode::Logger::Error("       lode ci init [--force] [package-root]");
+            Lode::Logger::Error("       lode ci init [--force] --sdk-version <nightly> --sdk-sha256 <sha256> [package-root]");
             Lode::Logger::Error("       lode ci update [package-root]");
             return 1;
         }

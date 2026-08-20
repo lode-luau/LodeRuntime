@@ -5,7 +5,11 @@
 #include "PathUtil.hpp"
 #include "nlohmann/json.hpp"
 
+#include <algorithm>
+#include <cctype>
 #include <fstream>
+#include <optional>
+#include <regex>
 #include <sstream>
 
 namespace fs = std::filesystem;
@@ -13,20 +17,94 @@ namespace fs = std::filesystem;
 namespace Lode::Package
 {
 
+bool CiSdkPin::IsValid() const
+{
+    static const std::regex versionPattern(
+        R"(^1\.0\.0-nightly\.[0-9]{8}\.[0-9]+$)");
+    if (!std::regex_match(version, versionPattern) || sha256.size() != 64)
+        return false;
+
+    return std::all_of(sha256.begin(), sha256.end(), [](unsigned char character) {
+        return std::isxdigit(character) != 0;
+    });
+}
+
 namespace
 {
 
 using json = nlohmann::json;
 using Lode::Detail::PathToUtf8;
 
-constexpr const char* CheckoutAction = "actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683";
-constexpr const char* UploadArtifactAction = "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02";
-constexpr const char* DownloadArtifactAction = "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093";
-
 void Error(ValidationReport& report, std::string message)
 {
     report.errors.push_back(std::move(message));
 }
+
+std::string SdkPinEnvironment(const CiSdkPin& sdkPin)
+{
+    return "  LODE_SDK_VERSION: \"" + sdkPin.version + "\"\n" +
+        "  LODE_SDK_SHA256: \"" + sdkPin.sha256 + "\"\n";
+}
+
+std::string LockedInstallStep(bool hasDependencies)
+{
+    if (!hasDependencies)
+        return {};
+
+    return R"LODE(
+      - name: Install locked dependencies
+        shell: pwsh
+        run: |
+          & "$env:LODE_SDK_ROOT/bin/Release/lode.exe" install --dev --locked .
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+)LODE";
+}
+
+std::string ReadYamlQuotedValue(const std::string& content, const std::string& key)
+{
+    const std::size_t keyPosition = content.find(key);
+    if (keyPosition == std::string::npos)
+        return {};
+
+    const std::size_t valueStart = content.find('"', keyPosition + key.size());
+    if (valueStart == std::string::npos)
+        return {};
+
+    const std::size_t valueEnd = content.find('"', valueStart + 1);
+    if (valueEnd == std::string::npos)
+        return {};
+
+    return content.substr(valueStart + 1, valueEnd - valueStart - 1);
+}
+
+std::optional<CiSdkPin> ReadWorkflowSdkPin(const fs::path& workflowPath,
+                                           ValidationReport& report)
+{
+    std::ifstream input(workflowPath, std::ios::binary);
+    if (!input.is_open())
+    {
+        Error(report, "Failed to read workflow: " + PathToUtf8(workflowPath));
+        return std::nullopt;
+    }
+
+    const std::string content((std::istreambuf_iterator<char>(input)),
+                              std::istreambuf_iterator<char>());
+    CiSdkPin sdkPin{
+        ReadYamlQuotedValue(content, "LODE_SDK_VERSION:"),
+        ReadYamlQuotedValue(content, "LODE_SDK_SHA256:")
+    };
+    if (!sdkPin.IsValid())
+    {
+        Error(report, "Workflow must contain a valid pinned Lode nightly SDK version "
+            "and SHA-256 before it can be updated: " + PathToUtf8(workflowPath));
+        return std::nullopt;
+    }
+    return sdkPin;
+}
+
+constexpr const char* CheckoutAction = "actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683";
+constexpr const char* UploadArtifactAction = "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02";
+constexpr const char* DownloadArtifactAction = "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093";
 
 std::string SdkDownloadSteps()
 {
@@ -58,7 +136,7 @@ std::string SdkDownloadSteps()
 )LODE";
 }
 
-std::string NativeWorkflow()
+std::string NativeWorkflow(const CiSdkPin& sdkPin, bool hasDependencies)
 {
     std::ostringstream workflow;
     workflow << R"LODE(name: Lode CI
@@ -77,9 +155,8 @@ permissions:
 # BEGIN LODE MANAGED: v1
 env:
   LODE_REPOSITORY: lode-luau/LodeRuntime
-  # Pin these values to an existing Lode nightly release before enabling CI.
-  LODE_SDK_VERSION: "<nightly-version>"
-  LODE_SDK_SHA256: "<sdk-sha256>"
+)LODE"
+        << SdkPinEnvironment(sdkPin) << R"LODE(
 
 jobs:
   native-windows-x64:
@@ -89,11 +166,12 @@ jobs:
 
 )LODE";
     workflow << SdkDownloadSteps();
+    workflow << LockedInstallStep(hasDependencies);
     workflow << R"LODE(
       - name: Validate package source
         shell: pwsh
         run: |
-          & "$env:LODE_SDK_ROOT/bin/Release/lode.exe" ci validate --source .
+          & "$env:LODE_SDK_ROOT/bin/Release/lode.exe" ci validate --source --locked .
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       # Add package-specific dependency provisioning here. OpenSSL and other
@@ -193,7 +271,7 @@ jobs:
     return workflow.str();
 }
 
-std::string PureLuauWorkflow()
+std::string PureLuauWorkflow(const CiSdkPin& sdkPin, bool hasDependencies)
 {
     std::ostringstream workflow;
     workflow << R"LODE(name: Lode CI
@@ -211,9 +289,8 @@ permissions:
 # BEGIN LODE MANAGED: v1
 env:
   LODE_REPOSITORY: lode-luau/LodeRuntime
-  # Pin these values to an existing Lode nightly release before enabling CI.
-  LODE_SDK_VERSION: "<nightly-version>"
-  LODE_SDK_SHA256: "<sdk-sha256>"
+)LODE"
+        << SdkPinEnvironment(sdkPin) << R"LODE(
 
 jobs:
   pure-luau:
@@ -222,11 +299,12 @@ jobs:
       - uses: )LODE" << CheckoutAction << R"LODE(
 )LODE";
     workflow << SdkDownloadSteps();
+    workflow << LockedInstallStep(hasDependencies);
     workflow << R"LODE(
       - name: Validate package source
         shell: pwsh
         run: |
-          & "$env:LODE_SDK_ROOT/bin/Release/lode.exe" ci validate --source .
+          & "$env:LODE_SDK_ROOT/bin/Release/lode.exe" ci validate --source --locked .
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Run package tests
@@ -246,9 +324,17 @@ jobs:
 
 bool BuildWorkflowText(const fs::path& root,
                        const fs::path& standardLibraryRoot,
+                       const CiSdkPin& sdkPin,
                        ValidationReport& report,
                        std::string& workflow)
 {
+    if (!sdkPin.IsValid())
+    {
+        Error(report, "CI generation requires a pinned Lode nightly SDK version "
+            "and a 64-character SHA-256 checksum.");
+        return false;
+    }
+
     ValidationReport sourceReport = Validate(root, ValidationMode::Source, standardLibraryRoot);
     report.errors.insert(report.errors.end(), sourceReport.errors.begin(), sourceReport.errors.end());
     report.warnings.insert(report.warnings.end(), sourceReport.warnings.begin(), sourceReport.warnings.end());
@@ -289,7 +375,14 @@ bool BuildWorkflowText(const fs::path& root,
         }
     }
 
-    workflow = isNative ? NativeWorkflow() : PureLuauWorkflow();
+    const bool hasDependencies =
+        (manifest.contains("dependencies") && manifest["dependencies"].is_object() &&
+            !manifest["dependencies"].empty()) ||
+        (manifest.contains("devDependencies") && manifest["devDependencies"].is_object() &&
+            !manifest["devDependencies"].empty());
+    workflow = isNative
+        ? NativeWorkflow(sdkPin, hasDependencies)
+        : PureLuauWorkflow(sdkPin, hasDependencies);
     return true;
 }
 
@@ -347,6 +440,7 @@ bool ReplaceManagedWorkflowBlock(const fs::path& workflowPath, const std::string
 
 ValidationReport GenerateWorkflow(const fs::path& packageRoot,
                                   bool force,
+                                  const CiSdkPin& sdkPin,
                                   const fs::path& standardLibraryRoot)
 {
     ValidationReport report;
@@ -366,7 +460,7 @@ ValidationReport GenerateWorkflow(const fs::path& packageRoot,
     }
 
     std::string workflow;
-    if (!BuildWorkflowText(root, standardLibraryRoot, report, workflow))
+    if (!BuildWorkflowText(root, standardLibraryRoot, sdkPin, report, workflow))
         return report;
 
     std::error_code createError;
@@ -410,8 +504,12 @@ ValidationReport UpdateWorkflow(const fs::path& packageRoot,
         return report;
     }
 
+    const std::optional<CiSdkPin> sdkPin = ReadWorkflowSdkPin(workflowPath, report);
+    if (!sdkPin)
+        return report;
+
     std::string generated;
-    if (!BuildWorkflowText(root, standardLibraryRoot, report, generated))
+    if (!BuildWorkflowText(root, standardLibraryRoot, *sdkPin, report, generated))
         return report;
 
     ReplaceManagedWorkflowBlock(workflowPath, generated, report);

@@ -1,0 +1,91 @@
+if(NOT DEFINED LODE_EXECUTABLE OR NOT DEFINED TEST_BINARY_DIR)
+    message(FATAL_ERROR "ci_generator_test.cmake requires LODE_EXECUTABLE and TEST_BINARY_DIR")
+endif()
+
+set(package_root "${TEST_BINARY_DIR}/ci-generator-package")
+file(REMOVE_RECURSE "${package_root}")
+file(MAKE_DIRECTORY "${package_root}")
+
+file(WRITE "${package_root}/lode.json" [=[{
+  "name": "ci_generator_package",
+  "version": "1.0.0",
+  "license": "MIT",
+  "dependencies": {
+    "example": {
+      "git": "https://github.com/example/example.git",
+      "version": "1.0.0"
+    }
+  }
+}
+]=])
+file(WRITE "${package_root}/init.luau" "return {}\n")
+file(WRITE "${package_root}/LICENSE" "MIT\n")
+
+execute_process(
+    COMMAND "${LODE_EXECUTABLE}" ci init "${package_root}"
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+if(result EQUAL 0)
+    file(REMOVE_RECURSE "${package_root}")
+    message(FATAL_ERROR "ci init unexpectedly accepted an unpinned SDK:\n${output}\n${error}")
+endif()
+if(EXISTS "${package_root}/.github/workflows/lode.yml")
+    file(REMOVE_RECURSE "${package_root}")
+    message(FATAL_ERROR "ci init left a workflow after rejecting an unpinned SDK")
+endif()
+
+set(sdk_version "1.0.0-nightly.20260820.2")
+set(sdk_sha256 "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+execute_process(
+    COMMAND "${LODE_EXECUTABLE}" ci init
+        --sdk-version "${sdk_version}"
+        --sdk-sha256 "${sdk_sha256}"
+        "${package_root}"
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+if(NOT result EQUAL 0)
+    file(REMOVE_RECURSE "${package_root}")
+    message(FATAL_ERROR "ci init failed with a valid SDK pin:\n${output}\n${error}")
+endif()
+
+set(workflow_path "${package_root}/.github/workflows/lode.yml")
+file(READ "${workflow_path}" workflow)
+foreach(required_text IN ITEMS
+    "LODE_SDK_VERSION: \"${sdk_version}\""
+    "LODE_SDK_SHA256: \"${sdk_sha256}\""
+    "install --dev --locked ."
+    "ci validate --source --locked .")
+    string(FIND "${workflow}" "${required_text}" position)
+    if(position LESS 0)
+        file(REMOVE_RECURSE "${package_root}")
+        message(FATAL_ERROR "Generated workflow is missing '${required_text}':\n${workflow}")
+    endif()
+endforeach()
+foreach(placeholder IN ITEMS "<nightly-version>" "<sdk-sha256>")
+    string(FIND "${workflow}" "${placeholder}" position)
+    if(NOT position LESS 0)
+        file(REMOVE_RECURSE "${package_root}")
+        message(FATAL_ERROR "Generated workflow contains placeholder '${placeholder}'")
+    endif()
+endforeach()
+
+file(APPEND "${workflow_path}" "\n# User-owned workflow content\n")
+execute_process(
+    COMMAND "${LODE_EXECUTABLE}" ci update "${package_root}"
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+if(NOT result EQUAL 0)
+    file(REMOVE_RECURSE "${package_root}")
+    message(FATAL_ERROR "ci update failed for a pinned workflow:\n${output}\n${error}")
+endif()
+
+file(READ "${workflow_path}" workflow)
+string(FIND "${workflow}" "# User-owned workflow content" user_content_position)
+if(user_content_position LESS 0)
+    file(REMOVE_RECURSE "${package_root}")
+    message(FATAL_ERROR "ci update removed user-owned workflow content")
+endif()
+string(FIND "${workflow}" "LODE_SDK_VERSION: \"${sdk_version}\"" position)
+if(position LESS 0)
+    file(REMOVE_RECURSE "${package_root}")
+    message(FATAL_ERROR "ci update did not preserve the pinned SDK version")
+endif()
+
+file(REMOVE_RECURSE "${package_root}")

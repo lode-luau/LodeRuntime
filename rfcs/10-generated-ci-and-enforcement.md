@@ -13,16 +13,18 @@ The package manager will provide:
 
 ```text
 lode install [--dev] [--locked]
-lode ci init
+lode ci init --sdk-version <nightly> --sdk-sha256 <sha256>
 lode ci validate [--source|--artifact] [--locked]
 lode ci update
 ```
 
-`lode ci init` creates `.github/workflows/lode.yml` and refuses to overwrite an
-existing file unless explicitly forced. It validates package metadata and file
-presence only; it does not execute package code. The initial generator accepts
-native Windows x64 packages and emits a pure-Luau test workflow. Other native
-targets are rejected until their runner and SDK matrix is implemented.
+`lode ci init` requires the exact nightly SDK release tag and SHA-256 checksum
+that the generated workflow will download. It refuses to write a workflow when
+the pin is missing or malformed, and refuses to overwrite an existing file
+unless explicitly forced. It validates package metadata and file presence only;
+it does not execute package code. The initial generator accepts native Windows
+x64 packages and emits a pure-Luau test workflow. Other native targets are
+rejected until their runner and SDK matrix is implemented.
 
 `lode ci validate --source` validates the development tree: `lode.json`,
 `init.luau`, `LICENSE`, native library path declarations, and `CMakeLists.txt`
@@ -44,10 +46,10 @@ third-party notices. The flagless `lode ci validate` form remains an alias for
 `--artifact`.
 
 `lode ci update` requires an existing workflow containing the exact managed
-markers emitted by `lode ci init`. It updates only the generated baseline
-section. User-owned jobs and configuration must remain outside that section;
-missing or malformed markers cause the command to fail instead of replacing
-the workflow silently.
+markers emitted by `lode ci init` and a valid SDK pin. It reuses the existing
+pin and updates only the generated baseline section. User-owned jobs and
+configuration must remain outside that section; missing or malformed markers
+or pins cause the command to fail instead of replacing the workflow silently.
 
 ## Native workflow
 
@@ -55,7 +57,7 @@ The workflow identifies a native package from `lode.json.libraries`. Its
 baseline job performs these operations:
 
 1. Check out the tagged source.
-2. Download and checksum the pinned Lode SDK.
+2. Download and checksum the explicitly pinned Lode SDK.
 3. Run `lode install --dev --locked` when the package declares dependencies or
    development dependencies. The command may fetch the exact locked artifact,
    but must not resolve new versions or revisions.
@@ -84,10 +86,12 @@ not claim support based only on a platform key written in `lode.json`.
 
 ## Pure Luau workflow
 
-Pure Luau packages do not download the native SDK. Their baseline validates
-the manifest, runs `lode install --dev --locked` when dependencies are declared,
-checks the package root convention, and runs the package's declared Luau test
-entry through `lode`.
+Pure Luau packages do not build native modules, but the current Windows
+baseline still downloads the pinned SDK because its `lode` executable is the
+runtime used for validation and tests. Their baseline runs
+`lode install --dev --locked` when dependencies are declared, checks the
+package root convention, and runs the package's declared Luau test entry
+through that runtime.
 
 ## User customization and enforcement
 
