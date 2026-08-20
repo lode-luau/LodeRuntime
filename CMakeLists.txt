@@ -151,9 +151,9 @@ FetchContent_Declare(
 # tree. Prevent their own install scripts from being pulled into the SDK
 # package; Lode exports the targets and headers it intentionally supports
 # below.
-set(CMAKE_SKIP_INSTALL_RULES TRUE)
+set(INSTALL_PROJECT OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(luau json libuv rapidjson miniz)
-unset(CMAKE_SKIP_INSTALL_RULES)
+unset(INSTALL_PROJECT CACHE)
 
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include
