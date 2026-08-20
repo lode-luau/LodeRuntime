@@ -166,6 +166,17 @@ add_test(
 )
 set_tests_properties(package_ci_generator PROPERTIES RUN_SERIAL TRUE)
 
+add_test(
+    NAME package_packer
+    COMMAND ${CMAKE_COMMAND}
+        -DLODE_EXECUTABLE=$<TARGET_FILE:lode>
+        -DPROJECT_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DTEST_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}
+        -P "${CMAKE_SOURCE_DIR}/tests/package/packer_test.cmake"
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+)
+set_tests_properties(package_packer PROPERTIES RUN_SERIAL TRUE)
+
 # Exercises State destruction while filesystem resources are still active.
 # The script deliberately raises after opening them, so the runtime must run
 # module shutdown hooks without hanging or crashing.

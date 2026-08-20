@@ -58,6 +58,21 @@ cache, CI workspace, temporary files, or unrelated private files.
 `init.luau` remains the automatic package convention. This RFC does not add a
 `type`, `entry`, or `bin` field.
 
+The supported pack command is:
+
+```text
+lode pack [--output <archive>] [package-root]
+```
+
+It validates the package artifact, replays `lode.lock` when one is present,
+creates the Windows x64 archive and its sibling `.sha256` file, extracts the
+archive into a temporary staging directory, and validates the extracted
+package before succeeding. The archive contains `lode.json`, `init.luau`,
+`LICENSE`, optional `README.md`/`NOTICE`, Luau sources outside `tests/`, and
+runtime libraries under `libs/`. It excludes `.config.luau`, CMake files,
+build output, and test files. The default output is
+`out/lode-<name>-<version>-windows-x64.zip` under the package root.
+
 ## Native library paths
 
 `lode.json.libraries.<platform>.<architecture>` contains a package-relative
@@ -122,7 +137,7 @@ A release workflow must:
 4. build only declared and supported targets;
 5. run all required tests for each artifact;
 6. validate `lode.json` and package paths;
-7. create the compressed artifact;
+7. run `lode pack` to create the compressed artifact;
 8. generate a SHA-256 checksum;
 9. publish metadata mapping target information to the artifact;
 10. publish only artifacts from successful jobs.

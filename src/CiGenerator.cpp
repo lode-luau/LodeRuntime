@@ -213,13 +213,10 @@ jobs:
       - name: Package validated artifact
         shell: pwsh
         run: |
-          if (-not (Test-Path -LiteralPath "ci/package.ps1")) {
-              throw "Native package CI requires ci/package.ps1."
-          }
           $manifest = Get-Content lode.json -Raw | ConvertFrom-Json
           $archive = "out/lode-$($manifest.name)-$($manifest.version)-windows-x64.zip"
           New-Item -ItemType Directory -Force out | Out-Null
-          & ./ci/package.ps1 -Runtime "$env:LODE_SDK_ROOT/bin/Release/lode.exe" -ArchivePath $archive
+          & "$env:LODE_SDK_ROOT/bin/Release/lode.exe" pack --output $archive .
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "PACKAGE_ARCHIVE=$archive" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 

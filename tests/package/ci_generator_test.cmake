@@ -59,7 +59,8 @@ foreach(required_text IN ITEMS
     "LODE_SDK_SHA256: \"${sdk_sha256}\""
     "install --dev --locked ."
     "ci validate --source --locked ."
-    "ci validate --artifact --locked .")
+    "ci validate --artifact --locked ."
+    "pack --output $archive .")
     string(FIND "${workflow}" "${required_text}" position)
     if(position LESS 0)
         file(REMOVE_RECURSE "${package_root}")

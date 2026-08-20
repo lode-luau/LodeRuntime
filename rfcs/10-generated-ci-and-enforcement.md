@@ -13,6 +13,7 @@ The package manager will provide:
 
 ```text
 lode install [--dev] [--locked]
+lode pack [--output <archive>] [package-root]
 lode ci init --sdk-version <nightly> --sdk-sha256 <sha256>
 lode ci validate [--source|--artifact] [--locked]
 lode ci update
@@ -82,7 +83,8 @@ baseline job performs these operations:
 8. Verify `LodeModuleABI()` and `LodeModuleConfig()` before packaging.
 9. Validate every `lode.json.libraries` path with
    `lode ci validate --artifact --locked`.
-10. Package only artifacts produced by successful jobs.
+10. Run `lode pack --output out/lode-<name>-<version>-windows-x64.zip .` and
+    publish only the archive and checksum produced by successful jobs.
 
 The native package CMake must use:
 

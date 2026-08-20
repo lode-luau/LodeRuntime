@@ -11,6 +11,7 @@
 #include "PackageValidator.hpp"
 #include "PackageLockfile.hpp"
 #include "PackageInstaller.hpp"
+#include "PackagePacker.hpp"
 #include "PathUtil.hpp"
 #include "Platform/CrashHandler.hpp"
 
@@ -320,6 +321,7 @@ int main(int argc, char* argv[])
         Lode::Logger::Info("Lode (lode) v1.0.0");
         Lode::Logger::Info("Usage: lode <file.luac | file.luau>");
         Lode::Logger::Info("       lode install [--locked] [--dev] [package-root]");
+        Lode::Logger::Info("       lode pack [--output <archive>] [package-root]");
         Lode::Logger::Info("       lode add [--dev] owner/repository[@version] [package-root]");
         Lode::Logger::Info("       lode ci validate [--source|--artifact] [--locked] [package-root]");
         Lode::Logger::Info("       lode ci init [--force] --sdk-version <nightly> --sdk-sha256 <sha256> [package-root]");
@@ -421,6 +423,49 @@ int main(int argc, char* argv[])
         Lode::Logger::Success(std::string(locked ? "Locked" : "Local") +
             " package installation completed: " +
             PathToUtf8(fs::absolute(packageRoot)));
+        return 0;
+    }
+
+    if (firstArgument == "pack")
+    {
+        fs::path packageRoot = fs::current_path();
+        fs::path outputArchive;
+        bool hasPackageRoot = false;
+        for (int argumentIndex = 2; argumentIndex < argc; ++argumentIndex)
+        {
+            const std::string argument = PathToUtf8(fs::path(argv[argumentIndex]));
+            if (argument == "--output")
+            {
+                if (argumentIndex + 1 >= argc)
+                {
+                    Lode::Logger::Error("Usage: lode pack [--output <archive>] [package-root]");
+                    return 1;
+                }
+                outputArchive = fs::path(argv[++argumentIndex]);
+            }
+            else if (argument.rfind("--", 0) == 0 || hasPackageRoot)
+            {
+                Lode::Logger::Error("Usage: lode pack [--output <archive>] [package-root]");
+                return 1;
+            }
+            else
+            {
+                packageRoot = fs::path(argv[argumentIndex]);
+                hasPackageRoot = true;
+            }
+        }
+
+        const Lode::Package::PackResult result = Lode::Package::PackPackage(
+            packageRoot, standardLibraryPath, outputArchive);
+        for (const std::string& error : result.errors)
+            Lode::Logger::Error(error);
+        if (!result.IsValid())
+            return 1;
+
+        Lode::Logger::Success("Package archive created: " +
+            PathToUtf8(result.archivePath));
+        Lode::Logger::Success("Package checksum created: " +
+            PathToUtf8(result.checksumPath));
         return 0;
     }
 
