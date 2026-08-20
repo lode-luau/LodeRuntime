@@ -128,6 +128,7 @@ bool MoveVerifiedArchive(const fs::path& downloaded,
             PathToUtf8(cached));
         return false;
     }
+    ec.clear();
     if (ec || fs::exists(cached, ec))
     {
         AddError(result, "Cached package archive path is not a regular file: " +
