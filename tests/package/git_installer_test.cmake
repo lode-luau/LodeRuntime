@@ -48,6 +48,12 @@ if(NOT result EQUAL 0)
     file(REMOVE_RECURSE "${git_source}" "${consumer_root}" "${cache_home}")
     message(FATAL_ERROR "git commit failed:\n${output}\n${error}")
 endif()
+execute_process(COMMAND git -C "${git_source}" tag v1.0.0
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+if(NOT result EQUAL 0)
+    file(REMOVE_RECURSE "${git_source}" "${consumer_root}" "${cache_home}")
+    message(FATAL_ERROR "git tag failed:\n${output}\n${error}")
+endif()
 
 file(TO_CMAKE_PATH "${git_source}" git_reference)
 file(WRITE "${consumer_root}/lode.json" "{\n  \"name\": \"git_consumer\",\n  \"version\": \"1.0.0\",\n  \"license\": \"MIT\",\n  \"dependencies\": {\n    \"git_signal\": {\n      \"git\": \"${git_reference}\",\n      \"version\": \"1.0.0\"\n    }\n  }\n}\n")

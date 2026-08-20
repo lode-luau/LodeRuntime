@@ -290,7 +290,7 @@ bool ResolveGitDependencies(DependencyGraph& graph,
                 : dependency.sourceReference;
             size_t targetIndex = 0;
             const std::string resolutionKey = repository + "\n" +
-                (locked ? locked->commit : "");
+                (locked ? locked->commit : dependency.requestedVersion);
             auto resolved = resolvedRepositories.find(resolutionKey);
             if (resolved != resolvedRepositories.end())
             {
@@ -298,9 +298,23 @@ bool ResolveGitDependencies(DependencyGraph& graph,
             }
             else
             {
+                std::string resolvedCommit;
+                if (!locked)
+                {
+                    const GitTagResolutionResult tag = ResolveGitTag(
+                        repository, dependency.requestedVersion);
+                    if (!tag.IsValid())
+                    {
+                        result.errors.insert(result.errors.end(),
+                            tag.errors.begin(), tag.errors.end());
+                        return false;
+                    }
+                    resolvedCommit = tag.commit;
+                }
+
                 const GitCheckoutResult checkout = locked
                     ? CheckoutGitPackageAtCommit(repository, locked->commit, stagingDirectory)
-                    : CheckoutGitPackage(repository, stagingDirectory);
+                    : CheckoutGitPackageAtCommit(repository, resolvedCommit, stagingDirectory);
                 if (!checkout.IsValid())
                 {
                     result.errors.insert(result.errors.end(),

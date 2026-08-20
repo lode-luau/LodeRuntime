@@ -7,19 +7,28 @@
 #include "Lode/EventLoop.hpp"
 #include "Lode/Task.hpp"
 #include "CiGenerator.hpp"
+#include "GitResolver.hpp"
 #include "PackageValidator.hpp"
 #include "PackageLockfile.hpp"
 #include "PackageInstaller.hpp"
 #include "PathUtil.hpp"
 #include "Platform/CrashHandler.hpp"
 
-#include <fstream>
 #include <vector>
 #include <string>
 #include <filesystem>
 #include <algorithm>
 #include <cctype>
 #include <array>
+#include <chrono>
+#include <fstream>
+#include <system_error>
+
+#include "nlohmann/json.hpp"
+
+#if defined(_WIN32)
+#include <Windows.h>
+#endif
 
 namespace fs = std::filesystem;
 
@@ -48,6 +57,253 @@ static fs::path FindStandardLibraryPath(const fs::path& executablePath)
     return {};
 }
 
+struct AddDependencyResult
+{
+    std::string alias;
+    std::string repository;
+    std::string requirement;
+    std::vector<std::string> errors;
+
+    bool IsValid() const
+    {
+        return errors.empty() && !alias.empty() && !repository.empty();
+    }
+};
+
+void AddError(AddDependencyResult& result, std::string message)
+{
+    result.errors.push_back(std::move(message));
+}
+
+bool IsSafePackageAlias(const std::string& alias)
+{
+    if (alias.empty() || alias == "." || alias == "..")
+        return false;
+    return std::all_of(alias.begin(), alias.end(), [](unsigned char character) {
+        return std::isalnum(character) || character == '-' ||
+            character == '_' || character == '.';
+    });
+}
+
+bool LooksLikeGitHubSlug(const std::string& value)
+{
+    if (value.empty() || value.front() == '/' || value.front() == '\\' ||
+        value.rfind(".", 0) == 0 || value.find_first_of("\\:") != std::string::npos)
+        return false;
+
+    const size_t separator = value.find('/');
+    return separator != std::string::npos && separator > 0 &&
+        value.find('/', separator + 1) == std::string::npos;
+}
+
+std::string RepositoryAlias(const std::string& repository)
+{
+    std::string value = repository;
+    while (!value.empty() && (value.back() == '/' || value.back() == '\\'))
+        value.pop_back();
+    if (value.size() > 4 && value.substr(value.size() - 4) == ".git")
+        value.resize(value.size() - 4);
+
+    const size_t separator = value.find_last_of("/\\:");
+    const std::string alias = separator == std::string::npos
+        ? value : value.substr(separator + 1);
+    return alias;
+}
+
+AddDependencyResult ParseAddDependencySpec(const std::string& specification)
+{
+    AddDependencyResult result;
+    if (specification.empty())
+    {
+        AddError(result, "Package specification cannot be empty.");
+        return result;
+    }
+
+    std::string repository = specification;
+    std::string requirement;
+    const size_t at = specification.rfind('@');
+    const size_t separator = specification.find_last_of("/\\:");
+    if (at != std::string::npos && (separator == std::string::npos || at > separator))
+    {
+        repository = specification.substr(0, at);
+        requirement = specification.substr(at + 1);
+    }
+
+    if (repository.rfind("github:", 0) == 0)
+    {
+        const std::string slug = repository.substr(7);
+        if (!LooksLikeGitHubSlug(slug))
+        {
+            AddError(result, "GitHub package specification must use owner/repository.");
+            return result;
+        }
+    }
+    else if (LooksLikeGitHubSlug(repository))
+    {
+        repository = "github:" + repository;
+    }
+
+    result.alias = RepositoryAlias(repository);
+    result.repository = repository;
+    result.requirement = requirement;
+    if (!IsSafePackageAlias(result.alias))
+        AddError(result, "Package repository does not produce a safe dependency alias: " + result.alias);
+    if (result.repository.empty())
+        AddError(result, "Package repository cannot be empty.");
+    return result;
+}
+
+bool ReplaceTextFileAtomically(const fs::path& destination,
+                               std::string_view content,
+                               std::string& error)
+{
+    std::error_code ec;
+    const fs::path absolute = fs::absolute(destination, ec);
+    if (ec)
+    {
+        error = "Cannot determine destination path: " + ec.message();
+        return false;
+    }
+
+    const auto timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    fs::path temporary = absolute;
+    temporary += ".tmp-" + std::to_string(timestamp);
+    {
+        std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
+        if (!output.is_open())
+        {
+            error = "Cannot open temporary file: " + PathToUtf8(temporary);
+            return false;
+        }
+        output.write(content.data(), static_cast<std::streamsize>(content.size()));
+        output.flush();
+        if (!output.good())
+        {
+            error = "Cannot write temporary file: " + PathToUtf8(temporary);
+            output.close();
+            fs::remove(temporary, ec);
+            return false;
+        }
+    }
+
+#if defined(_WIN32)
+    if (!MoveFileExW(temporary.c_str(), absolute.c_str(),
+                     MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+    {
+        error = "Atomic replacement failed with Windows error " +
+            std::to_string(GetLastError());
+        fs::remove(temporary, ec);
+        return false;
+    }
+#else
+    fs::rename(temporary, absolute, ec);
+    if (ec)
+    {
+        error = "Atomic replacement failed: " + ec.message();
+        fs::remove(temporary, ec);
+        return false;
+    }
+#endif
+    return true;
+}
+
+std::vector<std::string> AddDependencyToManifest(
+    const fs::path& packageRoot,
+    const std::string& specification,
+    bool development,
+    const fs::path& standardLibraryPath)
+{
+    std::vector<std::string> errors;
+    const AddDependencyResult parsed = ParseAddDependencySpec(specification);
+    if (!parsed.IsValid())
+        return parsed.errors;
+
+    const Lode::Package::GitTagResolutionResult tag =
+        Lode::Package::ResolveGitTag(parsed.repository, parsed.requirement);
+    if (!tag.IsValid())
+        return tag.errors;
+
+    const fs::path manifestPath = packageRoot / "lode.json";
+    nlohmann::json manifest;
+    std::string originalManifest;
+    try
+    {
+        std::ifstream file(manifestPath);
+        if (!file.is_open())
+        {
+            errors.push_back("Cannot open package manifest: " + PathToUtf8(manifestPath));
+            return errors;
+        }
+        originalManifest.assign(std::istreambuf_iterator<char>(file),
+                                std::istreambuf_iterator<char>());
+        manifest = nlohmann::json::parse(originalManifest);
+    }
+    catch (const std::exception& exception)
+    {
+        errors.push_back("Failed to parse package manifest: " + std::string(exception.what()));
+        return errors;
+    }
+
+    if (!manifest.is_object())
+    {
+        errors.push_back("Package manifest must contain a JSON object.");
+        return errors;
+    }
+
+    const char* fieldName = development ? "devDependencies" : "dependencies";
+    const char* otherFieldName = development ? "dependencies" : "devDependencies";
+    if (!manifest.contains(fieldName))
+        manifest[fieldName] = nlohmann::json::object();
+    if (!manifest[fieldName].is_object())
+    {
+        errors.push_back(std::string("lode.json.") + fieldName + " must be an object.");
+        return errors;
+    }
+    if (manifest.contains(otherFieldName) && !manifest[otherFieldName].is_object())
+    {
+        errors.push_back(std::string("lode.json.") + otherFieldName + " must be an object.");
+        return errors;
+    }
+    if (manifest.contains(otherFieldName) && manifest[otherFieldName].contains(parsed.alias))
+    {
+        errors.push_back("Dependency '" + parsed.alias +
+            "' already exists in " + otherFieldName + ".");
+        return errors;
+    }
+    if (manifest[fieldName].contains(parsed.alias))
+    {
+        errors.push_back("Dependency '" + parsed.alias +
+            "' already exists in " + fieldName + ".");
+        return errors;
+    }
+
+    const std::string requirement = parsed.requirement.empty() ? tag.version : parsed.requirement;
+    manifest[fieldName][parsed.alias] = {
+        { "git", parsed.repository },
+        { "version", requirement }
+    };
+
+    std::string replacementError;
+    const std::string content = manifest.dump(2) + "\n";
+    if (!ReplaceTextFileAtomically(manifestPath, content, replacementError))
+    {
+        errors.push_back("Cannot update lode.json: " + replacementError);
+        return errors;
+    }
+
+    const Lode::Package::InstallResult installation = Lode::Package::InstallLocal(
+        packageRoot, standardLibraryPath, development);
+    if (!installation.IsValid())
+    {
+        errors.insert(errors.end(), installation.errors.begin(), installation.errors.end());
+        std::string restoreError;
+        if (!ReplaceTextFileAtomically(manifestPath, originalManifest, restoreError))
+            errors.push_back("Cannot restore lode.json after installation failure: " + restoreError);
+        return errors;
+    }
+    return errors;
+}
+
 #if defined(_WIN32)
 int wmain(int argc, wchar_t* argv[])
 #else
@@ -64,6 +320,7 @@ int main(int argc, char* argv[])
         Lode::Logger::Info("Lode (lode) v1.0.0");
         Lode::Logger::Info("Usage: lode <file.luac | file.luau>");
         Lode::Logger::Info("       lode install [--locked] [--dev] [package-root]");
+        Lode::Logger::Info("       lode add [--dev] owner/repository[@version] [package-root]");
         Lode::Logger::Info("       lode ci validate [--source|--artifact] [--locked] [package-root]");
         Lode::Logger::Info("       lode ci init [--force] [package-root]");
         Lode::Logger::Info("       lode ci update [package-root]");
@@ -71,6 +328,57 @@ int main(int argc, char* argv[])
     }
 
     const std::string firstArgument = PathToUtf8(fs::path(argv[1]));
+    if (firstArgument == "add")
+    {
+        bool development = false;
+        fs::path packageRoot = fs::current_path();
+        std::string specification;
+        bool hasPackageRoot = false;
+        for (int argumentIndex = 2; argumentIndex < argc; ++argumentIndex)
+        {
+            const std::string argument = PathToUtf8(fs::path(argv[argumentIndex]));
+            if (argument == "--dev")
+            {
+                development = true;
+            }
+            else if (argument.rfind("--", 0) == 0)
+            {
+                Lode::Logger::Error("Usage: lode add [--dev] owner/repository[@version] [package-root]");
+                return 1;
+            }
+            else if (specification.empty())
+            {
+                specification = argument;
+            }
+            else if (!hasPackageRoot)
+            {
+                packageRoot = fs::path(argument);
+                hasPackageRoot = true;
+            }
+            else
+            {
+                Lode::Logger::Error("Usage: lode add [--dev] owner/repository[@version] [package-root]");
+                return 1;
+            }
+        }
+
+        if (specification.empty())
+        {
+            Lode::Logger::Error("Usage: lode add [--dev] owner/repository[@version] [package-root]");
+            return 1;
+        }
+
+        const std::vector<std::string> errors = AddDependencyToManifest(
+            packageRoot, specification, development, standardLibraryPath);
+        for (const std::string& error : errors)
+            Lode::Logger::Error(error);
+        if (!errors.empty())
+            return 1;
+
+        Lode::Logger::Success("Added and installed dependency from " + specification + ".");
+        return 0;
+    }
+
     if (firstArgument == "install")
     {
         bool locked = false;
