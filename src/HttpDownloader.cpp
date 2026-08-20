@@ -85,7 +85,10 @@ DownloadResult DownloadHttpsFile(const std::string& url, const fs::path& destina
     }
 
     WinHttpSetTimeouts(request, 15000, 15000, 30000, 30000);
-    const wchar_t headers[] = L"User-Agent: LodeRuntime/1.0\r\n";
+    const wchar_t headers[] =
+        L"User-Agent: LodeRuntime/1.0\r\n"
+        L"Cache-Control: no-cache\r\n"
+        L"Pragma: no-cache\r\n";
     if (!WinHttpAddRequestHeaders(request, headers, static_cast<DWORD>(-1L),
                                   WINHTTP_ADDREQ_FLAG_ADD | WINHTTP_ADDREQ_FLAG_REPLACE) ||
         !WinHttpSendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
