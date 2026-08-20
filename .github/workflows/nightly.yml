@@ -289,6 +289,14 @@ jobs:
           Set-Content -Path "$stdlibDist/.config.luau" -Value $config
           Set-Content -Path "$stdlibDist/VERSION" -Value $ver
 
+          # Package CI runs the SDK's lode executable for dependency
+          # installation and validation. Keep the exact bundled stdlib catalog
+          # beside that executable so standard-module dependencies resolve in
+          # the SDK archive without requiring a second runtime download.
+          $sdkStdlibDist = Join-Path $sdkDist "stdlib"
+          New-Item -ItemType Directory -Force -Path $sdkStdlibDist | Out-Null
+          Copy-Item "$stdlibDist/*" $sdkStdlibDist -Recurse -Force
+
           Compress-Archive -Path "$distributionDist/*" -DestinationPath "lode-windows-x64-$ver.zip"
           Compress-Archive -Path "$sdkDist/*" -DestinationPath "lode-sdk-windows-x64-$ver.zip"
 

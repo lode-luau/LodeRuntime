@@ -32,9 +32,19 @@ The shorthand form is reserved for an official Lode standard-library module.
 
 For an official standard module, the package manager first checks the stdlib
 bundle associated with the installed Lode runtime. If the bundled version does
-not satisfy the requirement, it downloads only that module's GitHub Release
-artifact from the official LodeRuntime repository. This is a GitHub Release
-convention, not a Lode-owned registry.
+not satisfy the requirement, unlocked installation downloads only that
+module's GitHub Release artifact from the official LodeRuntime repository. The
+release tag is read from the installed catalog's `stdlib/VERSION` marker, and
+the current Windows x64 contract selects:
+
+```text
+lode-stdlib-<name>-<exact-version>-windows-x64.zip
+```
+
+This fallback currently requires an exact SemVer requirement. A `^` or `~`
+requirement is installable when the bundled module satisfies it; otherwise
+the installer reports that it cannot select an official artifact for a range.
+This is a GitHub Release convention, not a Lode-owned registry.
 
 An explicit source may be used for Git or local development:
 
@@ -221,7 +231,17 @@ distribution contains a complete stdlib bundle and its root `.config.luau`.
 The package manager does not put that bundle in `lode.lock`. When a project or
 transitive dependency requests an incompatible stdlib version, only the
 required module artifact is installed and the affected package receives a
-package-local `.config.luau` context.
+package-local `.config.luau` context. Each unresolved stdlib edge is handled
+independently, so a module and its stdlib dependencies are downloaded once
+per resolved package identity rather than as a second copy of the complete
+stdlib bundle.
+
+The installed catalog's `stdlib/VERSION` is the exact nightly release used for
+unlocked fallback downloads. The installer verifies the release checksum
+before extraction and records the selected release, asset, ABI, and SHA-256
+in the stdlib package record. The current release must contain the requested
+exact-version module asset; Lode does not query a registry or synthesize a
+version from a moving branch.
 
 When Lode validates a package outside the runtime checkout, the validator uses
 the stdlib catalog installed alongside the `lode` executable. The CLI passes
@@ -370,6 +390,10 @@ by selecting the highest matching `v<SemVer>` tag and checking out its commit.
 Pure Luau Git packages are copied from that checkout. A native Git package must
 use the GitHub Release artifact contract described by RFC 09; the selected
 `v<version>` release is downloaded, checked, and copied into the global cache.
+For stdlib dependencies, a compatible module is reused from the installed
+catalog. An incompatible exact requirement downloads the one matching
+`lode-stdlib-<name>-<version>-windows-x64.zip` asset from the release named by
+`stdlib/VERSION`; its transitive stdlib edges are resolved by the same rule.
 Resolved packages are materialized under the project's `lode_modules`
 directory and reflected in `.config.luau` and the deterministic `lode.lock`.
 
@@ -380,6 +404,18 @@ devDependencies and the runtime dependencies reachable only through those
 development roots are not materialized. With --dev, those root development
 packages and their runtime dependency subgraphs are materialized; a dependency
 package's own devDependencies remain excluded.
+
+When a locked stdlib edge contains an artifact record, installation downloads
+that exact release asset when it is absent from the cache and rejects any
+release, asset, ABI, or checksum mismatch. If the installed bundled module
+already satisfies the locked requirement, no separate artifact is required.
+
+CI artifact validation uses the same locked graph after the package's native
+artifacts are built. `lode ci validate --artifact --locked` validates the
+package's complete declared artifact matrix while accepting an exact locked
+stdlib or Git artifact that is not part of the SDK's bundled catalog. It may
+populate the global cache, but it does not materialize dependencies or modify
+the project configuration.
 
 The runtime contains the SHA-256 verifier, safe-ZIP staging, and GitHub Release
 download path for the current published target: Windows x64. A Git package with

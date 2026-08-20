@@ -80,6 +80,8 @@ The SDK is installed with normal CMake package layout:
 ├── lode-sdk.json
 ├── bin/<configuration>/lode[.exe]
 ├── bin/<configuration>/LodeCore[.dll]
+├── stdlib/.config.luau
+├── stdlib/modules/<module>/
 ├── include/Lode/*.hpp
 ├── include/Luau/*
 ├── lib/<configuration>/LodeCore[.lib|.so|.dylib]
@@ -93,6 +95,12 @@ The SDK is installed with normal CMake package layout:
 
 The SDK ships Debug and Release variants together. A package built in Debug
 must be tested with the Debug runtime; the same rule applies to Release.
+
+The SDK archive also carries the matching bundled standard-library catalog.
+This keeps the SDK's `lode` executable self-contained for `lode install` and
+package CI validation. It does not turn standard modules into external
+packages; the end-user runtime archive and selective standard-module artifacts
+remain the distribution paths described by RFC 09.
 
 The exported Luau targets are included because a native module calls Luau's C
 API in addition to using the Lode C++ wrappers. The SDK must therefore keep

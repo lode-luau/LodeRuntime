@@ -153,33 +153,37 @@ bool MoveVerifiedArchive(const fs::path& downloaded,
 
 } // namespace
 
-PackageArtifactResult DownloadGitHubPackageArtifact(
+PackageArtifactResult DownloadGitHubReleaseArtifact(
     const std::string& repository,
     const std::string& packageName,
     const std::string& packageVersion,
+    const std::string& release,
+    const std::string& assetName,
     const PackageCacheLayout& cacheLayout,
-    const fs::path& stagingDirectory)
+    const fs::path& stagingDirectory,
+    const std::string& packageKind)
 {
     PackageArtifactResult result;
     const std::optional<std::string> slug = GitHubSlug(repository);
     if (!slug)
     {
-        AddError(result, "Native Git package '" + packageName +
+        AddError(result, packageKind + " package '" + packageName +
             "' does not use a supported GitHub repository reference.");
         return result;
     }
-    if (!IsSafeComponent(packageName) || !IsSafeComponent(packageVersion))
+    if (!IsSafeComponent(packageName) || !IsSafeComponent(packageVersion) ||
+        !IsSafeComponent(release) || !IsSafeComponent(assetName))
     {
-        AddError(result, "Native Git package artifact has an unsafe name or version.");
+        AddError(result, packageKind + " package artifact has an unsafe name, version, release, or asset.");
         return result;
     }
 
-    const std::string assetName = "lode-" + packageName + "-" +
-        packageVersion + "-windows-x64.zip";
-    const std::string release = "v" + packageVersion;
     const std::string baseUrl = "https://github.com/" + *slug +
         "/releases/download/" + release + "/";
-    const fs::path operationRoot = stagingDirectory / "artifact-download";
+    const std::string operationKey = Lode::Detail::Sha256Hex(
+        *slug + "\n" + release + "\n" + assetName).substr(0, 16);
+    const fs::path operationRoot = stagingDirectory /
+        ("artifact-download-" + operationKey);
     const fs::path checksumPath = operationRoot / (assetName + ".sha256");
     const fs::path downloadedPath = operationRoot / assetName;
 
@@ -251,7 +255,7 @@ PackageArtifactResult DownloadGitHubPackageArtifact(
         }
     }
 
-    const fs::path extractionRoot = stagingDirectory / "artifact";
+    const fs::path extractionRoot = stagingDirectory / ("artifact-" + operationKey);
     const ArchiveExtractionResult extraction = ExtractVerifiedArchive(
         cachedPath, *expected, extractionRoot);
     if (!extraction.IsValid())
@@ -272,6 +276,43 @@ PackageArtifactResult DownloadGitHubPackageArtifact(
         *expected
     };
     return result;
+}
+
+PackageArtifactResult DownloadGitHubPackageArtifact(
+    const std::string& repository,
+    const std::string& packageName,
+    const std::string& packageVersion,
+    const PackageCacheLayout& cacheLayout,
+    const fs::path& stagingDirectory)
+{
+    return DownloadGitHubReleaseArtifact(
+        repository,
+        packageName,
+        packageVersion,
+        "v" + packageVersion,
+        "lode-" + packageName + "-" + packageVersion + "-windows-x64.zip",
+        cacheLayout,
+        stagingDirectory,
+        "native Git");
+}
+
+PackageArtifactResult DownloadGitHubStdlibArtifact(
+    const std::string& repository,
+    const std::string& packageName,
+    const std::string& packageVersion,
+    const std::string& release,
+    const PackageCacheLayout& cacheLayout,
+    const fs::path& stagingDirectory)
+{
+    return DownloadGitHubReleaseArtifact(
+        repository,
+        packageName,
+        packageVersion,
+        release,
+        "lode-stdlib-" + packageName + "-" + packageVersion + "-windows-x64.zip",
+        cacheLayout,
+        stagingDirectory,
+        "stdlib");
 }
 
 } // namespace Lode::Package

@@ -37,4 +37,15 @@ LODE_API PackageArtifactResult DownloadGitHubPackageArtifact(
     const PackageCacheLayout& cacheLayout,
     const std::filesystem::path& stagingDirectory);
 
+// Resolves an official Lode standard-module artifact from an exact nightly
+// release, verifies its checksum, caches the archive, and extracts it into
+// operation-scoped staging.
+LODE_API PackageArtifactResult DownloadGitHubStdlibArtifact(
+    const std::string& repository,
+    const std::string& packageName,
+    const std::string& packageVersion,
+    const std::string& release,
+    const PackageCacheLayout& cacheLayout,
+    const std::filesystem::path& stagingDirectory);
+
 } // namespace Lode::Package

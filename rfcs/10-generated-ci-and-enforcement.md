@@ -13,16 +13,19 @@ The package manager will provide:
 
 ```text
 lode install [--dev] [--locked]
-lode ci init
+lode pack [--output <archive>] [package-root]
+lode ci init --sdk-version <nightly> --sdk-sha256 <sha256>
 lode ci validate [--source|--artifact] [--locked]
 lode ci update
 ```
 
-`lode ci init` creates `.github/workflows/lode.yml` and refuses to overwrite an
-existing file unless explicitly forced. It validates package metadata and file
-presence only; it does not execute package code. The initial generator accepts
-native Windows x64 packages and emits a pure-Luau test workflow. Other native
-targets are rejected until their runner and SDK matrix is implemented.
+`lode ci init` requires the exact nightly SDK release tag and SHA-256 checksum
+that the generated workflow will download. It refuses to write a workflow when
+the pin is missing or malformed, and refuses to overwrite an existing file
+unless explicitly forced. It validates package metadata and file presence only;
+it does not execute package code. The initial generator accepts native Windows
+x64 packages and emits a pure-Luau test workflow. Other native targets are
+rejected until their runner and SDK matrix is implemented.
 
 `lode ci validate --source` validates the development tree: `lode.json`,
 `init.luau`, `LICENSE`, native library path declarations, and `CMakeLists.txt`
@@ -33,9 +36,22 @@ dependencies. With `--locked`, it additionally verifies that the existing
 `lode.lock` exactly describes the validated dependency graph. A dependency-
 bearing package with a missing or stale lockfile fails this check rather than
 regenerating the file. A package with no dependencies may pass without a
-lockfile, as defined by RFC 06. This check does not download artifacts or
-materialize aliases; dependency-bearing CI must still run
+lockfile, as defined by RFC 06. The regular validation path does not download
+artifacts or materialize aliases; dependency-bearing CI must still run
 `lode install --dev --locked` after validation once the installer is available.
+
+The `--source --locked` form is the CI handoff after that install step. It
+replays the exact locked graph, including selected stdlib and GitHub Release
+artifacts, without materializing packages or changing `.config.luau`. A
+locked artifact may be populated into the global cache when it is missing;
+the project graph and lockfile remain unchanged.
+
+The `--artifact --locked` form uses the same exact locked graph, but validates
+the publishable package after its Debug/Release artifacts have been built. It
+does not resolve a different dependency version merely because the bundled
+stdlib catalog has another version. It may populate an exact locked dependency
+artifact into the global cache, but it does not materialize packages or change
+`.config.luau`.
 
 `lode ci validate --artifact` validates the publishable tree: the source
 contract plus the Debug/Release native libraries, required exports, ABI,
@@ -44,10 +60,10 @@ third-party notices. The flagless `lode ci validate` form remains an alias for
 `--artifact`.
 
 `lode ci update` requires an existing workflow containing the exact managed
-markers emitted by `lode ci init`. It updates only the generated baseline
-section. User-owned jobs and configuration must remain outside that section;
-missing or malformed markers cause the command to fail instead of replacing
-the workflow silently.
+markers emitted by `lode ci init` and a valid SDK pin. It reuses the existing
+pin and updates only the generated baseline section. User-owned jobs and
+configuration must remain outside that section; missing or malformed markers
+or pins cause the command to fail instead of replacing the workflow silently.
 
 ## Native workflow
 
@@ -55,7 +71,7 @@ The workflow identifies a native package from `lode.json.libraries`. Its
 baseline job performs these operations:
 
 1. Check out the tagged source.
-2. Download and checksum the pinned Lode SDK.
+2. Download and checksum the explicitly pinned Lode SDK.
 3. Run `lode install --dev --locked` when the package declares dependencies or
    development dependencies. The command may fetch the exact locked artifact,
    but must not resolve new versions or revisions.
@@ -65,8 +81,10 @@ baseline job performs these operations:
 6. Build Debug and Release for each declared target.
 7. Run CTest and the package tests through the matching SDK `lode` runtime.
 8. Verify `LodeModuleABI()` and `LodeModuleConfig()` before packaging.
-9. Validate every `lode.json.libraries` path.
-10. Package only artifacts produced by successful jobs.
+9. Validate every `lode.json.libraries` path with
+   `lode ci validate --artifact --locked`.
+10. Run `lode pack --output out/lode-<name>-<version>-windows-x64.zip .` and
+    publish only the archive and checksum produced by successful jobs.
 
 The native package CMake must use:
 
@@ -84,10 +102,12 @@ not claim support based only on a platform key written in `lode.json`.
 
 ## Pure Luau workflow
 
-Pure Luau packages do not download the native SDK. Their baseline validates
-the manifest, runs `lode install --dev --locked` when dependencies are declared,
-checks the package root convention, and runs the package's declared Luau test
-entry through `lode`.
+Pure Luau packages do not build native modules, but the current Windows
+baseline still downloads the pinned SDK because its `lode` executable is the
+runtime used for validation and tests. Their baseline runs
+`lode install --dev --locked` when dependencies are declared, checks the
+package root convention, and runs the package's declared Luau test entry
+through that runtime.
 
 ## User customization and enforcement
 

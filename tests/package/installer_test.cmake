@@ -83,6 +83,30 @@ if(NOT EXISTS "${test_root}/.config.luau" OR
     message(FATAL_ERROR "stdlib locked install did not materialize the expected package view")
 endif()
 
+execute_process(
+    COMMAND "${CMAKE_COMMAND}" -E env "USERPROFILE=${cache_home}"
+        "${LODE_EXECUTABLE}" ci validate --source --locked "${test_root}"
+    RESULT_VARIABLE result
+    OUTPUT_VARIABLE output
+    ERROR_VARIABLE error
+)
+if(NOT result EQUAL 0)
+    file(REMOVE_RECURSE "${test_root}" "${unlocked_test_root}" "${dev_test_root}" "${cache_home}")
+    message(FATAL_ERROR "locked source validation after installation failed:\n${output}\n${error}")
+endif()
+
+execute_process(
+    COMMAND "${CMAKE_COMMAND}" -E env "USERPROFILE=${cache_home}"
+        "${LODE_EXECUTABLE}" ci validate --artifact --locked "${test_root}"
+    RESULT_VARIABLE result
+    OUTPUT_VARIABLE output
+    ERROR_VARIABLE error
+)
+if(NOT result EQUAL 0)
+    file(REMOVE_RECURSE "${test_root}" "${unlocked_test_root}" "${dev_test_root}" "${cache_home}")
+    message(FATAL_ERROR "locked artifact validation after installation failed:\n${output}\n${error}")
+endif()
+
 file(READ "${test_root}/.config.luau" config_content)
 string(FIND "${config_content}" "lode_modules/signal" signal_alias)
 string(FIND "${config_content}" "lode_modules/task" task_alias)

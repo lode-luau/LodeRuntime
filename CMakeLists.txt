@@ -185,6 +185,7 @@ set(LODE_CORE_SOURCES
     src/Registry.cpp
     src/ModuleLoader.cpp
     src/PackageArchive.cpp
+    src/PackagePacker.cpp
     src/HttpDownloader.cpp
     src/PackageArtifact.cpp
     src/PackageValidator.cpp
@@ -239,6 +240,7 @@ set(LODE_CORE_HEADERS
     src/PackageConfig.hpp
     src/PackageInstaller.hpp
     src/PackageArchive.hpp
+    src/PackagePacker.hpp
     src/HttpDownloader.hpp
     src/PackageArtifact.hpp
     src/GitResolver.hpp

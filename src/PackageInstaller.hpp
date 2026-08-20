@@ -3,6 +3,7 @@
 #pragma once
 
 #include "Lode/Export.hpp"
+#include "PackageValidator.hpp"
 
 #include <filesystem>
 #include <string>
@@ -21,6 +22,15 @@ struct InstallResult
         return errors.empty();
     }
 };
+
+// Resolves and validates the exact locked graph without materializing package
+// directories or updating .config.luau. Locked GitHub artifacts may be
+// downloaded into the global cache when they are not cached yet.
+LODE_API ValidationReport ValidateLockedPackage(
+    const std::filesystem::path& packageRoot,
+    const std::filesystem::path& standardLibraryRoot,
+    bool includeDevelopmentDependencies,
+    ValidationMode mode = ValidationMode::InstallSource);
 
 // Installs an already locked graph using the installed stdlib catalog, local
 // path packages, and pinned Git source/release artifacts for the current
