@@ -892,11 +892,12 @@ struct LockedGraphResult
 LockedGraphResult ResolveLockedGraph(const fs::path& packageRoot,
                                      const fs::path& standardLibraryRoot,
                                      const PackageCacheLayout& cacheLayout,
-                                     bool includeDevelopmentDependencies)
+                                     bool includeDevelopmentDependencies,
+                                     ValidationMode mode = ValidationMode::InstallSource)
 {
     LockedGraphResult result;
     const ValidationReport validation = Validate(
-        packageRoot, ValidationMode::InstallSource, standardLibraryRoot);
+        packageRoot, mode, standardLibraryRoot);
     if (!validation.IsValid())
     {
         result.errors = validation.errors;
@@ -1133,7 +1134,8 @@ InstallResult InstallLocked(const fs::path& packageRoot,
 
 ValidationReport ValidateLockedPackage(const fs::path& packageRoot,
                                        const fs::path& standardLibraryRoot,
-                                       bool includeDevelopmentDependencies)
+                                       bool includeDevelopmentDependencies,
+                                       ValidationMode mode)
 {
     ValidationReport report;
     const CacheLayoutResult cache = ResolvePackageCacheLayout();
@@ -1144,7 +1146,7 @@ ValidationReport ValidateLockedPackage(const fs::path& packageRoot,
     }
 
     LockedGraphResult resolution = ResolveLockedGraph(
-        packageRoot, standardLibraryRoot, *cache.layout, includeDevelopmentDependencies);
+        packageRoot, standardLibraryRoot, *cache.layout, includeDevelopmentDependencies, mode);
     report.errors = std::move(resolution.errors);
     report.dependencyGraph = std::move(resolution.graph);
     std::error_code ec;

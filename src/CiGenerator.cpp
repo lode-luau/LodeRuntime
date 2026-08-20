@@ -207,7 +207,7 @@ jobs:
       - name: Validate package artifact
         shell: pwsh
         run: |
-          & "$env:LODE_SDK_ROOT/bin/Release/lode.exe" ci validate --artifact .
+          & "$env:LODE_SDK_ROOT/bin/Release/lode.exe" ci validate --artifact --locked .
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Package validated artifact

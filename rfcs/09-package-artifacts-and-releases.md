@@ -184,7 +184,9 @@ only that artifact; if the bundled version is compatible, no additional
 download is required. The downloaded archive is validated as a Windows
 x64/Release installation artifact. The public `ci validate --artifact` mode
 continues to validate the complete platform/configuration matrix declared by
-an external package.
+an external package. When the package has a lockfile, CI must use
+`ci validate --artifact --locked`; this keeps the complete matrix validation
+while using the exact dependency artifacts selected by `lode.lock`.
 
 No new stdlib manifest or Lode-owned registry is required. Existing module
 `lode.json` files provide names, versions, and dependency declarations, while

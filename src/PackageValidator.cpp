@@ -147,7 +147,8 @@ struct DependencyGraphContext
 bool AllowsUnresolvedStdlib(ValidationMode mode)
 {
     return mode == ValidationMode::InstallSource ||
-        mode == ValidationMode::InstallArtifact;
+        mode == ValidationMode::InstallArtifact ||
+        mode == ValidationMode::LockedArtifact;
 }
 
 std::optional<fs::path> FindStdlibRoot(const fs::path& packageRoot,

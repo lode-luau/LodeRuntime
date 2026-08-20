@@ -10,6 +10,11 @@ file(WRITE "${package_root}/lode.json" [=[{
   "name": "ci_generator_package",
   "version": "1.0.0",
   "license": "MIT",
+  "libraries": {
+    "windows": {
+      "x64": "libs/windows/x64/ci_generator_package.dll"
+    }
+  },
   "dependencies": {
     "example": {
       "git": "https://github.com/example/example.git",
@@ -20,6 +25,7 @@ file(WRITE "${package_root}/lode.json" [=[{
 ]=])
 file(WRITE "${package_root}/init.luau" "return {}\n")
 file(WRITE "${package_root}/LICENSE" "MIT\n")
+file(WRITE "${package_root}/CMakeLists.txt" "cmake_minimum_required(VERSION 3.20)\nproject(ci_generator_package LANGUAGES CXX)\n")
 
 execute_process(
     COMMAND "${LODE_EXECUTABLE}" ci init "${package_root}"
@@ -52,7 +58,8 @@ foreach(required_text IN ITEMS
     "LODE_SDK_VERSION: \"${sdk_version}\""
     "LODE_SDK_SHA256: \"${sdk_sha256}\""
     "install --dev --locked ."
-    "ci validate --source --locked .")
+    "ci validate --source --locked ."
+    "ci validate --artifact --locked .")
     string(FIND "${workflow}" "${required_text}" position)
     if(position LESS 0)
         file(REMOVE_RECURSE "${package_root}")

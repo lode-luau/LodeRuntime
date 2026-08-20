@@ -554,13 +554,18 @@ int main(int argc, char* argv[])
         }
 
         Lode::Package::ValidationReport report;
-        if (locked && mode == Lode::Package::ValidationMode::Source)
+        if (locked && (mode == Lode::Package::ValidationMode::Source ||
+                       mode == Lode::Package::ValidationMode::Artifact))
         {
             // A locked install may select a standard-module artifact that is
             // not present in the bundled catalog. Reuse the exact locked
             // graph validation instead of resolving only against that catalog.
+            const Lode::Package::ValidationMode lockedMode =
+                mode == Lode::Package::ValidationMode::Artifact
+                    ? Lode::Package::ValidationMode::LockedArtifact
+                    : Lode::Package::ValidationMode::InstallSource;
             report = Lode::Package::ValidateLockedPackage(
-                packageRoot, standardLibraryPath, true);
+                packageRoot, standardLibraryPath, true, lockedMode);
         }
         else
         {

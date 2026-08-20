@@ -410,6 +410,13 @@ that exact release asset when it is absent from the cache and rejects any
 release, asset, ABI, or checksum mismatch. If the installed bundled module
 already satisfies the locked requirement, no separate artifact is required.
 
+CI artifact validation uses the same locked graph after the package's native
+artifacts are built. `lode ci validate --artifact --locked` validates the
+package's complete declared artifact matrix while accepting an exact locked
+stdlib or Git artifact that is not part of the SDK's bundled catalog. It may
+populate the global cache, but it does not materialize dependencies or modify
+the project configuration.
+
 The runtime contains the SHA-256 verifier, safe-ZIP staging, and GitHub Release
 download path for the current published target: Windows x64. A Git package with
 a `libraries` declaration must use the generated release contract (`v<version>`,

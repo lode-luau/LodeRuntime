@@ -18,6 +18,9 @@ enum class ValidationMode
     Artifact,
     InstallSource,
     InstallArtifact,
+    // Validates the package's complete published artifact matrix while
+    // allowing dependency resolution to come from the existing lockfile.
+    LockedArtifact,
 };
 
 struct ValidationReport

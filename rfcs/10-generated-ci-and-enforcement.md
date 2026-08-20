@@ -45,6 +45,13 @@ artifacts, without materializing packages or changing `.config.luau`. A
 locked artifact may be populated into the global cache when it is missing;
 the project graph and lockfile remain unchanged.
 
+The `--artifact --locked` form uses the same exact locked graph, but validates
+the publishable package after its Debug/Release artifacts have been built. It
+does not resolve a different dependency version merely because the bundled
+stdlib catalog has another version. It may populate an exact locked dependency
+artifact into the global cache, but it does not materialize packages or change
+`.config.luau`.
+
 `lode ci validate --artifact` validates the publishable tree: the source
 contract plus the Debug/Release native libraries, required exports, ABI,
 configuration metadata, package-local runtime libraries, and required
@@ -73,7 +80,8 @@ baseline job performs these operations:
 6. Build Debug and Release for each declared target.
 7. Run CTest and the package tests through the matching SDK `lode` runtime.
 8. Verify `LodeModuleABI()` and `LodeModuleConfig()` before packaging.
-9. Validate every `lode.json.libraries` path.
+9. Validate every `lode.json.libraries` path with
+   `lode ci validate --artifact --locked`.
 10. Package only artifacts produced by successful jobs.
 
 The native package CMake must use:

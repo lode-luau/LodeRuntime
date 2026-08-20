@@ -29,7 +29,8 @@ struct InstallResult
 LODE_API ValidationReport ValidateLockedPackage(
     const std::filesystem::path& packageRoot,
     const std::filesystem::path& standardLibraryRoot,
-    bool includeDevelopmentDependencies);
+    bool includeDevelopmentDependencies,
+    ValidationMode mode = ValidationMode::InstallSource);
 
 // Installs an already locked graph using the installed stdlib catalog, local
 // path packages, and pinned Git source/release artifacts for the current
