@@ -335,22 +335,28 @@ The current installer commands are:
     lode install [--dev] [package-root]
     lode install --locked [--dev] [package-root]
 
-The unlocked local resolver validates the current source graph, supports only
-stdlib and local path packages already present on disk, copies them into the
-global cache, materializes their aliases under the project's lode_modules
-directory, updates the project's .config.luau, and writes the deterministic
-lode.lock atomically. It does not compile native packages.
+The unlocked resolver validates the current source graph, supports stdlib and
+local path packages already present on disk, and resolves a Git dependency by
+cloning its default revision and recording the resulting commit. Git source
+installation is currently limited to pure Luau packages; a Git package with a
+`libraries` declaration is rejected until artifact download and verification
+are implemented. Resolved packages are copied into the global cache,
+materialized under the project's lode_modules directory, and reflected in
+.config.luau and the deterministic lode.lock.
 
 `--locked` performs the same local materialization only after validating the
-existing lockfile and never changes it. Without --dev, root devDependencies
-and the runtime dependencies reachable only through those development roots
-are not materialized. With --dev, those root development packages and their
-runtime dependency subgraphs are materialized; a dependency package's own
-devDependencies remain excluded.
+existing lockfile and never changes it. Locked Git installation is not yet
+implemented because the current locked path cannot retrieve a package from its
+recorded commit or select its published artifact. Without --dev, root
+devDependencies and the runtime dependencies reachable only through those
+development roots are not materialized. With --dev, those root development
+packages and their runtime dependency subgraphs are materialized; a dependency
+package's own devDependencies remain excluded.
 
-Neither mode resolves or installs Git dependencies, downloads release
-archives, extracts ZIP files, or builds native packages. Those operations
-remain separate implementation blocks.
+Neither mode downloads release archives, extracts ZIP files, or builds native
+packages. Those operations remain separate implementation blocks. The Git
+declaration has no branch/ref field in v1; unlocked resolution follows the
+repository's default revision and pins its commit in `lode.lock`.
 
 ## Version conflicts
 
