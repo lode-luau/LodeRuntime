@@ -138,8 +138,9 @@ runtime contains the SHA-256 verifier and ZIP extractor for this path; it does
 not call PowerShell, `tar`, `cmake`, or `gh` to install packages. It must
 extract into a staging directory, reject archive paths that escape that
 directory, validate the package root, and move the completed installation into
-the global cache atomically. Release selection and download remain the next
-installer block.
+the global cache atomically. The current installer implements this flow for
+the Windows x64 GitHub Release contract; other targets remain unsupported
+until their downloader and release matrix are implemented.
 
 An incomplete download or extraction must never become an installable package.
 

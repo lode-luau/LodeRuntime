@@ -354,13 +354,21 @@ development roots are not materialized. With --dev, those root development
 packages and their runtime dependency subgraphs are materialized; a dependency
 package's own devDependencies remain excluded.
 
-The runtime now contains the SHA-256 verifier and safe-ZIP staging primitives,
-and the graph/lockfile model can record a selected artifact. Neither installer
-mode yet selects or downloads GitHub Release assets or builds native packages.
-A Git package with a `libraries` declaration is therefore still rejected with
-an explicit published-artifact error. The Git
+The runtime contains the SHA-256 verifier, safe-ZIP staging, and GitHub Release
+download path for the current published target: Windows x64. An unlocked Git
+package with a `libraries` declaration must use the generated release contract
+(`v<version>`, `lode-<name>-<version>-windows-x64.zip`, and its `.sha256`
+asset). The downloaded package is validated as an artifact before entering the
+global cache. GitHub is the source; there is no Lode registry or `gh` runtime
+dependency.
+
+`--locked` clones the exact Git commit recorded by the lockfile and downloads
+the same release asset only when its release, asset name, ABI, and checksum
+match the locked artifact record. A Git package that is not a supported
+GitHub Release package, or a package targeting another runtime platform, is
+rejected explicitly. The Git
 declaration has no branch/ref field in v1; unlocked resolution follows the
-repository's default revision and pins its commit in `lode.lock`.
+repository’s default revision and pins its commit in `lode.lock`.
 
 ## Version conflicts
 
