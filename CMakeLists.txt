@@ -185,6 +185,8 @@ set(LODE_CORE_SOURCES
     src/Registry.cpp
     src/ModuleLoader.cpp
     src/PackageArchive.cpp
+    src/HttpDownloader.cpp
+    src/PackageArtifact.cpp
     src/PackageValidator.cpp
     src/PackageGraph.cpp
     src/PackageLockfile.cpp
@@ -237,6 +239,8 @@ set(LODE_CORE_HEADERS
     src/PackageConfig.hpp
     src/PackageInstaller.hpp
     src/PackageArchive.hpp
+    src/HttpDownloader.hpp
+    src/PackageArtifact.hpp
     src/GitResolver.hpp
     src/CiGenerator.hpp
     src/Platform/Platform.hpp
@@ -260,6 +264,9 @@ target_include_directories(LodeCore PRIVATE
     "${miniz_SOURCE_DIR}"
     "${miniz_BINARY_DIR}"
 )
+if(WIN32)
+    target_link_libraries(LodeCore PRIVATE winhttp)
+endif()
 
 # Compile each target (runtime + every native module) with its own build
 # configuration name. The loader compares a module's LodeModuleConfig export

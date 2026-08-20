@@ -48,16 +48,23 @@ std::string SerializeDependencyGraph(const DependencyGraph& graph)
             packageDocument["reference"] = package.sourceReference;
             packageDocument["commit"] = package.resolvedCommit;
         }
-        if (package.artifact)
+        if (!package.artifacts.empty())
         {
-            packageDocument["artifact"] = {
-                { "platform", package.artifact->platform },
-                { "architecture", package.artifact->architecture },
-                { "abi", package.artifact->abi },
-                { "release", package.artifact->release },
-                { "asset", package.artifact->asset },
-                { "sha256", package.artifact->sha256 }
-            };
+            packageDocument["artifacts"] = json::array();
+            for (const PackageArtifact& artifact : package.artifacts)
+            {
+                json artifactDocument = {
+                    { "platform", artifact.platform },
+                    { "architecture", artifact.architecture },
+                    { "abi", artifact.abi },
+                    { "release", artifact.release },
+                    { "asset", artifact.asset },
+                    { "sha256", artifact.sha256 }
+                };
+                if (!artifact.configuration.empty())
+                    artifactDocument["configuration"] = artifact.configuration;
+                packageDocument["artifacts"].push_back(std::move(artifactDocument));
+            }
         }
 
         for (const DependencyEdge& dependency : package.dependencies)

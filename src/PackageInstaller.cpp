@@ -7,6 +7,7 @@
 #include "PackageLockfile.hpp"
 #include "PackageValidator.hpp"
 #include "GitResolver.hpp"
+#include "PackageArtifact.hpp"
 #include "PathUtil.hpp"
 #include "nlohmann/json.hpp"
 
@@ -96,6 +97,128 @@ bool HasInstallEdges(const DependencyGraph& graph,
     return false;
 }
 
+struct LockedGitRecord
+{
+    std::string name;
+    std::string version;
+    std::string repository;
+    std::string commit;
+    std::vector<PackageArtifact> artifacts;
+};
+
+std::string LockedEdgeKey(const json& package, const json& dependency)
+{
+    return package.value("name", "") + "\n" +
+        package.value("version", "") + "\n" +
+        dependency.value("alias", "") + "\n" +
+        dependency.value("requirement", "");
+}
+
+bool ParseLockedGitEdges(const json& document,
+                         std::map<std::string, LockedGitRecord>& records,
+                         InstallResult& result)
+{
+    if (!document.is_object() || !document.contains("packages") ||
+        !document["packages"].is_array())
+    {
+        AddError(result, "Locked package installation requires a valid lode.lock packages array.");
+        return false;
+    }
+
+    const json& packages = document["packages"];
+    for (const json& package : packages)
+    {
+        if (!package.is_object())
+            continue;
+        for (const char* field : { "dependencies", "devDependencies" })
+        {
+            if (!package.contains(field) || !package[field].is_array())
+                continue;
+            for (const json& dependency : package[field])
+            {
+                if (!dependency.is_object() || !dependency.contains("target") ||
+                    !dependency["target"].is_number_unsigned())
+                    continue;
+                const size_t target = dependency["target"].get<size_t>();
+                if (target >= packages.size() || !packages[target].is_object() ||
+                    packages[target].value("source", "") != "git")
+                    continue;
+
+                const json& targetPackage = packages[target];
+                LockedGitRecord record;
+                record.name = targetPackage.value("name", "");
+                record.version = targetPackage.value("version", "");
+                record.repository = targetPackage.value("reference", "");
+                record.commit = targetPackage.value("commit", "");
+                if (record.name.empty() || record.version.empty() ||
+                    record.repository.empty() || record.commit.empty())
+                {
+                    AddError(result, "Locked Git package record is missing name, version, reference, or commit.");
+                    return false;
+                }
+
+                if (targetPackage.contains("artifacts"))
+                {
+                    if (!targetPackage["artifacts"].is_array())
+                    {
+                        AddError(result, "Locked Git package artifacts must be an array.");
+                        return false;
+                    }
+                    for (const json& artifactDocument : targetPackage["artifacts"])
+                    {
+                        if (!artifactDocument.is_object())
+                            continue;
+                        PackageArtifact artifact;
+                        artifact.platform = artifactDocument.value("platform", "");
+                        artifact.architecture = artifactDocument.value("architecture", "");
+                        artifact.configuration = artifactDocument.value("configuration", "");
+                        artifact.abi = artifactDocument.value("abi", "");
+                        artifact.release = artifactDocument.value("release", "");
+                        artifact.asset = artifactDocument.value("asset", "");
+                        artifact.sha256 = artifactDocument.value("sha256", "");
+                        record.artifacts.push_back(std::move(artifact));
+                    }
+                }
+
+                const std::string key = LockedEdgeKey(package, dependency);
+                const auto existing = records.find(key);
+                if (existing != records.end() &&
+                    (existing->second.repository != record.repository ||
+                     existing->second.commit != record.commit))
+                {
+                    AddError(result, "lode.lock contains ambiguous Git resolutions for dependency '" +
+                        dependency.value("alias", "") + "'.");
+                    return false;
+                }
+                records.emplace(key, std::move(record));
+            }
+        }
+    }
+    return true;
+}
+
+const LockedGitRecord* FindLockedGitEdge(
+    const std::map<std::string, LockedGitRecord>& records,
+    const PackageNode& package,
+    const DependencyEdge& dependency)
+{
+    const std::string key = package.name + "\n" + package.version + "\n" +
+        dependency.alias + "\n" + dependency.requestedVersion;
+    const auto found = records.find(key);
+    return found == records.end() ? nullptr : &found->second;
+}
+
+bool SameArtifact(const PackageArtifact& left, const PackageArtifact& right)
+{
+    return left.platform == right.platform &&
+        left.architecture == right.architecture &&
+        left.configuration == right.configuration &&
+        left.abi == right.abi &&
+        left.release == right.release &&
+        left.asset == right.asset &&
+        left.sha256 == right.sha256;
+}
+
 bool ReadFile(const fs::path& path, std::string& content)
 {
     std::ifstream file(path, std::ios::binary);
@@ -126,9 +249,15 @@ void RollbackMaterializedPackages(const fs::path& projectRoot,
 
 bool ResolveGitDependencies(DependencyGraph& graph,
                              const fs::path& standardLibraryRoot,
+                             const PackageCacheLayout& cacheLayout,
                              const fs::path& stagingDirectory,
+                             const json* lockedDocument,
                              InstallResult& result)
 {
+    std::map<std::string, LockedGitRecord> lockedEdges;
+    if (lockedDocument && !ParseLockedGitEdges(*lockedDocument, lockedEdges, result))
+        return false;
+
     std::map<fs::path, size_t> packageIndexes;
     for (size_t index = 0; index < graph.packages.size(); ++index)
         packageIndexes.emplace(fs::weakly_canonical(graph.packages[index].root), index);
@@ -144,17 +273,34 @@ bool ResolveGitDependencies(DependencyGraph& graph,
                 graph.packages[packageIndex].dependencies[edgeIndex].target)
                 continue;
 
-            const std::string repository =
-                graph.packages[packageIndex].dependencies[edgeIndex].sourceReference;
+            const DependencyEdge& dependency =
+                graph.packages[packageIndex].dependencies[edgeIndex];
+            const LockedGitRecord* locked = lockedDocument
+                ? FindLockedGitEdge(lockedEdges, graph.packages[packageIndex], dependency)
+                : nullptr;
+            if (lockedDocument && !locked)
+            {
+                AddError(result, "lode.lock has no Git target for dependency '" +
+                    dependency.alias + "'.");
+                return false;
+            }
+
+            const std::string repository = locked
+                ? locked->repository
+                : dependency.sourceReference;
             size_t targetIndex = 0;
-            auto resolved = resolvedRepositories.find(repository);
+            const std::string resolutionKey = repository + "\n" +
+                (locked ? locked->commit : "");
+            auto resolved = resolvedRepositories.find(resolutionKey);
             if (resolved != resolvedRepositories.end())
             {
                 targetIndex = resolved->second;
             }
             else
             {
-                const GitCheckoutResult checkout = CheckoutGitPackage(repository, stagingDirectory);
+                const GitCheckoutResult checkout = locked
+                    ? CheckoutGitPackageAtCommit(repository, locked->commit, stagingDirectory)
+                    : CheckoutGitPackage(repository, stagingDirectory);
                 if (!checkout.IsValid())
                 {
                     result.errors.insert(result.errors.end(),
@@ -179,8 +325,15 @@ bool ResolveGitDependencies(DependencyGraph& graph,
                     return false;
                 }
 
-                const PackageNode& resolvedRoot = resolvedGraph.packages[resolvedGraph.root];
-                const DependencyEdge& edge = graph.packages[packageIndex].dependencies[edgeIndex];
+                PackageNode resolvedRoot = resolvedGraph.packages[resolvedGraph.root];
+                const DependencyEdge& edge = dependency;
+                if (locked && (locked->repository != edge.sourceReference ||
+                               locked->commit.empty()))
+                {
+                    AddError(result, "lode.lock Git source does not match dependency '" +
+                        edge.alias + "'.");
+                    return false;
+                }
                 if (!PackageVersionSatisfies(resolvedRoot.version, edge.requestedVersion))
                 {
                     AddError(result, "Git dependency '" + edge.alias + "' requires version " +
@@ -200,20 +353,76 @@ bool ResolveGitDependencies(DependencyGraph& graph,
                 if (manifest.contains("libraries") && manifest["libraries"].is_object() &&
                     !manifest["libraries"].empty())
                 {
-                    AddError(result, "Git native package '" + resolvedRoot.name +
-                        "' requires a published artifact; native Git artifact installation is not implemented.");
-                    return false;
+                    const PackageArtifactResult artifact = DownloadGitHubPackageArtifact(
+                        repository, resolvedRoot.name, resolvedRoot.version,
+                        cacheLayout, stagingDirectory);
+                    if (!artifact.IsValid())
+                    {
+                        result.errors.insert(result.errors.end(),
+                            artifact.errors.begin(), artifact.errors.end());
+                        return false;
+                    }
+                    if (locked)
+                    {
+                        const auto expectedArtifact = std::find_if(
+                            locked->artifacts.begin(), locked->artifacts.end(),
+                            [](const PackageArtifact& candidate) {
+                                return candidate.platform == "windows" &&
+                                    candidate.architecture == "x64" &&
+                                    candidate.abi == LodeAbiId();
+                            });
+                        if (expectedArtifact == locked->artifacts.end() ||
+                            !SameArtifact(*expectedArtifact, artifact.artifact))
+                        {
+                            AddError(result, "Downloaded GitHub artifact does not match the locked "
+                                "platform, ABI, release, asset, or SHA-256.");
+                            return false;
+                        }
+                    }
+
+                    const ValidationReport artifactValidation = Validate(
+                        artifact.packageRoot, ValidationMode::Artifact, standardLibraryRoot);
+                    if (!artifactValidation.IsValid())
+                    {
+                        result.errors.insert(result.errors.end(),
+                            artifactValidation.errors.begin(), artifactValidation.errors.end());
+                        return false;
+                    }
+                    if (artifactValidation.dependencyGraph.root >=
+                        artifactValidation.dependencyGraph.packages.size())
+                    {
+                        AddError(result, "Downloaded artifact for '" + resolvedRoot.name +
+                            "' produced an invalid dependency graph.");
+                        return false;
+                    }
+                    const PackageNode& artifactRoot =
+                        artifactValidation.dependencyGraph.packages[
+                            artifactValidation.dependencyGraph.root];
+                    if (artifactRoot.name != resolvedRoot.name ||
+                        artifactRoot.version != resolvedRoot.version)
+                    {
+                        AddError(result, "Downloaded artifact identity does not match Git package '" +
+                            resolvedRoot.name + "'.");
+                        return false;
+                    }
+
+                    resolvedRoot.root = artifactRoot.root;
+                    resolvedRoot.artifacts.push_back(artifact.artifact);
                 }
 
                 const fs::path canonicalRoot = fs::weakly_canonical(checkout.packageRoot);
+                const fs::path packageRoot = fs::weakly_canonical(resolvedRoot.root);
+                const std::vector<PackageArtifact> artifacts = resolvedRoot.artifacts;
                 auto existingPackage = packageIndexes.find(canonicalRoot);
                 if (existingPackage != packageIndexes.end())
                 {
                     targetIndex = existingPackage->second;
                     PackageNode& existing = graph.packages[targetIndex];
+                    existing.root = packageRoot;
                     existing.source = DependencySource::Git;
                     existing.sourceReference = repository;
                     existing.resolvedCommit = checkout.commit;
+                    existing.artifacts = artifacts;
                 }
                 else
                 {
@@ -221,10 +430,11 @@ bool ResolveGitDependencies(DependencyGraph& graph,
                     graph.packages.push_back(PackageNode{
                         resolvedRoot.name,
                         resolvedRoot.version,
-                        canonicalRoot,
+                        packageRoot,
                         DependencySource::Git,
                         repository,
                         checkout.commit,
+                        artifacts,
                         {}
                     });
                     packageIndexes.emplace(canonicalRoot, targetIndex);
@@ -282,7 +492,7 @@ bool ResolveGitDependencies(DependencyGraph& graph,
                     }
                 }
 
-                resolvedRepositories.emplace(repository, targetIndex);
+                resolvedRepositories.emplace(resolutionKey, targetIndex);
             }
 
             graph.packages[packageIndex].dependencies[edgeIndex].target = targetIndex;
@@ -441,17 +651,8 @@ InstallResult InstallLocked(const fs::path& packageRoot,
 
     DependencyGraph graph = validation.dependencyGraph;
     const fs::path root = graph.packages[graph.root].root;
-    const std::vector<bool> installablePackages = CollectInstallablePackages(
+    const std::vector<bool> initialInstallablePackages = CollectInstallablePackages(
         graph, includeDevelopmentDependencies);
-    if (HasInstallEdges(graph, installablePackages, includeDevelopmentDependencies))
-    {
-        const LockfileResult lock = ValidateLockfile(root / "lode.lock", graph);
-        if (!lock.IsValid())
-        {
-            result.errors = lock.errors;
-            return result;
-        }
-    }
 
     const CacheLayoutResult cache = ResolvePackageCacheLayout();
     if (!cache.IsValid())
@@ -460,8 +661,57 @@ InstallResult InstallLocked(const fs::path& packageRoot,
         return result;
     }
 
-    return InstallResolvedGraph(graph, root, *cache.layout,
-                                includeDevelopmentDependencies);
+    const bool hasInstallEdges = HasInstallEdges(
+        graph, initialInstallablePackages, includeDevelopmentDependencies);
+    fs::path gitStaging;
+    if (hasInstallEdges)
+    {
+        std::string lockContent;
+        if (!ReadFile(root / "lode.lock", lockContent))
+        {
+            result.errors.push_back("Cannot open lockfile: " + PathToUtf8(root / "lode.lock"));
+            return result;
+        }
+
+        json lockDocument;
+        try
+        {
+            lockDocument = json::parse(lockContent);
+        }
+        catch (const std::exception& error)
+        {
+            result.errors.push_back("Failed to parse lockfile " +
+                PathToUtf8(root / "lode.lock") + ": " + error.what());
+            return result;
+        }
+
+        const auto timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
+        gitStaging = cache.layout->stagingDirectory /
+            ("git-locked-" + std::to_string(timestamp));
+        if (!ResolveGitDependencies(graph, standardLibraryRoot, *cache.layout,
+                                    gitStaging, &lockDocument, result))
+        {
+            std::error_code ec;
+            fs::remove_all(gitStaging, ec);
+            return result;
+        }
+
+        const LockfileResult lock = ValidateLockfile(root / "lode.lock", graph);
+        if (!lock.IsValid())
+        {
+            result.errors = lock.errors;
+            std::error_code ec;
+            fs::remove_all(gitStaging, ec);
+            return result;
+        }
+    }
+
+    result = InstallResolvedGraph(graph, root, *cache.layout,
+                                  includeDevelopmentDependencies);
+    std::error_code ec;
+    if (!gitStaging.empty())
+        fs::remove_all(gitStaging, ec);
+    return result;
 }
 
 InstallResult InstallLocal(const fs::path& packageRoot,
@@ -490,7 +740,8 @@ InstallResult InstallLocal(const fs::path& packageRoot,
     const auto timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
     const fs::path gitStaging = cache.layout->stagingDirectory /
         ("git-" + std::to_string(timestamp));
-    if (!ResolveGitDependencies(graph, standardLibraryRoot, gitStaging, result))
+    if (!ResolveGitDependencies(graph, standardLibraryRoot, *cache.layout,
+                                gitStaging, nullptr, result))
     {
         std::error_code ec;
         fs::remove_all(gitStaging, ec);

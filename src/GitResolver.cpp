@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <string_view>
 #include <system_error>
 
 #if defined(_WIN32)
@@ -61,6 +62,18 @@ bool IsCommitHash(const std::string& value)
     return std::all_of(value.begin(), value.end(), [](unsigned char character) {
         return std::isxdigit(character) != 0;
     });
+}
+
+std::string NormalizeRepositoryReference(const std::string& repository)
+{
+    constexpr std::string_view prefix = "github:";
+    if (repository.rfind(prefix, 0) != 0)
+        return repository;
+
+    const std::string slug = repository.substr(prefix.size());
+    if (slug.empty() || slug.find('/') == std::string::npos)
+        return repository;
+    return "https://github.com/" + slug;
 }
 
 #if defined(_WIN32)
@@ -212,8 +225,9 @@ ProcessResult RunGit(const std::vector<std::string>& arguments)
 
 } // namespace
 
-GitCheckoutResult CheckoutGitPackage(const std::string& repository,
-                                     const std::filesystem::path& stagingDirectory)
+GitCheckoutResult CheckoutGitPackageInternal(const std::string& repository,
+                                             const std::string& requestedCommit,
+                                             const std::filesystem::path& stagingDirectory)
 {
     GitCheckoutResult result;
     if (repository.empty())
@@ -231,21 +245,55 @@ GitCheckoutResult CheckoutGitPackage(const std::string& repository,
     }
 
     const fs::path packageRoot = stagingDirectory /
-        Lode::Detail::Sha256Hex(repository);
+        Lode::Detail::Sha256Hex(repository + "\n" + requestedCommit);
     if (fs::exists(packageRoot, ec))
     {
         AddError(result, "Git staging destination already exists: " + PathToUtf8(packageRoot));
         return result;
     }
 
-    const ProcessResult clone = RunGit({
-        "clone", "--depth", "1", "--quiet", "--", repository, PathToUtf8(packageRoot)
+    const std::string cloneRepository = NormalizeRepositoryReference(repository);
+    std::vector<std::string> cloneArguments = {
+        "clone", "--depth", "1", "--quiet"
+    };
+    if (!requestedCommit.empty())
+        cloneArguments.push_back("--no-checkout");
+    cloneArguments.insert(cloneArguments.end(), {
+        "--", cloneRepository, PathToUtf8(packageRoot)
     });
+    const ProcessResult clone = RunGit(cloneArguments);
     if (clone.exitCode != 0)
     {
         AddError(result, "Git clone failed for '" + repository + "': " +
             Trim(clone.output.empty() ? clone.error : clone.output));
         return result;
+    }
+
+    if (!requestedCommit.empty())
+    {
+        const ProcessResult fetch = RunGit({
+            "-C", PathToUtf8(packageRoot), "fetch", "--depth", "1",
+            "--quiet", "origin", requestedCommit
+        });
+        if (fetch.exitCode != 0)
+        {
+            AddError(result, "Git commit '" + requestedCommit + "' could not be fetched from '" +
+                repository + "': " + Trim(fetch.output));
+            fs::remove_all(packageRoot, ec);
+            return result;
+        }
+
+        const ProcessResult checkout = RunGit({
+            "-C", PathToUtf8(packageRoot), "checkout", "--quiet",
+            "--detach", requestedCommit
+        });
+        if (checkout.exitCode != 0)
+        {
+            AddError(result, "Git commit '" + requestedCommit + "' could not be checked out from '" +
+                repository + "': " + Trim(checkout.output));
+            fs::remove_all(packageRoot, ec);
+            return result;
+        }
     }
 
     const ProcessResult revision = RunGit({
@@ -270,8 +318,39 @@ GitCheckoutResult CheckoutGitPackage(const std::string& repository,
     }
 
     result.packageRoot = packageRoot;
+    if (!requestedCommit.empty() &&
+        (requestedCommit.size() != commit.size() ||
+         !std::equal(requestedCommit.begin(), requestedCommit.end(), commit.begin(),
+            [](unsigned char left, unsigned char right) {
+                return std::tolower(left) == std::tolower(right);
+            })))
+    {
+        AddError(result, "Git checkout resolved a different commit than the lockfile requested.");
+        fs::remove_all(packageRoot, ec);
+        return result;
+    }
+
     result.commit = commit;
     return result;
+}
+
+GitCheckoutResult CheckoutGitPackage(const std::string& repository,
+                                     const std::filesystem::path& stagingDirectory)
+{
+    return CheckoutGitPackageInternal(repository, {}, stagingDirectory);
+}
+
+GitCheckoutResult CheckoutGitPackageAtCommit(const std::string& repository,
+                                             const std::string& commit,
+                                             const std::filesystem::path& stagingDirectory)
+{
+    if (commit.empty())
+    {
+        GitCheckoutResult result;
+        result.errors.push_back("Locked Git installation requires a resolved commit.");
+        return result;
+    }
+    return CheckoutGitPackageInternal(repository, commit, stagingDirectory);
 }
 
 } // namespace Lode::Package

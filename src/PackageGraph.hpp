@@ -38,6 +38,7 @@ struct PackageArtifact
 {
     std::string platform;
     std::string architecture;
+    std::string configuration;
     std::string abi;
     std::string release;
     std::string asset;
@@ -52,7 +53,7 @@ struct PackageNode
     DependencySource source = DependencySource::Path;
     std::string sourceReference;
     std::string resolvedCommit;
-    std::optional<PackageArtifact> artifact;
+    std::vector<PackageArtifact> artifacts;
     std::vector<DependencyEdge> dependencies;
 };
 

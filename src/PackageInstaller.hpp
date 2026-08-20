@@ -22,17 +22,17 @@ struct InstallResult
     }
 };
 
-// Installs an already locked source graph using the installed stdlib catalog
-// and local path dependencies. This first implementation does not resolve Git,
-// download archives, or build native packages.
+// Installs an already locked graph using the installed stdlib catalog, local
+// path packages, and pinned Git source/release artifacts for the current
+// runtime target. It never compiles native packages locally.
 LODE_API InstallResult InstallLocked(
     const std::filesystem::path& packageRoot,
     const std::filesystem::path& standardLibraryRoot,
     bool includeDevelopmentDependencies);
 
-// Resolves and installs the currently available stdlib and local path graph,
-// then writes its deterministic lockfile. Git resolution, downloads, and
-// native package builds are intentionally unsupported by this local resolver.
+// Resolves and installs stdlib, local path, pure-Luau Git, and supported
+// Windows x64 GitHub Release artifact packages, then writes its deterministic
+// lockfile. It never builds native packages locally.
 LODE_API InstallResult InstallLocal(
     const std::filesystem::path& packageRoot,
     const std::filesystem::path& standardLibraryRoot,

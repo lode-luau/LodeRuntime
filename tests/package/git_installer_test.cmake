@@ -20,7 +20,7 @@ file(WRITE "${git_source}/lode.json" [=[{
 ]=])
 file(WRITE "${git_source}/init.luau" [=[
 local task = require("@task")
-return { has_task = task ~= nil }
+return { has_task = task ~= nil, revision = "first" }
 ]=])
 file(WRITE "${git_source}/LICENSE" "MIT\n")
 
@@ -54,6 +54,7 @@ file(WRITE "${consumer_root}/lode.json" "{\n  \"name\": \"git_consumer\",\n  \"v
 file(WRITE "${consumer_root}/init.luau" [=[
 local git_signal = require("@git_signal")
 assert(git_signal.has_task == true, "Git package did not load its stdlib dependency")
+assert(git_signal.revision == "first", "Git package was not pinned to the locked commit")
 ]=])
 file(WRITE "${consumer_root}/LICENSE" "MIT\n")
 
@@ -97,8 +98,49 @@ execute_process(
     ERROR_VARIABLE error
 )
 if(NOT result EQUAL 0)
+   file(REMOVE_RECURSE "${git_source}" "${consumer_root}" "${cache_home}")
+   message(FATAL_ERROR "Runtime rejected the Git package installation:\n${output}\n${error}")
+endif()
+
+file(WRITE "${git_source}/init.luau" [=[
+local task = require("@task")
+return { has_task = task ~= nil, revision = "second" }
+]=])
+execute_process(COMMAND git -C "${git_source}" add init.luau)
+execute_process(
+    COMMAND git -C "${git_source}" commit --quiet -m "Advance Git package after lock"
+    RESULT_VARIABLE result
+    OUTPUT_VARIABLE output
+    ERROR_VARIABLE error
+)
+if(NOT result EQUAL 0)
     file(REMOVE_RECURSE "${git_source}" "${consumer_root}" "${cache_home}")
-    message(FATAL_ERROR "Runtime rejected the Git package installation:\n${output}\n${error}")
+    message(FATAL_ERROR "Git post-lock commit failed:\n${output}\n${error}")
+endif()
+
+file(REMOVE_RECURSE "${consumer_root}/lode_modules" "${consumer_root}/.config.luau")
+execute_process(
+    COMMAND "${CMAKE_COMMAND}" -E env "USERPROFILE=${cache_home}"
+        "${LODE_EXECUTABLE}" install --locked "${consumer_root}"
+    RESULT_VARIABLE result
+    OUTPUT_VARIABLE output
+    ERROR_VARIABLE error
+)
+if(NOT result EQUAL 0)
+    file(REMOVE_RECURSE "${git_source}" "${consumer_root}" "${cache_home}")
+    message(FATAL_ERROR "Locked Git install failed:\n${output}\n${error}")
+endif()
+
+execute_process(
+    COMMAND "${CMAKE_COMMAND}" -E env "USERPROFILE=${cache_home}"
+        "${LODE_EXECUTABLE}" "${consumer_root}/init.luau"
+    RESULT_VARIABLE result
+    OUTPUT_VARIABLE output
+    ERROR_VARIABLE error
+)
+if(NOT result EQUAL 0)
+    file(REMOVE_RECURSE "${git_source}" "${consumer_root}" "${cache_home}")
+    message(FATAL_ERROR "Runtime rejected the locked Git package:\n${output}\n${error}")
 endif()
 
 file(REMOVE_RECURSE "${git_source}" "${consumer_root}" "${cache_home}")

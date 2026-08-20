@@ -24,7 +24,7 @@ struct LockfileResult
 };
 
 // Builds the versioned lockfile document for a graph that has already been
-// validated. This does not resolve Git sources or select/download artifacts.
+// validated and resolved. It records selected GitHub artifacts when present.
 LODE_API LockfileResult BuildLockfile(const DependencyGraph& graph);
 
 // Writes a validated lockfile through a temporary file and an atomic replace.

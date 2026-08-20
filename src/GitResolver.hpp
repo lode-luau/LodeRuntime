@@ -31,4 +31,9 @@ LODE_API GitCheckoutResult CheckoutGitPackage(
     const std::string& repository,
     const std::filesystem::path& stagingDirectory);
 
+LODE_API GitCheckoutResult CheckoutGitPackageAtCommit(
+    const std::string& repository,
+    const std::string& commit,
+    const std::filesystem::path& stagingDirectory);
+
 } // namespace Lode::Package
