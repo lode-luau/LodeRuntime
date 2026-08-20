@@ -67,6 +67,15 @@ std::string RelativePackageReference(const DependencyGraph& graph, const Package
     return relative.generic_string();
 }
 
+std::string PackageReference(const DependencyGraph& graph, const PackageNode& package)
+{
+    if (package.source == DependencySource::Git)
+        return package.sourceReference;
+    if (package.source == DependencySource::Path)
+        return RelativePackageReference(graph, package);
+    return {};
+}
+
 bool PackageLess(const DependencyGraph& graph, size_t left, size_t right)
 {
     const PackageNode& a = graph.packages[left];
@@ -79,12 +88,15 @@ bool PackageLess(const DependencyGraph& graph, size_t left, size_t right)
     if (a.version != b.version)
         return a.version < b.version;
 
-    const std::string aReference = RelativePackageReference(graph, a);
-    const std::string bReference = RelativePackageReference(graph, b);
+    const std::string aReference = PackageReference(graph, a);
+    const std::string bReference = PackageReference(graph, b);
     if (aReference != bReference)
         return aReference < bReference;
 
-    return a.root.generic_string() < b.root.generic_string();
+    if (a.resolvedCommit != b.resolvedCommit)
+        return a.resolvedCommit < b.resolvedCommit;
+
+    return false;
 }
 
 void AddError(LockfileResult& result, std::string message)
@@ -169,8 +181,16 @@ LockfileResult BuildLockfile(const DependencyGraph& graph)
 
         if (package.source == DependencySource::Git)
         {
-            AddError(result, "Cannot write lode.lock: Git package resolution has not produced a commit for '" +
-                package.name + "'.");
+            if (package.sourceReference.empty())
+                AddError(result, "Cannot write lode.lock: Git package '" + package.name +
+                    "' has no repository reference.");
+            if (package.resolvedCommit.empty())
+                AddError(result, "Cannot write lode.lock: Git package '" + package.name +
+                    "' has no resolved commit.");
+            if (!package.sourceReference.empty())
+                packageDocument["reference"] = package.sourceReference;
+            if (!package.resolvedCommit.empty())
+                packageDocument["commit"] = package.resolvedCommit;
         }
         else if (package.source == DependencySource::Path)
         {

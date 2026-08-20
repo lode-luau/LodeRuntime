@@ -294,7 +294,7 @@ CacheIdentityResult ResolvePackageCacheIdentity(const DependencyGraph& graph,
         return result;
     }
 
-    if (package.source == DependencySource::Git)
+    if (package.source == DependencySource::Git && package.resolvedCommit.empty())
     {
         AddError(result, "Git package '" + package.name +
             "' has no resolved commit and cannot be assigned a cache identity.");
@@ -324,6 +324,17 @@ CacheIdentityResult ResolvePackageCacheIdentity(const DependencyGraph& graph,
             return result;
         }
         document["reference"] = *reference;
+    }
+    else if (package.source == DependencySource::Git)
+    {
+        if (package.sourceReference.empty())
+        {
+            AddError(result, "Git package '" + package.name +
+                "' has no repository reference for its cache identity.");
+            return result;
+        }
+        document["reference"] = package.sourceReference;
+        document["commit"] = package.resolvedCommit;
     }
 
     const std::string canonicalDocument = document.dump();

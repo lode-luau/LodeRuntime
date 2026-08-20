@@ -40,6 +40,8 @@ struct PackageNode
     std::string version;
     std::filesystem::path root;
     DependencySource source = DependencySource::Path;
+    std::string sourceReference;
+    std::string resolvedCommit;
     std::vector<DependencyEdge> dependencies;
 };
 

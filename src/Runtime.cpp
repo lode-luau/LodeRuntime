@@ -33,8 +33,9 @@ static fs::path FindStandardLibraryPath(const fs::path& executablePath)
         return {};
 
     const fs::path executableDirectory = executable.parent_path();
-    const std::array<fs::path, 2> candidates = {
+    const std::array<fs::path, 3> candidates = {
         executableDirectory.parent_path() / "stdlib",
+        executableDirectory.parent_path().parent_path() / "stdlib",
         executableDirectory / "stdlib"
     };
 
@@ -42,6 +43,8 @@ static fs::path FindStandardLibraryPath(const fs::path& executablePath)
     {
         if (fs::is_directory(candidate) && fs::is_regular_file(candidate / ".config.luau"))
             return fs::weakly_canonical(candidate, ec);
+        if (fs::is_directory(candidate / "modules"))
+            return fs::weakly_canonical(candidate / "modules", ec);
     }
 
     return {};

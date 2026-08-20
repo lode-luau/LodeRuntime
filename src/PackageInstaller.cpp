@@ -6,8 +6,11 @@
 #include "PackageConfig.hpp"
 #include "PackageLockfile.hpp"
 #include "PackageValidator.hpp"
+#include "GitResolver.hpp"
 #include "PathUtil.hpp"
+#include "nlohmann/json.hpp"
 
+#include <chrono>
 #include <fstream>
 #include <map>
 #include <set>
@@ -22,6 +25,7 @@ namespace
 
 namespace fs = std::filesystem;
 using Lode::Detail::PathToUtf8;
+using json = nlohmann::json;
 
 void AddError(InstallResult& result, std::string message)
 {
@@ -118,6 +122,174 @@ void RollbackMaterializedPackages(const fs::path& projectRoot,
             fs::remove_all(canonicalPackage, ec);
         }
     }
+}
+
+bool ResolveGitDependencies(DependencyGraph& graph,
+                             const fs::path& standardLibraryRoot,
+                             const fs::path& stagingDirectory,
+                             InstallResult& result)
+{
+    std::map<fs::path, size_t> packageIndexes;
+    for (size_t index = 0; index < graph.packages.size(); ++index)
+        packageIndexes.emplace(fs::weakly_canonical(graph.packages[index].root), index);
+
+    std::map<std::string, size_t> resolvedRepositories;
+    for (size_t packageIndex = 0; packageIndex < graph.packages.size(); ++packageIndex)
+    {
+        for (size_t edgeIndex = 0;
+             edgeIndex < graph.packages[packageIndex].dependencies.size();
+             ++edgeIndex)
+        {
+            if (graph.packages[packageIndex].dependencies[edgeIndex].source != DependencySource::Git ||
+                graph.packages[packageIndex].dependencies[edgeIndex].target)
+                continue;
+
+            const std::string repository =
+                graph.packages[packageIndex].dependencies[edgeIndex].sourceReference;
+            size_t targetIndex = 0;
+            auto resolved = resolvedRepositories.find(repository);
+            if (resolved != resolvedRepositories.end())
+            {
+                targetIndex = resolved->second;
+            }
+            else
+            {
+                const GitCheckoutResult checkout = CheckoutGitPackage(repository, stagingDirectory);
+                if (!checkout.IsValid())
+                {
+                    result.errors.insert(result.errors.end(),
+                        checkout.errors.begin(), checkout.errors.end());
+                    return false;
+                }
+
+                const ValidationReport packageValidation = Validate(
+                    checkout.packageRoot, ValidationMode::Source, standardLibraryRoot);
+                if (!packageValidation.IsValid())
+                {
+                    result.errors.insert(result.errors.end(),
+                        packageValidation.errors.begin(), packageValidation.errors.end());
+                    return false;
+                }
+
+                const DependencyGraph& resolvedGraph = packageValidation.dependencyGraph;
+                if (resolvedGraph.root >= resolvedGraph.packages.size())
+                {
+                    AddError(result, "Git package '" + repository +
+                        "' produced an invalid dependency graph.");
+                    return false;
+                }
+
+                const PackageNode& resolvedRoot = resolvedGraph.packages[resolvedGraph.root];
+                const DependencyEdge& edge = graph.packages[packageIndex].dependencies[edgeIndex];
+                if (!PackageVersionSatisfies(resolvedRoot.version, edge.requestedVersion))
+                {
+                    AddError(result, "Git dependency '" + edge.alias + "' requires version " +
+                        edge.requestedVersion + ", but the repository contains " +
+                        resolvedRoot.version + ".");
+                    return false;
+                }
+
+                std::ifstream manifestFile(resolvedRoot.root / "lode.json");
+                json manifest;
+                if (!manifestFile.is_open() || !(manifestFile >> manifest))
+                {
+                    AddError(result, "Cannot inspect Git package manifest for '" +
+                        resolvedRoot.name + "'.");
+                    return false;
+                }
+                if (manifest.contains("libraries") && manifest["libraries"].is_object() &&
+                    !manifest["libraries"].empty())
+                {
+                    AddError(result, "Git native package '" + resolvedRoot.name +
+                        "' requires a published artifact; native Git artifact installation is not implemented.");
+                    return false;
+                }
+
+                const fs::path canonicalRoot = fs::weakly_canonical(checkout.packageRoot);
+                auto existingPackage = packageIndexes.find(canonicalRoot);
+                if (existingPackage != packageIndexes.end())
+                {
+                    targetIndex = existingPackage->second;
+                    PackageNode& existing = graph.packages[targetIndex];
+                    existing.source = DependencySource::Git;
+                    existing.sourceReference = repository;
+                    existing.resolvedCommit = checkout.commit;
+                }
+                else
+                {
+                    targetIndex = graph.packages.size();
+                    graph.packages.push_back(PackageNode{
+                        resolvedRoot.name,
+                        resolvedRoot.version,
+                        canonicalRoot,
+                        DependencySource::Git,
+                        repository,
+                        checkout.commit,
+                        {}
+                    });
+                    packageIndexes.emplace(canonicalRoot, targetIndex);
+                }
+
+                std::vector<size_t> remapped(resolvedGraph.packages.size());
+                remapped[resolvedGraph.root] = targetIndex;
+                for (size_t resolvedIndex = 0;
+                     resolvedIndex < resolvedGraph.packages.size();
+                     ++resolvedIndex)
+                {
+                    if (resolvedIndex == resolvedGraph.root)
+                        continue;
+
+                    const PackageNode& resolvedPackage = resolvedGraph.packages[resolvedIndex];
+                    const fs::path resolvedPath = fs::weakly_canonical(resolvedPackage.root);
+                    auto package = packageIndexes.find(resolvedPath);
+                    if (package != packageIndexes.end())
+                    {
+                        remapped[resolvedIndex] = package->second;
+                        continue;
+                    }
+
+                    remapped[resolvedIndex] = graph.packages.size();
+                    graph.packages.push_back(PackageNode{
+                        resolvedPackage.name,
+                        resolvedPackage.version,
+                        resolvedPath,
+                        resolvedPackage.source,
+                        resolvedPackage.sourceReference,
+                        resolvedPackage.resolvedCommit,
+                        {}
+                    });
+                    packageIndexes.emplace(resolvedPath, remapped[resolvedIndex]);
+                }
+
+                for (size_t resolvedIndex = 0;
+                     resolvedIndex < resolvedGraph.packages.size();
+                     ++resolvedIndex)
+                {
+                    const PackageNode& resolvedPackage = resolvedGraph.packages[resolvedIndex];
+                    PackageNode& destination = graph.packages[remapped[resolvedIndex]];
+                    if (!destination.dependencies.empty())
+                        continue;
+
+                    for (const DependencyEdge& resolvedEdge : resolvedPackage.dependencies)
+                    {
+                        if (resolvedEdge.scope == DependencyScope::Development)
+                            continue;
+
+                        DependencyEdge edge = resolvedEdge;
+                        if (edge.target)
+                            edge.target = remapped[*edge.target];
+                        destination.dependencies.push_back(std::move(edge));
+                    }
+                }
+
+                resolvedRepositories.emplace(repository, targetIndex);
+            }
+
+            graph.packages[packageIndex].dependencies[edgeIndex].target = targetIndex;
+        }
+    }
+
+    return true;
 }
 
 } // namespace
@@ -267,7 +439,7 @@ InstallResult InstallLocked(const fs::path& packageRoot,
         return result;
     }
 
-    const DependencyGraph& graph = validation.dependencyGraph;
+    DependencyGraph graph = validation.dependencyGraph;
     const fs::path root = graph.packages[graph.root].root;
     const std::vector<bool> installablePackages = CollectInstallablePackages(
         graph, includeDevelopmentDependencies);
@@ -305,14 +477,8 @@ InstallResult InstallLocal(const fs::path& packageRoot,
         return result;
     }
 
-    const DependencyGraph& graph = validation.dependencyGraph;
+    DependencyGraph graph = validation.dependencyGraph;
     const fs::path root = graph.packages[graph.root].root;
-    const LockfileResult lock = BuildLockfile(graph);
-    if (!lock.IsValid())
-    {
-        result.errors = lock.errors;
-        return result;
-    }
 
     const CacheLayoutResult cache = ResolvePackageCacheLayout();
     if (!cache.IsValid())
@@ -321,14 +487,39 @@ InstallResult InstallLocal(const fs::path& packageRoot,
         return result;
     }
 
+    const auto timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    const fs::path gitStaging = cache.layout->stagingDirectory /
+        ("git-" + std::to_string(timestamp));
+    if (!ResolveGitDependencies(graph, standardLibraryRoot, gitStaging, result))
+    {
+        std::error_code ec;
+        fs::remove_all(gitStaging, ec);
+        return result;
+    }
+
+    const LockfileResult lock = BuildLockfile(graph);
+    if (!lock.IsValid())
+    {
+        result.errors = lock.errors;
+        std::error_code ec;
+        fs::remove_all(gitStaging, ec);
+        return result;
+    }
+
     result = InstallResolvedGraph(graph, root, *cache.layout,
                                   includeDevelopmentDependencies);
     if (!result.IsValid())
+    {
+        std::error_code ec;
+        fs::remove_all(gitStaging, ec);
         return result;
+    }
 
     const LockfileResult written = WriteLockfile(root / "lode.lock", graph);
     if (!written.IsValid())
         result.errors = written.errors;
+    std::error_code ec;
+    fs::remove_all(gitStaging, ec);
     return result;
 }
 

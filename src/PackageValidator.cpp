@@ -299,6 +299,8 @@ size_t AddGraphNode(const fs::path& packageRoot,
         manifest.value("version", ""),
         canonicalRoot,
         source,
+        "",
+        "",
         {}
     });
     return index;
@@ -575,6 +577,12 @@ void ValidateLibraryEntry(const fs::path& root,
 }
 
 } // namespace
+
+bool PackageVersionSatisfies(const std::string& actual,
+                             const std::string& requirement)
+{
+    return VersionSatisfies(actual, requirement);
+}
 
 ValidationReport Validate(const fs::path& packageRoot)
 {

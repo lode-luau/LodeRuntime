@@ -43,6 +43,12 @@ std::string SerializeDependencyGraph(const DependencyGraph& graph)
             { "dependencies", json::array() }
         };
 
+        if (package.source == DependencySource::Git)
+        {
+            packageDocument["reference"] = package.sourceReference;
+            packageDocument["commit"] = package.resolvedCommit;
+        }
+
         for (const DependencyEdge& dependency : package.dependencies)
         {
             json dependencyDocument = {
