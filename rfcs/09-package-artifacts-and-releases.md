@@ -69,8 +69,10 @@ creates the Windows x64 archive and its sibling `.sha256` file, extracts the
 archive into a temporary staging directory, and validates the extracted
 package before succeeding. The archive contains `lode.json`, `init.luau`,
 `LICENSE`, optional `README.md`/`NOTICE`, Luau sources outside `tests/`, and
-runtime libraries under `libs/`. It excludes `.config.luau`, CMake files,
-build output, and test files. The default output is
+runtime libraries under `libs/`. Luau sources may be spread across nested
+module directories; `init.luau` is only the package root convention, not the
+only source file included. It excludes `.config.luau`, CMake files, build
+output, and test files. The default output is
 `out/lode-<name>-<version>-windows-x64.zip` under the package root.
 
 ## Native library paths

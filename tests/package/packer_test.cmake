@@ -11,6 +11,10 @@ file(MAKE_DIRECTORY "${package_root}" "${cache_home}")
 
 file(GLOB package_entries "${PROJECT_SOURCE_DIR}/tests/package/stdlib_dependency_consumer/*")
 file(COPY ${package_entries} DESTINATION "${package_root}")
+file(MAKE_DIRECTORY "${package_root}/modules/example" "${package_root}/tests")
+file(WRITE "${package_root}/modules/example/init.luau" "return require('./helper')\n")
+file(WRITE "${package_root}/modules/example/helper.luau" "return { value = 42 }\n")
+file(WRITE "${package_root}/tests/ignored.luau" "error('test source must not be packaged')\n")
 
 execute_process(
     COMMAND "${CMAKE_COMMAND}" -E env "USERPROFILE=${cache_home}"
@@ -39,7 +43,13 @@ if(NOT result EQUAL 0)
     message(FATAL_ERROR "packed archive could not be listed:\n${error}")
 endif()
 
-foreach(required_entry IN ITEMS "lode.json" "init.luau" "LICENSE" "lode_modules/signal/init.luau")
+foreach(required_entry IN ITEMS
+    "lode.json"
+    "init.luau"
+    "LICENSE"
+    "lode_modules/signal/init.luau"
+    "modules/example/init.luau"
+    "modules/example/helper.luau")
     string(FIND "${archive_listing}" "${required_entry}" position)
     if(position LESS 0)
         file(REMOVE_RECURSE "${package_root}" "${cache_home}" "${TEST_BINARY_DIR}/lode-packer-output")
@@ -51,6 +61,12 @@ string(FIND "${archive_listing}" ".config.luau" config_position)
 if(NOT config_position LESS 0)
     file(REMOVE_RECURSE "${package_root}" "${cache_home}" "${TEST_BINARY_DIR}/lode-packer-output")
     message(FATAL_ERROR "Packed archive contains generated .config.luau:\n${archive_listing}")
+endif()
+
+string(FIND "${archive_listing}" "tests/ignored.luau" test_position)
+if(NOT test_position LESS 0)
+    file(REMOVE_RECURSE "${package_root}" "${cache_home}" "${TEST_BINARY_DIR}/lode-packer-output")
+    message(FATAL_ERROR "Packed archive contains a test Luau source:\n${archive_listing}")
 endif()
 
 file(REMOVE_RECURSE "${package_root}" "${cache_home}" "${TEST_BINARY_DIR}/lode-packer-output")

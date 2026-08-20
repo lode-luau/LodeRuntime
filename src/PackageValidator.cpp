@@ -165,8 +165,13 @@ std::optional<fs::path> FindStdlibRoot(const fs::path& packageRoot,
             return current;
 
         const fs::path siblingModules = current / "modules";
+        // A package may legitimately keep Luau modules under its own
+        // modules/ directory. A package root with lode.json is not the
+        // repository-level stdlib catalog, even when installation generated
+        // a .config.luau beside it.
         if (fs::is_directory(siblingModules) &&
-            fs::is_regular_file(current / ".config.luau"))
+            fs::is_regular_file(current / ".config.luau") &&
+            !fs::is_regular_file(current / "lode.json"))
             return siblingModules;
 
         const fs::path parent = current.parent_path();
