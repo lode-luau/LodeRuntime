@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 #include "GitResolver.hpp"
 
+#include "PackageValidator.hpp"
 #include "PathUtil.hpp"
 #include "Sha256.hpp"
 
@@ -11,9 +12,12 @@
 #include <cctype>
 #include <filesystem>
 #include <fstream>
+#include <map>
+#include <regex>
 #include <sstream>
 #include <string_view>
 #include <system_error>
+#include <tuple>
 
 #if defined(_WIN32)
 #include <Windows.h>
@@ -224,6 +228,119 @@ ProcessResult RunGit(const std::vector<std::string>& arguments)
 #endif
 
 } // namespace
+
+GitTagResolutionResult ResolveGitTag(const std::string& repository,
+                                     const std::string& requirement)
+{
+    GitTagResolutionResult result;
+    if (repository.empty())
+    {
+        result.errors.push_back("Cannot resolve Git dependency: repository reference is empty.");
+        return result;
+    }
+
+    if (!requirement.empty() && !PackageVersionSatisfies(requirement, requirement) &&
+        requirement[0] != '^' && requirement[0] != '~')
+    {
+        result.errors.push_back("Git dependency version requirement '" + requirement +
+            "' is not a valid exact or ^/~ SemVer requirement.");
+        return result;
+    }
+
+    const ProcessResult tags = RunGit({
+        "ls-remote", "--tags", NormalizeRepositoryReference(repository)
+    });
+    if (tags.exitCode != 0)
+    {
+        result.errors.push_back("Cannot list Git tags for '" + repository + "': " +
+            Trim(tags.output.empty() ? tags.error : tags.output));
+        return result;
+    }
+
+    struct Candidate
+    {
+        std::string version;
+        std::string tag;
+        std::string commit;
+        int major = 0;
+        int minor = 0;
+        int patch = 0;
+        bool prerelease = false;
+    };
+
+    std::map<std::string, Candidate> candidates;
+    const std::regex tagPattern(
+        R"(^refs/tags/(v([0-9]+)\.([0-9]+)\.([0-9]+)(-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)(\^\{\})?$)"
+    );
+    std::istringstream lines(tags.output);
+    std::string line;
+    while (std::getline(lines, line))
+    {
+        if (!line.empty() && line.back() == '\r')
+            line.pop_back();
+        std::istringstream fields(line);
+        std::string commit;
+        std::string reference;
+        if (!(fields >> commit >> reference))
+            continue;
+
+        std::smatch match;
+        if (!std::regex_match(reference, match, tagPattern))
+            continue;
+
+        Candidate& candidate = candidates[match[2].str() + "." +
+            match[3].str() + "." + match[4].str() +
+            (match[5].matched ? match[5].str() : "")];
+        candidate.version = match[2].str() + "." + match[3].str() + "." +
+            match[4].str() + (match[5].matched ? match[5].str() : "");
+        candidate.tag = match[1].str();
+        try
+        {
+            candidate.major = std::stoi(match[2].str());
+            candidate.minor = std::stoi(match[3].str());
+            candidate.patch = std::stoi(match[4].str());
+        }
+        catch (const std::exception&)
+        {
+            candidates.erase(candidate.version);
+            continue;
+        }
+        candidate.prerelease = match[5].matched;
+        if (reference.ends_with("^{}"))
+            candidate.commit = commit;
+        else if (candidate.commit.empty())
+            candidate.commit = commit;
+    }
+
+    const Candidate* selected = nullptr;
+    for (const auto& [version, candidate] : candidates)
+    {
+        if (candidate.commit.empty() ||
+            (!requirement.empty() && !PackageVersionSatisfies(version, requirement)))
+            continue;
+        if (requirement.empty() && candidate.prerelease)
+            continue;
+
+        if (!selected || std::tie(candidate.major, candidate.minor, candidate.patch,
+                                  candidate.prerelease) >
+                             std::tie(selected->major, selected->minor, selected->patch,
+                                      selected->prerelease))
+            selected = &candidate;
+    }
+
+    if (!selected)
+    {
+        result.errors.push_back("No Git tag matching version requirement '" +
+            (requirement.empty() ? "latest stable" : requirement) +
+            "' was found for '" + repository + "'.");
+        return result;
+    }
+
+    result.version = selected->version;
+    result.tag = selected->tag;
+    result.commit = selected->commit;
+    return result;
+}
 
 GitCheckoutResult CheckoutGitPackageInternal(const std::string& repository,
                                              const std::string& requestedCommit,

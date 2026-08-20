@@ -11,6 +11,8 @@ The package manager resolves package requirements and writes the result into a
 lockfile and Luau configuration. The manifest package name identifies the
 package, but it does not automatically become a `require` alias. A resolved
 package is identified by its exact version and source as well as its name.
+`lode add` adds a Git dependency to the manifest and then runs the same
+installation path as `lode install`.
 
 The existing `.config.luau` format remains in use because it is consumed by the
 Luau compiler and LSP. The package manager may update managed aliases in that
@@ -69,8 +71,34 @@ manager must validate that the resolved package manifest has the expected
 
 Published versions use SemVer without a leading `v` in the manifest. Git
 release tags use `vMAJOR.MINOR.PATCH`, for example `v1.2.0`. A Git branch may be
-used for local development, but release and lockfile resolution must record a
-commit rather than relying on a moving branch or the word `latest`.
+used for local development outside the package-manager flow, but package
+resolution requires a SemVer tag and records its commit rather than relying on
+a moving branch or the word `latest`.
+
+## Adding a Git dependency
+
+`lode install` installs the dependency graph already declared by the project.
+It does not interpret a repository argument as a package request. The command
+that adds a repository dependency is:
+
+```text
+lode add [--dev] owner/repository[@version] [package-root]
+```
+
+The repository shorthand is canonicalized to `github:owner/repository` in
+`lode.json`. A local Git repository path and a full supported Git URL may also
+be used when developing a package.
+
+When `@version` is omitted, Lode lists the repository's `v<SemVer>` tags and
+selects the highest stable version. With `@1.2.0`, it selects exactly
+`v1.2.0`; the existing exact, `^`, and `~` requirement forms are accepted.
+The selected version is written to the manifest when no requirement was
+provided. The command then runs unlocked installation, which writes the
+lockfile and materializes the alias.
+
+Tag selection never uses a moving `latest` tag or the repository's default
+branch. Every selected tag is resolved to a commit and recorded in
+`lode.lock`.
 
 ## Resolved package identity
 
@@ -337,38 +365,36 @@ The current installer commands are:
     lode install --locked [--dev] [package-root]
 
 The unlocked resolver validates the current source graph, supports stdlib and
-local path packages already present on disk, and resolves a Git dependency by
-cloning its default revision and recording the resulting commit. Git source
-installation is currently limited to pure Luau packages; a Git package with a
-`libraries` declaration is rejected until artifact download and verification
-are implemented. Resolved packages are copied into the global cache,
-materialized under the project's lode_modules directory, and reflected in
-.config.luau and the deterministic lode.lock.
+local path packages already present on disk, and resolves every Git dependency
+by selecting the highest matching `v<SemVer>` tag and checking out its commit.
+Pure Luau Git packages are copied from that checkout. A native Git package must
+use the GitHub Release artifact contract described by RFC 09; the selected
+`v<version>` release is downloaded, checked, and copied into the global cache.
+Resolved packages are materialized under the project's `lode_modules`
+directory and reflected in `.config.luau` and the deterministic `lode.lock`.
 
-`--locked` performs the same local materialization only after validating the
-existing lockfile and never changes it. Locked Git installation is not yet
-implemented because the current locked path cannot retrieve a package from its
-recorded commit or select its published artifact. Without --dev, root
+`--locked` performs the same materialization only after validating the existing
+lockfile and never changes it. For Git packages it checks out the exact commit
+and verifies the exact locked native artifact, when present. Without --dev, root
 devDependencies and the runtime dependencies reachable only through those
 development roots are not materialized. With --dev, those root development
 packages and their runtime dependency subgraphs are materialized; a dependency
 package's own devDependencies remain excluded.
 
 The runtime contains the SHA-256 verifier, safe-ZIP staging, and GitHub Release
-download path for the current published target: Windows x64. An unlocked Git
-package with a `libraries` declaration must use the generated release contract
-(`v<version>`, `lode-<name>-<version>-windows-x64.zip`, and its `.sha256`
-asset). The downloaded package is validated as an artifact before entering the
-global cache. GitHub is the source; there is no Lode registry or `gh` runtime
-dependency.
+download path for the current published target: Windows x64. A Git package with
+a `libraries` declaration must use the generated release contract (`v<version>`,
+`lode-<name>-<version>-windows-x64.zip`, and its `.sha256` asset). The downloaded
+package is validated as an artifact before entering the global cache. GitHub is
+the source; there is no Lode registry or `gh` runtime dependency.
 
 `--locked` clones the exact Git commit recorded by the lockfile and downloads
 the same release asset only when its release, asset name, ABI, and checksum
 match the locked artifact record. A Git package that is not a supported
 GitHub Release package, or a package targeting another runtime platform, is
-rejected explicitly. The Git
-declaration has no branch/ref field in v1; unlocked resolution follows the
-repository’s default revision and pins its commit in `lode.lock`.
+rejected explicitly. The Git declaration has no branch/ref field in v1;
+unlocked resolution follows SemVer tags and pins the selected commit in
+`lode.lock`.
 
 ## Version conflicts
 
