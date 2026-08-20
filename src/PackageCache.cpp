@@ -337,6 +337,18 @@ CacheIdentityResult ResolvePackageCacheIdentity(const DependencyGraph& graph,
         document["commit"] = package.resolvedCommit;
     }
 
+    if (package.artifact)
+    {
+        document["artifact"] = {
+            { "platform", package.artifact->platform },
+            { "architecture", package.artifact->architecture },
+            { "abi", package.artifact->abi },
+            { "release", package.artifact->release },
+            { "asset", package.artifact->asset },
+            { "sha256", package.artifact->sha256 }
+        };
+    }
+
     const std::string canonicalDocument = document.dump();
     const std::string digest = Lode::Detail::Sha256Hex(canonicalDocument);
 

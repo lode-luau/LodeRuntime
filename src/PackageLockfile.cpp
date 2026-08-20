@@ -206,6 +206,18 @@ LockfileResult BuildLockfile(const DependencyGraph& graph)
             }
         }
 
+        if (package.artifact)
+        {
+            packageDocument["artifact"] = {
+                { "platform", package.artifact->platform },
+                { "architecture", package.artifact->architecture },
+                { "abi", package.artifact->abi },
+                { "release", package.artifact->release },
+                { "asset", package.artifact->asset },
+                { "sha256", package.artifact->sha256 }
+            };
+        }
+
         std::vector<const DependencyEdge*> dependencies;
         dependencies.reserve(package.dependencies.size());
         for (const DependencyEdge& dependency : package.dependencies)

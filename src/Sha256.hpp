@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cstdint>
+#include <filesystem>
 #include <string>
 #include <string_view>
 
@@ -13,5 +14,6 @@ namespace Lode::Detail
 std::array<std::uint8_t, 32> Sha256(std::string_view data);
 std::string ToHex(const std::array<std::uint8_t, 32>& bytes);
 std::string Sha256Hex(std::string_view data);
+std::string Sha256FileHex(const std::filesystem::path& path);
 
 } // namespace Lode::Detail

@@ -92,10 +92,10 @@ unit. A lock entry may record the Git commit that produced the release when the
 source is Git-based, but the package manager must also record the artifact
 checksum.
 
-Package asset names are:
+Package asset names currently produced by the generated package workflow are:
 
 ```text
-<package-name>-1.0.0-windows-x64.zip
+lode-<package-name>-1.0.0-windows-x64.zip
 lode-stdlib-task-1.0.0-windows-x64.zip
 lode-windows-x64-1.0.0-nightly.YYYYMMDD.N.zip
 lode-sdk-windows-x64-1.0.0-nightly.YYYYMMDD.N.zip
@@ -133,10 +133,13 @@ package claims that target is available. Native artifacts without both
 
 ## Checksums and extraction
 
-The package manager must verify the checksum before using an archive. It must
+The package manager must verify the checksum before using an archive. Lode's
+runtime contains the SHA-256 verifier and ZIP extractor for this path; it does
+not call PowerShell, `tar`, `cmake`, or `gh` to install packages. It must
 extract into a staging directory, reject archive paths that escape that
 directory, validate the package root, and move the completed installation into
-the global cache atomically.
+the global cache atomically. Release selection and download remain the next
+installer block.
 
 An incomplete download or extraction must never become an installable package.
 

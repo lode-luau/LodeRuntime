@@ -136,12 +136,23 @@ FetchContent_Declare(
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
 
+# ZIP extraction is part of the package-manager runtime path. Keep the
+# implementation inside lode instead of depending on PowerShell, tar, cmake,
+# or the GitHub CLI being installed on the user's machine.
+FetchContent_Declare(
+    miniz
+    GIT_REPOSITORY https://github.com/richgel999/miniz.git
+    GIT_TAG        2.2.0
+    GIT_SHALLOW    TRUE
+    GIT_PROGRESS   TRUE
+)
+
 # FetchContent projects are build dependencies, not part of Lode's install
 # tree. Prevent their own install scripts from being pulled into the SDK
 # package; Lode exports the targets and headers it intentionally supports
 # below.
 set(CMAKE_SKIP_INSTALL_RULES TRUE)
-FetchContent_MakeAvailable(luau json libuv rapidjson)
+FetchContent_MakeAvailable(luau json libuv rapidjson miniz)
 unset(CMAKE_SKIP_INSTALL_RULES)
 
 include_directories(
@@ -173,6 +184,7 @@ set(LODE_CORE_SOURCES
     src/Module.cpp
     src/Registry.cpp
     src/ModuleLoader.cpp
+    src/PackageArchive.cpp
     src/PackageValidator.cpp
     src/PackageGraph.cpp
     src/PackageLockfile.cpp
@@ -224,6 +236,7 @@ set(LODE_CORE_HEADERS
     src/PackageCache.hpp
     src/PackageConfig.hpp
     src/PackageInstaller.hpp
+    src/PackageArchive.hpp
     src/GitResolver.hpp
     src/CiGenerator.hpp
     src/Platform/Platform.hpp
@@ -234,8 +247,19 @@ set(LODE_CORE_HEADERS
 )
 
 # LodeCore SHARED Library Target (Shared DLL linked dynamically by runtime and native modules)
-add_library(LodeCore SHARED ${LODE_CORE_SOURCES} ${LODE_CORE_HEADERS})
-target_compile_definitions(LodeCore PRIVATE LODE_CORE_BUILD)
+add_library(LodeCore SHARED
+    ${LODE_CORE_SOURCES}
+    ${LODE_CORE_HEADERS}
+    "${miniz_SOURCE_DIR}/miniz.c"
+    "${miniz_SOURCE_DIR}/miniz_zip.c"
+    "${miniz_SOURCE_DIR}/miniz_tinfl.c"
+    "${miniz_SOURCE_DIR}/miniz_tdef.c"
+)
+target_compile_definitions(LodeCore PRIVATE LODE_CORE_BUILD MINIZ_STATIC_DEFINE)
+target_include_directories(LodeCore PRIVATE
+    "${miniz_SOURCE_DIR}"
+    "${miniz_BINARY_DIR}"
+)
 
 # Compile each target (runtime + every native module) with its own build
 # configuration name. The loader compares a module's LodeModuleConfig export

@@ -102,6 +102,7 @@ platform
 architecture
 runtime configuration when applicable
 Lode ABI identifier
+artifact release, asset name, and SHA-256 when a published artifact is selected
 ```
 
 This prevents an artifact for one target or ABI from replacing another artifact
@@ -353,8 +354,11 @@ development roots are not materialized. With --dev, those root development
 packages and their runtime dependency subgraphs are materialized; a dependency
 package's own devDependencies remain excluded.
 
-Neither mode downloads release archives, extracts ZIP files, or builds native
-packages. Those operations remain separate implementation blocks. The Git
+The runtime now contains the SHA-256 verifier and safe-ZIP staging primitives,
+and the graph/lockfile model can record a selected artifact. Neither installer
+mode yet selects or downloads GitHub Release assets or builds native packages.
+A Git package with a `libraries` declaration is therefore still rejected with
+an explicit published-artifact error. The Git
 declaration has no branch/ref field in v1; unlocked resolution follows the
 repository's default revision and pins its commit in `lode.lock`.
 

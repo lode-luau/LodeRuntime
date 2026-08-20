@@ -34,6 +34,16 @@ struct DependencyEdge
     DependencyScope scope = DependencyScope::Runtime;
 };
 
+struct PackageArtifact
+{
+    std::string platform;
+    std::string architecture;
+    std::string abi;
+    std::string release;
+    std::string asset;
+    std::string sha256;
+};
+
 struct PackageNode
 {
     std::string name;
@@ -42,6 +52,7 @@ struct PackageNode
     DependencySource source = DependencySource::Path;
     std::string sourceReference;
     std::string resolvedCommit;
+    std::optional<PackageArtifact> artifact;
     std::vector<DependencyEdge> dependencies;
 };
 

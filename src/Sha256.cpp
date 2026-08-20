@@ -3,6 +3,8 @@
 #include "Sha256.hpp"
 
 #include <bit>
+#include <fstream>
+#include <stdexcept>
 #include <vector>
 
 namespace Lode::Detail
@@ -100,6 +102,20 @@ std::string ToHex(const std::array<std::uint8_t, 32>& bytes)
 std::string Sha256Hex(std::string_view data)
 {
     return ToHex(Sha256(data));
+}
+
+std::string Sha256FileHex(const std::filesystem::path& path)
+{
+    std::ifstream file(path, std::ios::binary);
+    if (!file.is_open())
+        throw std::runtime_error("Cannot open file for SHA-256: " + path.string());
+
+    std::vector<std::uint8_t> data((std::istreambuf_iterator<char>(file)),
+                                   std::istreambuf_iterator<char>());
+    if (file.bad())
+        throw std::runtime_error("Cannot read file for SHA-256: " + path.string());
+
+    return ToHex(Sha256(std::string_view(reinterpret_cast<const char*>(data.data()), data.size())));
 }
 
 } // namespace Lode::Detail
