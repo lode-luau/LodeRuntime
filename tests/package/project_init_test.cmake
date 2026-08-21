@@ -1,5 +1,5 @@
-if(NOT DEFINED LODE_EXECUTABLE OR NOT DEFINED TEST_BINARY_DIR OR NOT DEFINED LODE_BUILD_DIR)
-    message(FATAL_ERROR "project_init_test.cmake requires LODE_EXECUTABLE, TEST_BINARY_DIR and LODE_BUILD_DIR")
+if(NOT DEFINED LODE_EXECUTABLE OR NOT DEFINED TEST_BINARY_DIR OR NOT DEFINED LODE_BUILD_DIR OR NOT DEFINED LODE_CONFIGURATION)
+    message(FATAL_ERROR "project_init_test.cmake requires LODE_EXECUTABLE, TEST_BINARY_DIR, LODE_BUILD_DIR and LODE_CONFIGURATION")
 endif()
 
 set(test_root "${TEST_BINARY_DIR}/lode-project-init-test")
@@ -64,7 +64,7 @@ endif()
 
 set(sdk_root "${test_root}/sdk")
 execute_process(
-    COMMAND "${CMAKE_COMMAND}" --install "${LODE_BUILD_DIR}" --config Debug --component LodeSDK --prefix "${sdk_root}"
+    COMMAND "${CMAKE_COMMAND}" --install "${LODE_BUILD_DIR}" --config "${LODE_CONFIGURATION}" --component LodeSDK --prefix "${sdk_root}"
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
 if(NOT result EQUAL 0)
     message(FATAL_ERROR "Could not install the current SDK for the generated native project:\n${output}\n${error}")
@@ -72,15 +72,15 @@ endif()
 execute_process(
     COMMAND "${CMAKE_COMMAND}" -S "${native_root}" -B "${native_root}/build"
         "-DCMAKE_PREFIX_PATH=${sdk_root}"
-        "-DCMAKE_CONFIGURATION_TYPES=Debug"
+        "-DCMAKE_CONFIGURATION_TYPES=${LODE_CONFIGURATION}"
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
 if(NOT result EQUAL 0)
     message(FATAL_ERROR "Generated native project did not configure:\n${output}\n${error}")
 endif()
 execute_process(
-    COMMAND "${CMAKE_COMMAND}" --build "${native_root}/build" --config Debug
+    COMMAND "${CMAKE_COMMAND}" --build "${native_root}/build" --config "${LODE_CONFIGURATION}"
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
-if(NOT result EQUAL 0 OR NOT EXISTS "${native_root}/libs/windows/x64/Debug/native_project.dll")
+if(NOT result EQUAL 0 OR NOT EXISTS "${native_root}/libs/windows/x64/${LODE_CONFIGURATION}/native_project.dll")
     message(FATAL_ERROR "Generated native project did not build for the host:\n${output}\n${error}")
 endif()
 

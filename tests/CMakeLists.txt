@@ -172,6 +172,7 @@ add_test(
         -DLODE_EXECUTABLE=$<TARGET_FILE:lode>
         -DTEST_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}
         -DLODE_BUILD_DIR=${CMAKE_BINARY_DIR}
+        -DLODE_CONFIGURATION=$<CONFIG>
         -P "${CMAKE_SOURCE_DIR}/tests/package/project_init_test.cmake"
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
 )
