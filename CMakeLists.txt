@@ -424,6 +424,13 @@ configure_package_config_file(
     INSTALL_DESTINATION "${LODE_INSTALL_CMAKEDIR}"
 )
 
+# LodeConfigVersion stays at PROJECT_VERSION (1.0.0) even for nightly
+# builds (1.0.0-nightly.YYYYMMDD.N). The nightly tag is prerelease per SemVer
+# and CMake's version comparison treats 1.0.0-nightly < 1.0.0, so exposing the
+# nightly string here would break find_package(Lode 1.0.0). The exact nightly
+# is authoritative in the SDK's VERSION file and lode-sdk.json (see
+# nightly.yml:138 / cmake/lode-sdk.json.in), while the CMake package version
+# remains 1.0.0 with SameMajorVersion compatibility.
 write_basic_package_version_file(
     "${CMAKE_CURRENT_BINARY_DIR}/LodeConfigVersion.cmake"
     VERSION "${PROJECT_VERSION}"

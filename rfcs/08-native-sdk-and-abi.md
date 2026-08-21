@@ -154,6 +154,15 @@ verifies its SHA-256 checksum, and sets `CMAKE_PREFIX_PATH` to its extracted
 prefix. The package manager stores archives by checksum and extracted SDKs in
 the global `.lode` cache; no project-local `.lode` directory is used.
 
+> **Implementation note:** `CMakeLists.txt:427` keeps `LodeConfigVersion.cmake`
+> at `PROJECT_VERSION` (`1.0.0`) even for nightly `1.0.0-nightly.YYYYMMDD.N`
+> builds. CMake treats `1.0.0-nightly` < `1.0.0` (prerelease), so exposing the
+> nightly string as the CMake package version would make
+> `find_package(Lode 1.0.0)` fail on nightly SDKs. The exact nightly is
+> authoritative in the SDK's `VERSION` file and `lode-sdk.json`
+> (`nightly.yml:138`, `cmake/lode-sdk.json.in`); the CMake package version
+> stays `1.0.0` with `SameMajorVersion` compatibility.
+
 The package manager never places SDK link instructions in `lode.json`.
 
 ## Native dependency ownership

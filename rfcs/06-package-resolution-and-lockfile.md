@@ -452,3 +452,11 @@ runtime-owned stdlib fallback is independent of dependency resolution. Until
 the package manager generates project and package-local `.config.luau` files,
 existing relative requires and manually configured aliases remain the
 supported behavior.
+
+> **Limitation (2026-08-21):** `lode install` currently flattens the graph
+> into a single `lode_modules/` + root `.config.luau` (`src/PackageInstaller.cpp:973`).
+> Per-package `.config.luau` isolation for transitive version conflicts
+> (`06:443:447`) is not yet implemented — incompatible transitive versions
+> are reported as an alias collision (`PackageInstaller.cpp:1016`) instead of
+> being isolated in package-local contexts. This is tracked as future work and
+> does not affect single-version graphs.
