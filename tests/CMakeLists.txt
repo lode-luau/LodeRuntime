@@ -178,6 +178,14 @@ add_test(
 set_tests_properties(package_project_init PROPERTIES RUN_SERIAL TRUE)
 
 add_test(
+    NAME package_module_release_targets
+    COMMAND ${CMAKE_COMMAND}
+        -DPROJECT_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -P "${CMAKE_SOURCE_DIR}/tests/package/module_release_targets_test.cmake"
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+)
+
+add_test(
     NAME package_packer
     COMMAND ${CMAKE_COMMAND}
         -DLODE_EXECUTABLE=$<TARGET_FILE:lode>

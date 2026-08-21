@@ -18,5 +18,8 @@
       "x64": "libs/macos/x64/filesystem.dylib",
       "arm64": "libs/macos/arm64/filesystem.dylib"
     }
-  }
+  },
+  "releaseTargets": [
+    { "platform": "windows", "architecture": "x64" }
+  ]
 }
