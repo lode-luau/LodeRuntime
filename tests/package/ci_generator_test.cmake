@@ -13,8 +13,14 @@ file(WRITE "${package_root}/lode.json" [=[{
   "libraries": {
     "windows": {
       "x64": "libs/windows/x64/ci_generator_package.dll"
+    },
+    "linux": {
+      "x64": "libs/linux/x64/ci_generator_package.so"
     }
   },
+  "releaseTargets": [
+    { "platform": "windows", "architecture": "x64" }
+  ],
   "dependencies": {
     "example": {
       "git": "https://github.com/example/example.git",
@@ -94,6 +100,38 @@ string(FIND "${workflow}" "LODE_SDK_VERSION: \"${sdk_version}\"" position)
 if(position LESS 0)
     file(REMOVE_RECURSE "${package_root}")
     message(FATAL_ERROR "ci update did not preserve the pinned SDK version")
+endif()
+
+string(FIND "${workflow}" "native-linux-x64" linux_job_position)
+if(NOT linux_job_position LESS 0)
+    file(REMOVE_RECURSE "${package_root}")
+    message(FATAL_ERROR "Generated workflow inferred an undeclared linux release target")
+endif()
+
+file(WRITE "${package_root}/lode.json" [=[{
+  "name": "ci_generator_package",
+  "version": "1.0.0",
+  "license": "MIT",
+  "libraries": {
+    "windows": { "x64": "libs/windows/x64/ci_generator_package.dll" },
+    "linux": { "x64": "libs/linux/x64/ci_generator_package.so" }
+  },
+  "releaseTargets": [
+    { "platform": "linux", "architecture": "x64" }
+  ]
+}
+]=])
+execute_process(
+    COMMAND "${LODE_EXECUTABLE}" ci update "${package_root}"
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+if(result EQUAL 0)
+    file(REMOVE_RECURSE "${package_root}")
+    message(FATAL_ERROR "ci update accepted a target without an implemented runner/SDK matrix")
+endif()
+string(FIND "${output}${error}" "no runner and SDK matrix" unsupported_target_message)
+if(unsupported_target_message LESS 0)
+    file(REMOVE_RECURSE "${package_root}")
+    message(FATAL_ERROR "ci update did not report the unsupported target clearly:\n${output}\n${error}")
 endif()
 
 file(REMOVE_RECURSE "${package_root}")

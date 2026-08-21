@@ -1,0 +1,9 @@
+{
+  "name": "missing_platform_module",
+  "version": "1.0.0",
+  "libraries": {
+    "linux": {
+      "x64": "libs/linux/x64/missing_platform_module.so"
+    }
+  }
+}

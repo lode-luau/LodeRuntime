@@ -39,5 +39,8 @@
       "wasm32": "libs/wasm/wasm32/task.wasm",
       "wasm64": "libs/wasm/wasm64/task.wasm"
     }
-  }
+  },
+  "releaseTargets": [
+    { "platform": "windows", "architecture": "x64" }
+  ]
 }

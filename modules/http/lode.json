@@ -18,5 +18,8 @@
       "x64": "libs/macos/x64/http.dylib",
       "arm64": "libs/macos/arm64/http.dylib"
     }
-  }
+  },
+  "releaseTargets": [
+    { "platform": "windows", "architecture": "x64" }
+  ]
 }

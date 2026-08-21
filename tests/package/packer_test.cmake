@@ -14,6 +14,8 @@ file(COPY ${package_entries} DESTINATION "${package_root}")
 file(MAKE_DIRECTORY "${package_root}/modules/example" "${package_root}/tests")
 file(WRITE "${package_root}/modules/example/init.luau" "return require('./helper')\n")
 file(WRITE "${package_root}/modules/example/helper.luau" "return { value = 42 }\n")
+string(RANDOM LENGTH 131072 ALPHABET "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789" large_source)
+file(WRITE "${package_root}/modules/example/large.luau" "return [[${large_source}]]\n")
 file(WRITE "${package_root}/tests/ignored.luau" "error('test source must not be packaged')\n")
 
 execute_process(
@@ -35,6 +37,14 @@ if(NOT result EQUAL 0 OR NOT EXISTS "${archive_path}" OR
     message(FATAL_ERROR "lode pack failed:\n${output}\n${error}")
 endif()
 
+file(SHA256 "${archive_path}" expected_sha256)
+file(READ "${archive_path}.sha256" checksum_content)
+string(SUBSTRING "${checksum_content}" 0 64 actual_sha256)
+if(NOT actual_sha256 STREQUAL expected_sha256)
+    file(REMOVE_RECURSE "${package_root}" "${cache_home}" "${TEST_BINARY_DIR}/lode-packer-output")
+    message(FATAL_ERROR "lode pack wrote an incorrect SHA-256 sidecar")
+endif()
+
 execute_process(
     COMMAND "${CMAKE_COMMAND}" -E tar tf "${archive_path}"
     RESULT_VARIABLE result OUTPUT_VARIABLE archive_listing ERROR_VARIABLE error)
@@ -49,7 +59,8 @@ foreach(required_entry IN ITEMS
     "LICENSE"
     "lode_modules/signal/init.luau"
     "modules/example/init.luau"
-    "modules/example/helper.luau")
+    "modules/example/helper.luau"
+    "modules/example/large.luau")
     string(FIND "${archive_listing}" "${required_entry}" position)
     if(position LESS 0)
         file(REMOVE_RECURSE "${package_root}" "${cache_home}" "${TEST_BINARY_DIR}/lode-packer-output")

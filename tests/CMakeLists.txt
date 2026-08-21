@@ -167,6 +167,36 @@ add_test(
 set_tests_properties(package_ci_generator PROPERTIES RUN_SERIAL TRUE)
 
 add_test(
+    NAME package_project_init
+    COMMAND ${CMAKE_COMMAND}
+        -DLODE_EXECUTABLE=$<TARGET_FILE:lode>
+        -DTEST_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}
+        -DLODE_BUILD_DIR=${CMAKE_BINARY_DIR}
+        -DLODE_CONFIGURATION=$<CONFIG>
+        -P "${CMAKE_SOURCE_DIR}/tests/package/project_init_test.cmake"
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+)
+set_tests_properties(package_project_init PROPERTIES RUN_SERIAL TRUE)
+
+add_test(
+    NAME package_module_release_targets
+    COMMAND ${CMAKE_COMMAND}
+        -DPROJECT_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -P "${CMAKE_SOURCE_DIR}/tests/package/module_release_targets_test.cmake"
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+)
+
+add_test(
+    NAME cli_interaction
+    COMMAND ${CMAKE_COMMAND}
+        -DLODE_EXECUTABLE=$<TARGET_FILE:lode>
+        -DTEST_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}
+        -P "${CMAKE_SOURCE_DIR}/tests/package/cli_interaction_test.cmake"
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+)
+set_tests_properties(cli_interaction PROPERTIES RUN_SERIAL TRUE)
+
+add_test(
     NAME package_packer
     COMMAND ${CMAKE_COMMAND}
         -DLODE_EXECUTABLE=$<TARGET_FILE:lode>

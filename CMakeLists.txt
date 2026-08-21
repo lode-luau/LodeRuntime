@@ -196,6 +196,7 @@ set(LODE_CORE_SOURCES
     src/PackageInstaller.cpp
     src/GitResolver.cpp
     src/CiGenerator.cpp
+    src/ProjectInitializer.cpp
     src/State.cpp
     src/StateLifetime.cpp
     src/Compiler.cpp
@@ -245,6 +246,7 @@ set(LODE_CORE_HEADERS
     src/PackageArtifact.hpp
     src/GitResolver.hpp
     src/CiGenerator.hpp
+    src/ProjectInitializer.hpp
     src/Platform/Platform.hpp
     src/Platform/CrashHandler.hpp
     src/Platform/WindowsCrashHandler.hpp

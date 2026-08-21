@@ -1,6 +1,7 @@
 // Copyright (c) 2026 yanlvl99, Lode Runtime Contributors
 // SPDX-License-Identifier: MIT
 #include "Lode/Compiler.hpp"
+#include "Lode/Logger.hpp"
 #include "ModuleLoader.hpp"
 #include "PathUtil.hpp"
 #include "Sha256.hpp"
@@ -283,7 +284,8 @@ namespace
                     aliasOpts.overwriteAliases = true;
                     Luau::ConfigOptions opts;
                     opts.aliasOptions = std::move(aliasOpts);
-                    Luau::parseConfig(*contents, result, opts); // silently ignore parse errors
+                    if (std::optional<std::string> error = Luau::parseConfig(*contents, result, opts))
+                        Lode::Logger::Warn("Ignoring invalid .luaurc at " + PathToUtf8(luaurcPath) + ": " + *error);
                 }
             }
             else if (luauConfigExists)
@@ -294,7 +296,9 @@ namespace
                     aliasOpts.configLocation = PathToUtf8(luauConfigPath);
                     aliasOpts.overwriteAliases = true;
                     Luau::InterruptCallbacks callbacks{};
-                    Luau::extractLuauConfig(*contents, result, aliasOpts, std::move(callbacks));
+                    if (std::optional<std::string> error =
+                            Luau::extractLuauConfig(*contents, result, aliasOpts, std::move(callbacks)))
+                        Lode::Logger::Warn("Ignoring invalid .config.luau at " + PathToUtf8(luauConfigPath) + ": " + *error);
                 }
             }
 

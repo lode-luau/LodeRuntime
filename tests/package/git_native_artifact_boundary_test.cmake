@@ -17,7 +17,10 @@ file(WRITE "${git_source}/lode.json" [=[{
     "windows": {
       "x64": "libs/windows/x64/git_native_fixture.dll"
     }
-  }
+  },
+  "releaseTargets": [
+    { "platform": "windows", "architecture": "x64" }
+  ]
 }
 ]=])
 file(WRITE "${git_source}/init.luau" "return {}\n")

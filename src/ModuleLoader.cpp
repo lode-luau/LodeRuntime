@@ -420,7 +420,7 @@ static ModuleLoadResult LoadModuleNoJump(lua_State* L, void* ctx, const char* pa
         std::string rawPathStr(path ? path : "");
         std::string loadNameStr(loadname ? loadname : "");
 
-    // 1. Check for Static Module Registration (Production Bundling / iOS / App Store Sandbox)
+    // 1. Check for static module registration before attempting dynamic loading.
     if (loaderCtx && loaderCtx->registry)
     {
         if (loaderCtx->registry->HasStaticModule(rawPathStr))

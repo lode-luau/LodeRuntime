@@ -14,5 +14,8 @@
     "macos": {
       "x64": "libs/macos/x64/tty.dylib"
     }
-  }
+  },
+  "releaseTargets": [
+    { "platform": "windows", "architecture": "x64" }
+  ]
 }

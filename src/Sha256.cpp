@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: MIT
 #include "Sha256.hpp"
 
+#include <algorithm>
 #include <bit>
+#include <cstring>
 #include <fstream>
 #include <stdexcept>
-#include <vector>
 
 namespace Lode::Detail
 {
@@ -54,36 +55,70 @@ void Sha256Transform(std::uint32_t state[8], const std::uint8_t block[64])
     state[4] += e; state[5] += f; state[6] += g; state[7] += h;
 }
 
+class Sha256Hasher
+{
+public:
+    void Update(const char* input, size_t size)
+    {
+        totalBytes_ += size;
+        while (size != 0)
+        {
+            const size_t copied = std::min(size, block_.size() - blockSize_);
+            std::memcpy(block_.data() + blockSize_, input, copied);
+            blockSize_ += copied;
+            input += copied;
+            size -= copied;
+            if (blockSize_ == block_.size())
+            {
+                Sha256Transform(state_.data(), block_.data());
+                blockSize_ = 0;
+            }
+        }
+    }
+
+    std::array<std::uint8_t, 32> Finalize()
+    {
+        const std::uint64_t bitLength = totalBytes_ * 8;
+        block_[blockSize_++] = 0x80;
+        if (blockSize_ > 56)
+        {
+            std::fill(block_.begin() + blockSize_, block_.end(), 0);
+            Sha256Transform(state_.data(), block_.data());
+            blockSize_ = 0;
+        }
+        std::fill(block_.begin() + blockSize_, block_.begin() + 56, 0);
+        for (int i = 7; i >= 0; --i)
+            block_[56 + (7 - i)] = std::uint8_t((bitLength >> (i * 8)) & 0xff);
+        Sha256Transform(state_.data(), block_.data());
+
+        std::array<std::uint8_t, 32> output{};
+        for (int i = 0; i < 8; ++i)
+        {
+            output[i * 4] = std::uint8_t(state_[i] >> 24);
+            output[i * 4 + 1] = std::uint8_t(state_[i] >> 16);
+            output[i * 4 + 2] = std::uint8_t(state_[i] >> 8);
+            output[i * 4 + 3] = std::uint8_t(state_[i]);
+        }
+        return output;
+    }
+
+private:
+    std::array<std::uint32_t, 8> state_ = {
+        0x6a09e667u, 0xbb67ae85u, 0x3c6ef372u, 0xa54ff53au,
+        0x510e527fu, 0x9b05688cu, 0x1f83d9abu, 0x5be0cd19u
+    };
+    std::array<std::uint8_t, 64> block_{};
+    size_t blockSize_ = 0;
+    std::uint64_t totalBytes_ = 0;
+};
+
 } // namespace
 
 std::array<std::uint8_t, 32> Sha256(std::string_view data)
 {
-    std::uint32_t state[8] = {
-        0x6a09e667u, 0xbb67ae85u, 0x3c6ef372u, 0xa54ff53au,
-        0x510e527fu, 0x9b05688cu, 0x1f83d9abu, 0x5be0cd19u
-    };
-
-    std::vector<std::uint8_t> message(data.begin(), data.end());
-    message.push_back(0x80);
-    while (message.size() % 64 != 56)
-        message.push_back(0);
-
-    const std::uint64_t bitLength = std::uint64_t(data.size()) * 8;
-    for (int i = 7; i >= 0; --i)
-        message.push_back(std::uint8_t((bitLength >> (i * 8)) & 0xff));
-
-    for (size_t offset = 0; offset < message.size(); offset += 64)
-        Sha256Transform(state, message.data() + offset);
-
-    std::array<std::uint8_t, 32> output{};
-    for (int i = 0; i < 8; ++i)
-    {
-        output[i * 4] = std::uint8_t(state[i] >> 24);
-        output[i * 4 + 1] = std::uint8_t(state[i] >> 16);
-        output[i * 4 + 2] = std::uint8_t(state[i] >> 8);
-        output[i * 4 + 3] = std::uint8_t(state[i]);
-    }
-    return output;
+    Sha256Hasher hasher;
+    hasher.Update(data.data(), data.size());
+    return hasher.Finalize();
 }
 
 std::string ToHex(const std::array<std::uint8_t, 32>& bytes)
@@ -110,12 +145,14 @@ std::string Sha256FileHex(const std::filesystem::path& path)
     if (!file.is_open())
         throw std::runtime_error("Cannot open file for SHA-256: " + path.string());
 
-    std::vector<std::uint8_t> data((std::istreambuf_iterator<char>(file)),
-                                   std::istreambuf_iterator<char>());
-    if (file.bad())
+    Sha256Hasher hasher;
+    std::array<char, 64 * 1024> buffer{};
+    while (file.read(buffer.data(), static_cast<std::streamsize>(buffer.size())) || file.gcount() != 0)
+        hasher.Update(buffer.data(), static_cast<size_t>(file.gcount()));
+    if (!file.eof())
         throw std::runtime_error("Cannot read file for SHA-256: " + path.string());
 
-    return ToHex(Sha256(std::string_view(reinterpret_cast<const char*>(data.data()), data.size())));
+    return ToHex(hasher.Finalize());
 }
 
 } // namespace Lode::Detail

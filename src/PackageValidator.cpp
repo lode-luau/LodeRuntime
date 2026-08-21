@@ -612,6 +612,57 @@ void ValidateLibraryEntry(const fs::path& root,
     }
 }
 
+void ValidateReleaseTargets(const json& manifest, bool isNative, ValidationReport& report)
+{
+    if (!manifest.contains("releaseTargets"))
+    {
+        if (isNative)
+            Error(report, "Native packages must declare a releaseTargets array.");
+        return;
+    }
+    if (!isNative)
+    {
+        Error(report, "releaseTargets is valid only for native packages.");
+        return;
+    }
+    const json& targets = manifest["releaseTargets"];
+    if (!targets.is_array() || targets.empty())
+    {
+        Error(report, "releaseTargets must be a non-empty array.");
+        return;
+    }
+
+    std::set<std::pair<std::string, std::string>> seen;
+    for (const json& target : targets)
+    {
+        if (!target.is_object() || !target.contains("platform") || !target["platform"].is_string() ||
+            !target.contains("architecture") || !target["architecture"].is_string())
+        {
+            Error(report, "Each releaseTargets entry must contain string platform and architecture fields.");
+            continue;
+        }
+        const std::string platform = target["platform"].get<std::string>();
+        const std::string architecture = target["architecture"].get<std::string>();
+        if (platform.empty() || architecture.empty())
+        {
+            Error(report, "releaseTargets platform and architecture must not be empty.");
+            continue;
+        }
+        if (!seen.emplace(platform, architecture).second)
+        {
+            Error(report, "releaseTargets must not contain duplicate target '" + platform + "/" + architecture + "'.");
+            continue;
+        }
+        if (!manifest["libraries"].contains(platform) || !manifest["libraries"][platform].is_object() ||
+            !manifest["libraries"][platform].contains(architecture) ||
+            !manifest["libraries"][platform][architecture].is_string())
+        {
+            Error(report, "releaseTargets target '" + platform + "/" + architecture +
+                "' must have a matching libraries entry.");
+        }
+    }
+}
+
 } // namespace
 
 bool PackageVersionSatisfies(const std::string& actual,
@@ -692,17 +743,30 @@ ValidationReport Validate(const fs::path& packageRoot,
     if (!fs::is_regular_file(root / "LICENSE"))
         Error(report, "Packages must contain a root LICENSE file.");
 
-    if (!manifest.contains("libraries") || !manifest["libraries"].is_object())
+    const bool isNative = manifest.contains("libraries") && manifest["libraries"].is_object();
+    ValidateReleaseTargets(manifest, isNative, report);
+    if (!isNative)
     {
         Warning(report, "Package has no native libraries; native ABI validation was skipped.");
         return report;
     }
 
-    if (mode == ValidationMode::Source || mode == ValidationMode::InstallSource)
+    const bool sourceValidation = mode == ValidationMode::Source || mode == ValidationMode::InstallSource;
+    if (sourceValidation)
     {
         if (!fs::is_regular_file(root / "CMakeLists.txt"))
             Error(report, "Native source packages must contain a root CMakeLists.txt file.");
-        return report;
+    }
+
+    std::set<std::pair<std::string, std::string>> releaseTargets;
+    for (const json& target : manifest["releaseTargets"])
+    {
+        if (target.is_object() && target.contains("platform") && target["platform"].is_string() &&
+            target.contains("architecture") && target["architecture"].is_string())
+        {
+            releaseTargets.emplace(target["platform"].get<std::string>(),
+                target["architecture"].get<std::string>());
+        }
     }
 
     bool hasThirdPartyRuntime = false;
@@ -722,8 +786,16 @@ ValidationReport Validate(const fs::path& packageRoot,
                 continue;
             }
 
-            ValidateLibraryEntry(root, platformIt.key(), architectureIt.key(), architectureIt.value().get<std::string>(), mode,
-                hasThirdPartyRuntime, report);
+            const std::string relativePath = architectureIt.value().get<std::string>();
+            // Additional libraries remain valid runtime declarations, but only
+            // releaseTargets are required to exist as publishable artifacts.
+            ValidateLibraryEntry(root, platformIt.key(), architectureIt.key(), relativePath,
+                ValidationMode::Source, hasThirdPartyRuntime, report);
+            if (!sourceValidation && releaseTargets.contains({ platformIt.key(), architectureIt.key() }))
+            {
+                ValidateLibraryEntry(root, platformIt.key(), architectureIt.key(), relativePath, mode,
+                    hasThirdPartyRuntime, report);
+            }
         }
     }
 
