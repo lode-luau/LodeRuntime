@@ -8,6 +8,15 @@
 namespace Lode
 {
 
+namespace
+{
+void CloseHandle(uv_handle_t* handle, void*)
+{
+    if (!uv_is_closing(handle))
+        uv_close(handle, nullptr);
+}
+} // namespace
+
 EventLoop::EventLoop()
 {
     loop_ = new uv_loop_t;
@@ -55,6 +64,7 @@ void EventLoop::Close()
         return;
 
     uv_stop(loop_);
+    uv_walk(loop_, CloseHandle, nullptr);
     while (uv_loop_alive(loop_))
     {
         uv_run(loop_, UV_RUN_NOWAIT);

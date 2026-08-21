@@ -209,18 +209,29 @@ LockfileResult BuildLockfile(const DependencyGraph& graph)
         if (!package.artifacts.empty())
         {
             packageDocument["artifacts"] = json::array();
+            std::vector<const PackageArtifact*> artifacts;
+            artifacts.reserve(package.artifacts.size());
             for (const PackageArtifact& artifact : package.artifacts)
+                artifacts.push_back(&artifact);
+            std::sort(artifacts.begin(), artifacts.end(), [](const PackageArtifact* left,
+                                                              const PackageArtifact* right) {
+                return std::tie(left->platform, left->architecture, left->configuration,
+                                left->abi, left->release, left->asset, left->sha256) <
+                       std::tie(right->platform, right->architecture, right->configuration,
+                                right->abi, right->release, right->asset, right->sha256);
+            });
+            for (const PackageArtifact* artifact : artifacts)
             {
                 json artifactDocument = {
-                    { "platform", artifact.platform },
-                    { "architecture", artifact.architecture },
-                    { "abi", artifact.abi },
-                    { "release", artifact.release },
-                    { "asset", artifact.asset },
-                    { "sha256", artifact.sha256 }
+                    { "platform", artifact->platform },
+                    { "architecture", artifact->architecture },
+                    { "abi", artifact->abi },
+                    { "release", artifact->release },
+                    { "asset", artifact->asset },
+                    { "sha256", artifact->sha256 }
                 };
-                if (!artifact.configuration.empty())
-                    artifactDocument["configuration"] = artifact.configuration;
+                if (!artifact->configuration.empty())
+                    artifactDocument["configuration"] = artifact->configuration;
                 packageDocument["artifacts"].push_back(std::move(artifactDocument));
             }
         }
