@@ -12,6 +12,7 @@
 #include "PackageLockfile.hpp"
 #include "PackageInstaller.hpp"
 #include "PackagePacker.hpp"
+#include "ProjectInitializer.hpp"
 #include "PathUtil.hpp"
 #include "Platform/CrashHandler.hpp"
 
@@ -323,6 +324,7 @@ int main(int argc, char* argv[])
         Lode::Logger::Info("       lode install [--locked] [--dev] [package-root]");
         Lode::Logger::Info("       lode pack [--output <archive>] [package-root]");
         Lode::Logger::Info("       lode add [--dev] owner/repository[@version] [package-root]");
+        Lode::Logger::Info("       lode init <name> --description <text> [--native] [--version <semver>] [--license <id>] [project-root]");
         Lode::Logger::Info("       lode ci validate [--source|--artifact] [--locked] [package-root]");
         Lode::Logger::Info("       lode ci init [--force] --sdk-version <nightly> --sdk-sha256 <sha256> [package-root]");
         Lode::Logger::Info("       lode ci update [package-root]");
@@ -330,6 +332,60 @@ int main(int argc, char* argv[])
     }
 
     const std::string firstArgument = PathToUtf8(fs::path(argv[1]));
+    if (firstArgument == "init")
+    {
+        Lode::Package::ProjectInitOptions options;
+        fs::path projectRoot = fs::current_path();
+        bool hasProjectRoot = false;
+        for (int argumentIndex = 2; argumentIndex < argc; ++argumentIndex)
+        {
+            const std::string argument = PathToUtf8(fs::path(argv[argumentIndex]));
+            if (argument == "--native")
+            {
+                options.native = true;
+            }
+            else if (argument == "--description" || argument == "--version" || argument == "--license")
+            {
+                if (argumentIndex + 1 >= argc)
+                {
+                    Lode::Logger::Error("Usage: lode init <name> --description <text> [--native] [--version <semver>] [--license <id>] [project-root]");
+                    return 1;
+                }
+                const std::string value = PathToUtf8(fs::path(argv[++argumentIndex]));
+                if (argument == "--description") options.description = value;
+                else if (argument == "--version") options.version = value;
+                else options.license = value;
+            }
+            else if (argument.rfind("--", 0) == 0)
+            {
+                Lode::Logger::Error("Usage: lode init <name> --description <text> [--native] [--version <semver>] [--license <id>] [project-root]");
+                return 1;
+            }
+            else if (options.name.empty())
+            {
+                options.name = argument;
+            }
+            else if (!hasProjectRoot)
+            {
+                projectRoot = fs::path(argv[argumentIndex]);
+                hasProjectRoot = true;
+            }
+            else
+            {
+                Lode::Logger::Error("Usage: lode init <name> --description <text> [--native] [--version <semver>] [--license <id>] [project-root]");
+                return 1;
+            }
+        }
+        const Lode::Package::ProjectInitResult result = Lode::Package::InitializeProject(projectRoot, options);
+        for (const std::string& error : result.errors)
+            Lode::Logger::Error(error);
+        if (!result.IsValid())
+            return 1;
+        Lode::Logger::Success("Initialized " + std::string(options.native ? "native" : "Luau") +
+            " project: " + PathToUtf8(fs::absolute(projectRoot)));
+        return 0;
+    }
+
     if (firstArgument == "add")
     {
         bool development = false;

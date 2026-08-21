@@ -167,6 +167,17 @@ add_test(
 set_tests_properties(package_ci_generator PROPERTIES RUN_SERIAL TRUE)
 
 add_test(
+    NAME package_project_init
+    COMMAND ${CMAKE_COMMAND}
+        -DLODE_EXECUTABLE=$<TARGET_FILE:lode>
+        -DTEST_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}
+        -DLODE_BUILD_DIR=${CMAKE_BINARY_DIR}
+        -P "${CMAKE_SOURCE_DIR}/tests/package/project_init_test.cmake"
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+)
+set_tests_properties(package_project_init PROPERTIES RUN_SERIAL TRUE)
+
+add_test(
     NAME package_packer
     COMMAND ${CMAKE_COMMAND}
         -DLODE_EXECUTABLE=$<TARGET_FILE:lode>
