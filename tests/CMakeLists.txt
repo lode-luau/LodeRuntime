@@ -186,6 +186,16 @@ add_test(
 )
 
 add_test(
+    NAME cli_interaction
+    COMMAND ${CMAKE_COMMAND}
+        -DLODE_EXECUTABLE=$<TARGET_FILE:lode>
+        -DTEST_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}
+        -P "${CMAKE_SOURCE_DIR}/tests/package/cli_interaction_test.cmake"
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+)
+set_tests_properties(cli_interaction PROPERTIES RUN_SERIAL TRUE)
+
+add_test(
     NAME package_packer
     COMMAND ${CMAKE_COMMAND}
         -DLODE_EXECUTABLE=$<TARGET_FILE:lode>
