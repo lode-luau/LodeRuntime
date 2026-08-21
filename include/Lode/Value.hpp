@@ -126,6 +126,8 @@ public:
     [[nodiscard]] Vector AsVector() const;
     /** @brief Casts the value to a string (unsafe, returns "" if incorrect type). */
     [[nodiscard]] std::string AsString() const;
+    /** @brief Zero-copy string view (unsafe, returns empty view if not a string). */
+    [[nodiscard]] std::string_view AsStringView() const;
     /** @brief Casts the value to a LightUserdata pointer. */
     [[nodiscard]] void* AsLightUserdata() const;
     /** @brief Casts the value to a Buffer pointer and outputs its size. */
@@ -156,6 +158,8 @@ public:
     [[nodiscard]] Result<Vector> TryAsVector() const;
     /** @brief Safely attempts to cast to string. */
     [[nodiscard]] Result<std::string> TryAsString() const;
+    /** @brief Safely attempts to cast to string view (zero-copy). */
+    [[nodiscard]] Result<std::string_view> TryAsStringView() const;
     /** @brief Safely attempts to cast to Buffer pointer. */
     [[nodiscard]] Result<void*> TryAsBuffer(size_t* sizeOut = nullptr) const;
     /** @brief Safely attempts to convert to a Buffer object. */

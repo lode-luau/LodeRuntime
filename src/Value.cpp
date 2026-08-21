@@ -139,6 +139,10 @@ std::string Value::AsString() const {
     if (auto* s = std::get_if<std::string>(&data_)) return *s;
     return "";
 }
+std::string_view Value::AsStringView() const {
+    if (auto* s = std::get_if<std::string>(&data_)) return std::string_view(*s);
+    return std::string_view();
+}
 void* Value::AsLightUserdata() const {
     if (auto* ptr = std::get_if<void*>(&data_)) return *ptr;
     return nullptr;
@@ -241,6 +245,12 @@ Result<Vector> Value::TryAsVector() const
 Result<std::string> Value::TryAsString() const
 {
     if (auto* s = std::get_if<std::string>(&data_)) return *s;
+    return Error::Type("Value is not a string");
+}
+
+Result<std::string_view> Value::TryAsStringView() const
+{
+    if (auto* s = std::get_if<std::string>(&data_)) return std::string_view(*s);
     return Error::Type("Value is not a string");
 }
 
