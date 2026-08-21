@@ -104,12 +104,18 @@ The package manager validates that declared paths remain inside the package and
 that the artifact exists when creating a native package. The manifest does not
 contain CMake link instructions.
 
-Supported platform and architecture names follow the existing manifests:
+Recognized platform and architecture identifiers follow the existing manifests:
 
 ```text
 Platforms: windows, linux, android, freebsd, macos, ios, solaris, haiku, wasm
 Architectures: x64, arm64, x86, wasm32, wasm64
 ```
+
+Recognition is not a support or release commitment. A release may claim a
+target only when its workflow builds, tests, and publishes that target's
+artifact. In particular, iOS is an accepted manifest identifier, but static
+native-module loading and iOS deployment have not yet been validated; iOS is
+not currently a supported release target.
 
 ## Explicit non-goals
 

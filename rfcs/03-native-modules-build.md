@@ -37,7 +37,7 @@ We recommend using CMake to compile native modules. The build script should dyna
 2. **Architecture Detection:** Detects `x64`, `x86`, `arm64`, or `wasm` based on the compiler's target processor.
 3. **Dynamic Output:** Uses `POST_BUILD` custom commands to automatically copy the compiled binary into `${CMAKE_CURRENT_SOURCE_DIR}/libs/${TARGET_PLATFORM}/${TARGET_ARCH}/$<CONFIG>/`, keeping each build configuration's binary in its own subdirectory. The runtime resolves the `$<CONFIG>` subdirectory that matches its own build (see [RFC 01](01-module-resolution.md)), so Debug and Release builds never overwrite each other's shipped library.
 
-This ensures that developers only need to run the build command, and the resulting library will instantly be placed where `lode.json` expects it.
+This ensures that developers only need to run the build command, and the resulting library will be placed where `lode.json` expects it for a target that the package actually builds. A platform identifier or output path is not evidence of supported deployment: each target needs its own toolchain build, runtime test, and published artifact validation. In particular, iOS static loading has not yet been tested and iOS is not currently a supported release target.
 
 ### 3.1. Exporting the Build Configuration
 

@@ -29,7 +29,7 @@ public:
     void RegisterModule(const std::string& moduleName, std::shared_ptr<Platform::DynamicLibrary> library);
     std::shared_ptr<Platform::DynamicLibrary> GetModule(const std::string& moduleName) const;
 
-    // --- Static Module Registration (Production Bundling / iOS Sandbox / Luau LSP Compliant) ---
+    // --- Static Module Registration (for statically linked deployments; target validation is separate) ---
     void RegisterStaticModule(const std::string& moduleName, LodeModuleInitFn initFn);
     [[nodiscard]] bool HasStaticModule(const std::string& moduleName) const;
     [[nodiscard]] LodeModuleInitFn GetStaticModule(const std::string& moduleName) const;
