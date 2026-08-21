@@ -4,5 +4,8 @@
     "windows": {
       "x64": "../native_module/libs/windows/x64/native_module.dll"
     }
-  }
+  },
+  "releaseTargets": [
+    { "platform": "windows", "architecture": "x64" }
+  ]
 }

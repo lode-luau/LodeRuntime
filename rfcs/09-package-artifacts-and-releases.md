@@ -78,8 +78,10 @@ output, and test files. The default output is
 ## Native library paths
 
 `lode.json.libraries.<platform>.<architecture>` contains a package-relative
-base path. The runtime may insert `Debug` or `Release` between the architecture
-directory and the library filename:
+base path. `lode.json.releaseTargets` is the separate, explicit list of
+library targets authorized for CI validation and publication; every release
+target must have a matching library path. The runtime may insert `Debug` or
+`Release` between the architecture directory and the library filename:
 
 ```text
 libs/windows/x64/Debug/http.dll
@@ -88,7 +90,9 @@ libs/windows/x64/Release/http.dll
 
 The package manager validates that every declared path remains inside the
 package and that the selected artifact contains the path required by the
-current target.
+current target. A recognized `libraries` entry is not a release claim;
+publication is limited to `releaseTargets` that have an implemented, passing
+CI matrix.
 
 ## Artifact identity
 
@@ -136,7 +140,7 @@ A release workflow must:
 1. run from a clean checkout;
 2. require a `vMAJOR.MINOR.PATCH` tag;
 3. verify that the tag matches `lode.json.version`;
-4. build only declared and supported targets;
+4. build only `releaseTargets` that have implemented CI support;
 5. run all required tests for each artifact;
 6. validate `lode.json` and package paths;
 7. run `lode pack` to create the compressed artifact;
@@ -144,7 +148,7 @@ A release workflow must:
 9. publish metadata mapping target information to the artifact;
 10. publish only artifacts from successful jobs.
 
-The release must fail if a declared platform artifact was not produced and the
+The release must fail if a `releaseTargets` artifact was not produced and the
 package claims that target is available. Native artifacts without both
 `LodeModuleABI()` and `LodeModuleConfig()` are not publishable.
 
@@ -157,7 +161,8 @@ extract into a staging directory, reject archive paths that escape that
 directory, validate the package root, and move the completed installation into
 the global cache atomically. The current installer implements this flow for
 the Windows x64 GitHub Release contract; other targets remain unsupported
-until their downloader and release matrix are implemented.
+until their downloader and release matrix are implemented. Static native
+artifacts and iOS publishing are outside this scope.
 
 An incomplete download or extraction must never become an installable package.
 

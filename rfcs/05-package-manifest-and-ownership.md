@@ -27,6 +27,20 @@ The presence of `libraries` is the native-package convention. The absence of
 `libraries` does not make a project root invalid: a project manifest may only
 declare dependencies.
 
+## Project initialization
+
+`lode init <name> --description <text> [--native] [--version <semver>]
+[--license <SPDX>] [project-root]` creates the canonical project files in an
+absent or empty directory. `name` and `description` are required; version and
+license default to `0.1.0` and `MIT`. The default template is pure Luau and
+creates `lode.json`, `init.luau`, `LICENSE`, and `README.md`. `--native` also
+creates a CMake project and a C++ module using `LODE_MODULE`, `CreateTable`,
+and `CreateFunction`, and initializes the host platform/architecture in both
+`libraries` and `releaseTargets`.
+
+Host detection records an initial project declaration, not a cross-platform
+release promise. A non-empty directory is refused without overwriting files.
+
 ## Canonical manifest
 
 The initial package-manager contract is:
@@ -54,7 +68,8 @@ The fields have these meanings:
 | `repository` | Package manager and release metadata | Canonical source repository for external packages; runtime-owned stdlib modules omit it. |
 | `dependencies` | Package manager | Runtime Lode package requirements. |
 | `devDependencies` | Package manager/CI | Test and development requirements. |
-| `libraries` | Runtime and package manager | Native artifact map and packaging validation. |
+| `libraries` | Runtime and package manager | Native artifact map. Entries may describe buildable or locally usable targets. |
+| `releaseTargets` | CI and release tooling | Explicit native targets authorized for generated CI validation and publication. Every entry must match a `libraries` entry. |
 
 Dependency keys are local aliases only. They are not package identities and do
 not select a version globally. Resolution and lockfile identity are defined by
@@ -84,9 +99,16 @@ A native package adds `libraries` to the same manifest:
       "x64": "libs/macos/x64/http.dylib",
       "arm64": "libs/macos/arm64/http.dylib"
     }
-  }
+  },
+  "releaseTargets": [
+    { "platform": "windows", "architecture": "x64" }
+  ]
 }
 ```
+
+`releaseTargets` is required for a native package and is absent for a pure Luau
+package. It is intentionally narrower than `libraries`: a library entry alone
+does not authorize a CI job or a published artifact.
 
 ## Native library paths
 
@@ -111,11 +133,12 @@ Platforms: windows, linux, android, freebsd, macos, ios, solaris, haiku, wasm
 Architectures: x64, arm64, x86, wasm32, wasm64
 ```
 
-Recognition is not a support or release commitment. A release may claim a
-target only when its workflow builds, tests, and publishes that target's
-artifact. In particular, iOS is an accepted manifest identifier, but static
-native-module loading and iOS deployment have not yet been validated; iOS is
-not currently a supported release target.
+An identifier can be recognized by the manifest without being declared for
+publication. A target is declared for publication only when it appears in
+`releaseTargets`; it is effectively supported only after CI builds, tests, and
+publishes its artifact. The current implemented publication matrix is Windows
+x64. iOS is accepted as an identifier, but iOS deployment and static native
+loading are outside this scope and remain unvalidated.
 
 ## Explicit non-goals
 

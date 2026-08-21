@@ -67,7 +67,11 @@ or pins cause the command to fail instead of replacing the workflow silently.
 
 ## Native workflow
 
-The workflow identifies a native package from `lode.json.libraries`. Its
+The workflow identifies a native package from `lode.json.libraries` and derives
+its publication matrix exclusively from `lode.json.releaseTargets`. The first
+implemented native matrix is Windows x64; a declared target without an
+implemented runner and SDK matrix makes `lode ci init` or `lode ci update`
+fail explicitly rather than generate a workflow that claims support. Its
 baseline job performs these operations:
 
 1. Check out the tagged source.
@@ -78,10 +82,10 @@ baseline job performs these operations:
 4. Provision build dependencies required by the package's CMake project, such
    as OpenSSL. This does not create a Lode manifest dependency.
 5. Configure CMake with `CMAKE_PREFIX_PATH` pointing to the SDK.
-6. Build Debug and Release for each declared target.
+6. Build Debug and Release for each `releaseTargets` target.
 7. Run CTest and the package tests through the matching SDK `lode` runtime.
 8. Verify `LodeModuleABI()` and `LodeModuleConfig()` before packaging.
-9. Validate every `lode.json.libraries` path with
+9. Validate every published `releaseTargets` library path with
    `lode ci validate --artifact --locked`.
 10. Run `lode pack --output out/lode-<name>-<version>-windows-x64.zip .` and
     publish only the archive and checksum produced by successful jobs.
@@ -97,8 +101,10 @@ The default package test command runs `tests/run.luau` through the matching
 SDK `lode` executable. A maintainer may replace that command in the editable
 workflow or package CTest configuration without changing `lode.json`.
 
-The workflow must fail if a declared target was not built and tested. It must
-not claim support based only on a platform key written in `lode.json`.
+The workflow must fail if a `releaseTargets` target was not built and tested.
+It must not claim support based only on a recognized identifier or a platform
+key written in `lode.json.libraries`. Static native targets and iOS runners,
+signing, and loading remain outside this implementation.
 
 ## Pure Luau workflow
 

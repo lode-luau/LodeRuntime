@@ -353,21 +353,18 @@ bool BuildWorkflowText(const fs::path& root,
     const bool isNative = manifest.contains("libraries") && manifest["libraries"].is_object();
     if (isNative)
     {
-        for (auto platformIt = manifest["libraries"].begin(); platformIt != manifest["libraries"].end(); ++platformIt)
+        // Validation has already checked that every declared release target has
+        // a matching library. CI deliberately uses releaseTargets rather than
+        // inferring publication claims from every library map entry.
+        for (const json& target : manifest["releaseTargets"])
         {
-            if (platformIt.key() != "windows" || !platformIt.value().is_object())
+            const std::string platform = target["platform"].get<std::string>();
+            const std::string architecture = target["architecture"].get<std::string>();
+            if (platform != "windows" || architecture != "x64")
             {
-                Error(report, "lode ci currently supports only native windows/x64 package targets.");
+                Error(report, "lode ci has no runner and SDK matrix for native target '" +
+                    platform + "/" + architecture + "'.");
                 return false;
-            }
-
-            for (auto architectureIt = platformIt.value().begin(); architectureIt != platformIt.value().end(); ++architectureIt)
-            {
-                if (architectureIt.key() != "x64")
-                {
-                    Error(report, "lode ci currently supports only native windows/x64 package targets.");
-                    return false;
-                }
             }
         }
     }
