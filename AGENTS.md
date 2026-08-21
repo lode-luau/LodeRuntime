@@ -12,14 +12,14 @@
 2. Check existing branch suffixes and create `fix/runtime-issues-YYYYMMDD-N` from the updated `main`.
 3. Make changes. Each independent fix or feature gets its own commit.
 4. Before every commit, inspect `git status`, `git diff`, and `git diff --check`, then run the required validation below.
-5. Push: `git push -u origin fix/runtime-issues-YYYYDDMM-N`.
+5. Push: `git push -u origin fix/runtime-issues-YYYYMMDD-N`.
 6. Create the PR with base `main`, never `fix/runtime-issues`.
 7. Keep the PR open for review. Do not merge immediately after creation or bypass required checks.
 8. Merge only into `main`, after review and passing checks.
 9. After merge, update local `main`, delete the local branch, delete the remote branch, and prune stale remote refs.
 
 ## Build & test
-- Configure when needed: `cmake -B build`.
+- Configure when needed: `cmake -B build` (Visual Studio multi-config, single `build/` tree; CI uses Ninja with `build-debug/`/`build-release/` — see `CONTRIBUTING.md` and `.github/workflows/ci.yml`).
 - Build Debug: `cmake --build build --config Debug`.
 - Build Release: `cmake --build build --config Release`.
 - Tests: `build/bin/Debug/lode.exe modules/sanity/run.luau`, `build/bin/Release/lode.exe modules/sanity/run.luau`, and `ctest --test-dir build -C Debug --output-on-failure` (native fixtures under `tests/native/` and diagnostics under `tests/diagnostics/`).

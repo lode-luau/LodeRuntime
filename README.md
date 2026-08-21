@@ -18,7 +18,7 @@ A fast, modular runtime environment for executing Luau scripts.
 ## Building
 
 ### Requirements
-* CMake 3.15+
+* CMake 3.20+
 * C++20 compatible compiler (MSVC, GCC, or Clang)
 
 ### Build Commands
@@ -36,11 +36,16 @@ A fast, modular runtime environment for executing Luau scripts.
 ## Usage
 
     ./build/bin/Release/lode path/to/script.luau
+    # With Visual Studio multi-config generator the binary is at
+    # build/bin/Release/lode.exe (or build/bin/Debug/lode.exe for Debug).
 
 ### Running Tests
 
     ./build/bin/Release/lode modules/sanity/run.luau
-    ctest --test-dir build -C Release --output-on-failure
+    ctest --test-dir build -C Debug --output-on-failure
+    # CI (Ninja) uses split trees: build-debug/bin/Debug/lode.exe and
+    # build-release/bin/Release/lode.exe — see CONTRIBUTING.md for local
+    # Visual Studio workflow.
 
 ## Contributing
 

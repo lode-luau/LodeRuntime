@@ -84,7 +84,7 @@ repository.
 ### Setting up your local environment
 
 * Clone the repository.
-* CMake 3.15+ and a C++20 compiler (MSVC, GCC, or Clang).
+* CMake 3.20+ and a C++20 compiler (MSVC, GCC, or Clang).
 
 Configure and build:
 
@@ -110,11 +110,17 @@ Configure and build:
 
 ### Validating Changes
 
-Run the full validation flow, Debug and Release sequentially:
+Run the full validation flow, Debug and Release sequentially (Visual Studio
+multi-config generator, single `build/` tree):
 
 * `build/bin/Debug/lode.exe modules/sanity/run.luau`
 * `build/bin/Release/lode.exe modules/sanity/run.luau`
 * `ctest --test-dir build -C Debug --output-on-failure`
+
+> CI uses Ninja single-config with split trees (`build-debug/` and
+> `build-release/`); the `ctest -C` config must match the build type used
+> for that tree. Locally with Visual Studio, use the single `build/` tree
+> above.
 
 The sanity suite currently contains 33 tests; treat the reported count as
 authoritative if it changes. The `ctest` run covers the native module
@@ -122,7 +128,6 @@ fixtures and integration scripts under `tests/native/` and the diagnostic
 regression scripts under `tests/diagnostics/`. Validation must go through the
 real runtime path (`lode` + `.luau`) — do not keep temporary probe
 executables in the repo.
-repository.
 
 ### Reviewing Pull Requests
 
