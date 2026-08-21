@@ -339,8 +339,22 @@ CacheIdentityResult ResolvePackageCacheIdentity(const DependencyGraph& graph,
 
     if (!package.artifacts.empty())
     {
+        // Sort artifacts for deterministic digest — insertion order depends on
+        // graph traversal and download order, but the cache identity must be
+        // stable regardless of that order. Sorting matches lockfile determinism
+        // (PackageLockfile.cpp:79) and ensures Debug/Release artifacts produce
+        // distinct hashes when `configuration` is present.
+        std::vector<PackageArtifact> sortedArtifacts = package.artifacts;
+        std::sort(sortedArtifacts.begin(), sortedArtifacts.end(),
+            [](const PackageArtifact& left, const PackageArtifact& right) {
+                return std::tie(left.platform, left.architecture, left.configuration,
+                    left.abi, left.release, left.asset, left.sha256) <
+                    std::tie(right.platform, right.architecture, right.configuration,
+                    right.abi, right.release, right.asset, right.sha256);
+            });
+
         document["artifacts"] = json::array();
-        for (const PackageArtifact& artifact : package.artifacts)
+        for (const PackageArtifact& artifact : sortedArtifacts)
         {
             json artifactDocument = {
                 { "platform", artifact.platform },
