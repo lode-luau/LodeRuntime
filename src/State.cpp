@@ -123,6 +123,7 @@ State& State::operator=(State&& other) noexcept
         if (ownsState_ && L_)
         {
             CloseAsyncResources(*this, impl_ ? impl_->ownedEventLoop.get() : nullptr);
+            Detail::InvalidateStateLifetime(L_);
             lua_close(L_);
         }
         L_ = other.L_;
