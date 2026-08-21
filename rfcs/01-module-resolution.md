@@ -51,7 +51,7 @@ Native modules must include an `init.luau` file alongside the `lode.json` or in 
 1. **Type Definitions:** It provides type exports and function signatures for the LSP, ensuring developers have autocompletion and type checking when consuming the native module.
 2. **Package Root Indicator:** It (along with `lode.json`) marks the root of the package for internal path resolution.
 
-**Important Note:** For modules that contain a `lode.json` with a `libraries` field, the runtime will **ignore and not execute** the `init.luau` file. It is strictly used for LSP tooling and as a spatial reference for path resolution.
+**Important Note:** For modules that contain a `lode.json` with a non-empty `libraries` field, the runtime **always ignores and does not execute** the `init.luau` file, even if the current platform/architecture has no entry in the map (`src/ModuleLoader.cpp:498`). It is strictly used for LSP tooling and as a spatial reference for path resolution; a missing native artifact is reported as a platform error rather than silently falling back to Luau.
 
 ### 3. Registry Path Injection for Native Initialization
 When a native module is loaded and `LodeModuleInit` is called, the C++ code might need to call `require` to load helper Luau scripts distributed with the plugin. To ensure these `require` calls resolve correctly:
