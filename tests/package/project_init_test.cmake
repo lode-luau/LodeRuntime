@@ -70,7 +70,9 @@ if(NOT result EQUAL 0)
     message(FATAL_ERROR "Could not install the current SDK for the generated native project:\n${output}\n${error}")
 endif()
 execute_process(
-    COMMAND "${CMAKE_COMMAND}" -S "${native_root}" -B "${native_root}/build" "-DCMAKE_PREFIX_PATH=${sdk_root}"
+    COMMAND "${CMAKE_COMMAND}" -S "${native_root}" -B "${native_root}/build"
+        "-DCMAKE_PREFIX_PATH=${sdk_root}"
+        "-DCMAKE_CONFIGURATION_TYPES=Debug"
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
 if(NOT result EQUAL 0)
     message(FATAL_ERROR "Generated native project did not configure:\n${output}\n${error}")
