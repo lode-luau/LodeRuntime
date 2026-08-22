@@ -14,6 +14,7 @@ A fast, modular runtime environment for executing Luau scripts.
 * [08 - Native SDK and ABI](rfcs/08-native-sdk-and-abi.md)
 * [09 - Package Artifacts and Releases](rfcs/09-package-artifacts-and-releases.md)
 * [10 - Generated CI and Enforcement](rfcs/10-generated-ci-and-enforcement.md)
+* [11 - Static Native Target Validation](rfcs/11-static-native-target-validation.md)
 
 ## Building
 
@@ -46,6 +47,43 @@ A fast, modular runtime environment for executing Luau scripts.
     # CI (Ninja) uses split trees: build-debug/bin/Debug/lode.exe and
     # build-release/bin/Release/lode.exe — see CONTRIBUTING.md for local
     # Visual Studio workflow.
+
+## Package and CLI quick start
+
+The current package workflow is:
+
+    lode init demo --description "A Luau package"
+    lode add owner/repository[@version]
+    lode install [--locked] [--dev]
+    lode pack --output out/demo.zip .
+    lode ci validate --source
+    lode ci validate --artifact
+
+Use `lode ci init --sdk-version <nightly> --sdk-sha256 <sha256>` to generate
+an initial workflow. A locked install requires an up-to-date `lode.lock` and
+uses the exact locked artifacts; the current installer does not build dependency
+sources. The currently validated and published native package path is Windows
+x64. Platform keys present in a manifest do not, by themselves, mean that a
+target is tested or published. See [the manifest and ownership RFC](rfcs/05-package-manifest-and-ownership.md), [package resolution and lockfiles](rfcs/06-package-resolution-and-lockfile.md), and [package artifacts](rfcs/09-package-artifacts-and-releases.md).
+
+## Native module quick start
+
+A native package typically contains `lode.json`, a type/path metadata `init.luau`,
+`CMakeLists.txt`, and a `src/` directory. Its CMake project uses:
+
+    find_package(Lode CONFIG REQUIRED)
+    lode_add_native_module(...)
+
+Configure with the installed Lode SDK in `CMAKE_PREFIX_PATH`, then build the
+module and run it with the matching Debug or Release `lode` runtime. Native
+`init.luau` supplies metadata for loading and typing; it is not executed as
+the native module implementation. Publishable native artifacts must provide
+`LodeModuleInit`, `LodeModuleConfig`, and `LodeModuleABI`; direct legacy
+loading may have looser checks. See [the native SDK and ABI RFC](rfcs/08-native-sdk-and-abi.md), [artifact/release rules](rfcs/09-package-artifacts-and-releases.md), [generated CI](rfcs/10-generated-ci-and-enforcement.md), and [static target validation](rfcs/11-static-native-target-validation.md).
+
+Package installation and native CI behavior are evolving; the linked RFCs are
+the normative design documents. The runtime executes trusted code and is not a
+sandbox.
 
 ## Contributing
 
