@@ -67,6 +67,10 @@ export type FileHandle = {
     ReadBuffer: (self: FileHandle, length: number, offset: number?) -> buffer,
     --- Writes to the file
     Write: (self: FileHandle, data: string | buffer, offset: number?) -> (),
+    --- Repositions the file cursor and returns its absolute byte position.
+    --- The whence value is "set" (default), "cur", or "end".
+    --- FileHandle operations must be used sequentially; append-mode handles cannot seek.
+    Seek: (self: FileHandle, offset: number, whence: ("set" | "cur" | "end")?) -> number,
     --- Retrieves file status for the handle
     Stat: (self: FileHandle) -> FileStat,
     --- Synchronizes file state to disk
