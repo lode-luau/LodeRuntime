@@ -5,9 +5,18 @@
 #include "Lode/Coroutine.hpp"
 #include "Lode/Numeric.hpp"
 #include "Lode/ObjectWrap.hpp"
+#include <cerrno>
+#include <cmath>
+#include <cstdint>
 #include <cstring>
-#include <iostream>
-
+#include <limits>
+#include <string>
+#if defined(_WIN32)
+#include <io.h>
+#else
+#include <sys/types.h>
+#include <unistd.h>
+#endif
 namespace lodefs
 {
 
@@ -251,21 +260,139 @@ Lode::Value FileHandle::MethodWrite(Lode::State& vm, const std::vector<Lode::Val
     return Lode::Value();
 }
 
+namespace
+{
+struct SeekContext
+{
+    std::shared_ptr<FileHandle> handle;
+    Lode::Coroutine coroutine;
+    lua_State* L = nullptr;
+    uv_work_t work{};
+    int64_t offset = 0;
+    int whence = SEEK_SET;
+    int64_t result = -1;
+    std::string error;
+};
+
+void SeekWork(uv_work_t* request)
+{
+    auto* context = static_cast<SeekContext*>(request->data);
+#if defined(_WIN32)
+    const __int64 result = _lseeki64(context->handle->fd, context->offset, context->whence);
+#else
+    const off_t result = lseek(context->handle->fd, static_cast<off_t>(context->offset), context->whence);
+#endif
+    if (result < 0)
+    {
+        context->error = std::strerror(errno);
+        return;
+    }
+
+    if (static_cast<uint64_t>(result) > static_cast<uint64_t>((std::numeric_limits<int64_t>::max)()))
+    {
+        context->error = "resulting position is outside the supported integer range";
+        return;
+    }
+    context->result = static_cast<int64_t>(result);
+}
+
+void SeekAfter(uv_work_t* request, int status)
+{
+    auto* context = static_cast<SeekContext*>(request->data);
+    if (context->handle->mgr->shuttingDown)
+    {
+        delete context;
+        return;
+    }
+
+    Lode::State vm(context->L);
+    if (status < 0)
+    {
+        auto resumed = context->coroutine.ResumeError(std::string("fs File:Seek: ") + uv_strerror(status));
+        if (resumed.IsError() && Lode::Task::IsMainThread(vm, context->coroutine.GetThreadState()))
+            Lode::Task::SetMainThreadError(vm, resumed.GetError().ErrorMessage());
+    }
+    else if (!context->error.empty())
+    {
+        auto resumed = context->coroutine.ResumeError(std::string("fs File:Seek: ") + context->error);
+        if (resumed.IsError() && Lode::Task::IsMainThread(vm, context->coroutine.GetThreadState()))
+            Lode::Task::SetMainThreadError(vm, resumed.GetError().ErrorMessage());
+    }
+    else
+    {
+        auto resumed = context->coroutine.Resume({ Lode::Value(context->result) });
+        if (resumed.IsError() && Lode::Task::IsMainThread(vm, context->coroutine.GetThreadState()))
+            Lode::Task::SetMainThreadError(vm, resumed.GetError().ErrorMessage());
+    }
+    delete context;
+}
+} // namespace
+
 Lode::Value FileHandle::MethodSeek(Lode::State& vm, const std::vector<Lode::Value>& args)
 {
-    // libuv doesn't expose lseek directly via an async wrapper that yields
-    // However, read/write take an offset. But to mutate file cursor natively without read/write,
-    // we can use a small workaround or just implement lseek synchronously.
-    // For now, let's implement lseek as synchronous since it doesn't block significantly.
-    // NOTE: uv_fs_read/write update the internal offset if passed -1, but they don't give an easy way to seek manually.
-    // Wait, let's just do an async lseek using uv_work_t or just not support seek?
-    // Actually, lodefs::FileHandle should just have a `uint64_t cursor` if we pass it to read/write, OR we rely on OS cursor by passing -1.
-    // If we rely on OS cursor, we can't easily lseek asynchronously unless we use uv_work_t.
-    // Let's omit Seek for now, or just implement it synchronously via a wrapper?
-    // User plan said `Seek` is there. I'll implement it using uv_work_t.
-    // To save time and lines, let's just use `uv_fs_fstat` to get size if whence is END, or just omit Seek and implement `Stat` and `Sync`.
-    
-    vm.RaiseError("fs File:Seek: not implemented yet");
+    if (closed || closing)
+    {
+        vm.RaiseError("fs File:Seek: file is closed");
+        return Lode::Value();
+    }
+
+    if (openFlags & UV_FS_O_APPEND)
+    {
+        vm.RaiseError("fs File:Seek: append-mode handles cannot be repositioned");
+        return Lode::Value();
+    }
+
+    if (args.size() < 2 || !args[1].IsNumber())
+    {
+        vm.RaiseError("fs File:Seek: offset must be an integer");
+        return Lode::Value();
+    }
+
+    auto offset = args[1].TryAsInteger();
+    if (offset.IsError())
+    {
+        vm.RaiseError("fs File:Seek: offset must be an integer");
+        return Lode::Value();
+    }
+
+    int whence = SEEK_SET;
+    if (args.size() > 2 && !args[2].IsNil())
+    {
+        if (!args[2].IsString())
+        {
+            vm.RaiseError("fs File:Seek: whence must be 'set', 'cur', or 'end'");
+            return Lode::Value();
+        }
+
+        const std::string mode = args[2].AsString();
+        if (mode == "cur")
+            whence = SEEK_CUR;
+        else if (mode == "end")
+            whence = SEEK_END;
+        else if (mode != "set")
+        {
+            vm.RaiseError("fs File:Seek: whence must be 'set', 'cur', or 'end'");
+            return Lode::Value();
+        }
+    }
+
+    auto* context = new SeekContext();
+    context->handle = shared_from_this();
+    context->coroutine = Lode::Coroutine(vm.GetLuaState());
+    context->L = vm.GetLuaState();
+    context->offset = offset.GetValue();
+    context->whence = whence;
+    context->work.data = context;
+
+    const int status = uv_queue_work(mgr->loop, &context->work, SeekWork, SeekAfter);
+    if (status < 0)
+    {
+        delete context;
+        vm.RaiseError(std::string("fs File:Seek: ") + uv_strerror(status));
+        return Lode::Value();
+    }
+
+    vm.YieldThread();
     return Lode::Value();
 }
 

@@ -26,6 +26,7 @@ return {
             sys = "modules/sys",
             tty = "modules/tty",
             pipe = "modules/pipe",
+            crypto = "modules/crypto",
         }
     }
 }

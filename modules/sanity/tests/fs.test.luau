@@ -8,6 +8,8 @@
 
 local sanity = require("../init")
 local describe = sanity.describe
+local beforeEach = sanity.beforeEach
+local afterEach = sanity.afterEach
 local it = sanity.it
 local expect = sanity.expect
 local skip = sanity.skip
@@ -24,44 +26,19 @@ local function norm(s: string): string
 end
 
 local function cleanup()
-    -- Best-effort removal of anything we may have created.
-    pcall(function()
-        fs.RemoveFile(path.join(tmpRoot, "write.txt"))
-    end)
-    pcall(function()
-        fs.RemoveFile(path.join(tmpRoot, "append.txt"))
-    end)
-    pcall(function()
-        fs.RemoveFile(path.join(tmpRoot, "copy_src.txt"))
-    end)
-    pcall(function()
-        fs.RemoveFile(path.join(tmpRoot, "copy_dst.txt"))
-    end)
-    pcall(function()
-        fs.RemoveFile(path.join(tmpRoot, "rename_src.txt"))
-    end)
-    pcall(function()
-        fs.RemoveFile(path.join(tmpRoot, "rename_dst.txt"))
-    end)
-    pcall(function()
-        fs.RemoveFile(path.join(tmpRoot, "handle.txt"))
-    end)
-    pcall(function()
-        fs.RemoveFile(path.join(tmpRoot, "stream.txt"))
-    end)
-    pcall(function()
-        fs.RemoveFile(path.join(tmpRoot, "buffer.txt"))
-    end)
-    pcall(function()
-        fs.RemoveDirectory(path.join(tmpRoot, "subdir"), true)
-    end)
+    -- Remove the entire per-file test workspace so every test is isolated and
+    -- newly added fixtures are cleaned automatically without updating a list.
     pcall(function()
         fs.RemoveDirectory(tmpRoot, true)
     end)
 end
 
 describe("fs", function()
+    beforeEach(cleanup)
+    afterEach(cleanup)
+
     it("exposes the expected API surface", function()
+        fs.CreateDirectory(tmpRoot)
         expect(typeof(fs.ReadFile)).toBe("function")
         expect(typeof(fs.WriteFile)).toBe("function")
         expect(typeof(fs.AppendFile)).toBe("function")
@@ -76,34 +53,32 @@ describe("fs", function()
         expect(typeof(fs.RemoveFile)).toBe("function")
         expect(typeof(fs.RemoveDirectory)).toBe("function")
         expect(typeof(fs.File.Open)).toBe("function")
+        local surface = fs.File:Open(path.join(tmpRoot, "surface.txt"), "w+")
+        expect(typeof(surface.Seek)).toBe("function")
+        surface:Close()
         expect(typeof(fs.ReadStream.Create)).toBe("function")
         expect(typeof(fs.Watcher.Create)).toBe("function")
     end)
 
     it("writes and reads a file round-trip", function()
-        cleanup()
         fs.CreateDirectory(tmpRoot)
         local filePath = path.join(tmpRoot, "write.txt")
         fs.WriteFile(filePath, "hello fs")
         local contents = fs.ReadFile(filePath)
         expect(contents).toBe("hello fs")
         expect(fs.Exists(filePath)).toBe(true)
-        cleanup()
     end)
 
     it("appends to a file", function()
-        cleanup()
         fs.CreateDirectory(tmpRoot)
         local filePath = path.join(tmpRoot, "append.txt")
         fs.WriteFile(filePath, "a")
         fs.AppendFile(filePath, "b")
         fs.AppendFile(filePath, "c")
         expect(fs.ReadFile(filePath)).toBe("abc")
-        cleanup()
     end)
 
     it("reads a file into a buffer", function()
-        cleanup()
         fs.CreateDirectory(tmpRoot)
         local filePath = path.join(tmpRoot, "buffer.txt")
         fs.WriteFile(filePath, "0123456789")
@@ -113,22 +88,18 @@ describe("fs", function()
         local n = fs.ReadToBuffer(filePath, out, 0)
         expect(n).toBe(4)
         expect(buffer.tostring(out)).toBe("0123")
-        cleanup()
     end)
 
     it("copies a file", function()
-        cleanup()
         fs.CreateDirectory(tmpRoot)
         local src = path.join(tmpRoot, "copy_src.txt")
         local dst = path.join(tmpRoot, "copy_dst.txt")
         fs.WriteFile(src, "copy me")
         fs.CopyFile(src, dst)
         expect(fs.ReadFile(dst)).toBe("copy me")
-        cleanup()
     end)
 
     it("copies a directory tree", function()
-        cleanup()
         local source = path.join(tmpRoot, "copy_src_dir")
         local nested = path.join(source, "nested")
         local destination = path.join(tmpRoot, "copy_dst_dir")
@@ -138,11 +109,9 @@ describe("fs", function()
         fs.CopyFile(source, destination)
         expect(fs.ReadFile(path.join(destination, "root.txt"))).toBe("root")
         expect(fs.ReadFile(path.join(destination, "nested", "deep.txt"))).toBe("deep")
-        cleanup()
     end)
 
     it("renames a file", function()
-        cleanup()
         fs.CreateDirectory(tmpRoot)
         local src = path.join(tmpRoot, "rename_src.txt")
         local dst = path.join(tmpRoot, "rename_dst.txt")
@@ -150,11 +119,9 @@ describe("fs", function()
         fs.Rename(src, dst)
         expect(fs.Exists(src)).toBe(false)
         expect(fs.ReadFile(dst)).toBe("rename me")
-        cleanup()
     end)
 
     it("moves a non-empty directory", function()
-        cleanup()
         local source = path.join(tmpRoot, "move_src_dir")
         local destination = path.join(tmpRoot, "move_dst_dir")
         fs.CreateDirectory(source)
@@ -162,11 +129,9 @@ describe("fs", function()
         fs.Rename(source, destination)
         expect(fs.Exists(source)).toBe(false)
         expect(fs.ReadFile(path.join(destination, "child.txt"))).toBe("child")
-        cleanup()
     end)
 
     it("creates and reads a directory", function()
-        cleanup()
         fs.CreateDirectory(tmpRoot)
         local sub = path.join(tmpRoot, "subdir")
         fs.CreateDirectory(sub)
@@ -177,11 +142,9 @@ describe("fs", function()
             if e == "inner.txt" then found = true end
         end
         expect(found).toBe(true)
-        cleanup()
     end)
 
     it("matches files with glob patterns", function()
-        cleanup()
         local nested = path.join(tmpRoot, "subdir", "nested")
         fs.CreateDirectory(nested)
         fs.WriteFile(path.join(tmpRoot, "root.lua"), "root")
@@ -205,11 +168,9 @@ describe("fs", function()
             end
         end
         expect(foundDeep).toBe(true)
-        cleanup()
     end)
 
     it("returns file stats", function()
-        cleanup()
         fs.CreateDirectory(tmpRoot)
         local filePath = path.join(tmpRoot, "write.txt")
         fs.WriteFile(filePath, "12345")
@@ -217,11 +178,9 @@ describe("fs", function()
         expect(st.isFile).toBe(true)
         expect(st.isDirectory).toBe(false)
         expect(st.size).toBe(5)
-        cleanup()
     end)
 
     it("supports symlinks and permission updates", function()
-        cleanup()
         fs.CreateDirectory(tmpRoot)
         local target = path.join(tmpRoot, "target.txt")
         local link = path.join(tmpRoot, "target-link.txt")
@@ -233,8 +192,7 @@ describe("fs", function()
             fs.CreateSymlink(target, link)
         end)
         if not ok then
-            cleanup()
-            skip("Symbolic links are unavailable: " .. tostring(err))
+                skip("Symbolic links are unavailable: " .. tostring(err))
             return
         end
 
@@ -242,31 +200,25 @@ describe("fs", function()
         expect(stat.isSymbolicLink).toBe(true)
         expect(norm(fs.ReadLink(link))).toBe(norm(target))
         expect(fs.RealPath(link)).toBe(fs.RealPath(target))
-        cleanup()
     end)
 
     it("resolves a real path", function()
-        cleanup()
         fs.CreateDirectory(tmpRoot)
         local filePath = path.join(tmpRoot, "write.txt")
         fs.WriteFile(filePath, "x")
         local real = fs.RealPath(filePath)
         expect(norm(real):find("write.txt", 1, true) ~= nil).toBe(true)
-        cleanup()
     end)
 
     it("reports existence correctly", function()
-        cleanup()
         fs.CreateDirectory(tmpRoot)
         local filePath = path.join(tmpRoot, "write.txt")
         expect(fs.Exists(filePath)).toBe(false)
         fs.WriteFile(filePath, "x")
         expect(fs.Exists(filePath)).toBe(true)
-        cleanup()
     end)
 
     it("opens a File handle and reads/writes", function()
-        cleanup()
         fs.CreateDirectory(tmpRoot)
         local filePath = path.join(tmpRoot, "handle.txt")
         local f = fs.File:Open(filePath, "w+")
@@ -281,11 +233,137 @@ describe("fs", function()
         local st = f2:Stat()
         expect(st.size).toBe(11)
         f2:Close()
-        cleanup()
+    end)
+
+    it("seeks a File handle and preserves the descriptor cursor", function()
+        fs.CreateDirectory(tmpRoot)
+        local filePath = path.join(tmpRoot, "handle.txt")
+        fs.WriteFile(filePath, "0123456789")
+        local file = fs.File:Open(filePath, "r+")
+
+        expect(tostring(file:Seek(0))).toBe("0")
+        expect(file:Read(3)).toBe("012")
+        expect(tostring(file:Seek(2, "cur"))).toBe("5")
+        expect(file:Read(2)).toBe("56")
+        expect(tostring(file:Seek(-2, "end"))).toBe("8")
+        expect(file:Read(2)).toBe("89")
+        expect(tostring(file:Seek(4, "set"))).toBe("4")
+        expect(file:Read(2)).toBe("45")
+
+        local ok, err = pcall(function()
+            file:Seek(-1, "set")
+        end)
+        expect(ok).toBe(false)
+        expect(tostring(err):find("fs File:Seek", 1, true) ~= nil).toBe(true)
+
+        for _, invalid in { 1.5, math.huge, -math.huge } do
+            ok, err = pcall(function()
+                file:Seek(invalid)
+            end)
+            expect(ok).toBe(false)
+            expect(tostring(err):find("fs File:Seek", 1, true) ~= nil).toBe(true)
+        end
+
+        ok, err = pcall(function()
+            file:Seek(0, "invalid")
+        end)
+        expect(ok).toBe(false)
+        expect(tostring(err):find("fs File:Seek", 1, true) ~= nil).toBe(true)
+
+        file:Close()
+        ok, err = pcall(function()
+            file:Seek(0)
+        end)
+        expect(ok).toBe(false)
+        expect(tostring(err):find("fs File:Seek", 1, true) ~= nil).toBe(true)
+    end)
+
+    it("validates Seek edge cases", function()
+        fs.CreateDirectory(tmpRoot)
+        local filePath = path.join(tmpRoot, "seek-edges.txt")
+        fs.WriteFile(filePath, "0123456789")
+        local file = fs.File:Open(filePath, "r+")
+
+        expect(tostring(file:Seek(0, nil))).toBe("0")
+        expect(tostring(file:Seek(2, "cur"))).toBe("2")
+        expect(tostring(file:Seek(-2, "cur"))).toBe("0")
+        expect(tostring(file:Seek(-2, "end"))).toBe("8")
+        expect(file:Read(2)).toBe("89")
+
+        local invalidArguments = {
+            { "missing offset", function() (file.Seek :: any)(file) end },
+            { "string offset", function() file:Seek("0" :: any) end },
+            { "boolean whence", function() file:Seek(0, true :: any) end },
+            { "fractional offset", function() file:Seek(1.5) end },
+            { "positive infinity", function() file:Seek(math.huge) end },
+            { "negative infinity", function() file:Seek(-math.huge) end },
+            { "unknown whence", function() file:Seek(0, "invalid") end },
+            { "integer overflow", function() file:Seek(9223372036854775808) end },
+            { "negative result", function() file:Seek(-1, "set") end },
+        }
+        for _, case in ipairs(invalidArguments) do
+            local ok, err = pcall(case[2])
+            expect(ok).toBe(false)
+            expect(tostring(err):find("fs File:Seek", 1, true) ~= nil).toBe(true)
+        end
+
+        file:Close()
+        local ok, err = pcall(function()
+            file:Seek(0)
+        end)
+        expect(ok).toBe(false)
+        expect(tostring(err):find("fs File:Seek", 1, true) ~= nil).toBe(true)
+    end)
+
+    it("completes concurrent Seek and read operations", function()
+        fs.CreateDirectory(tmpRoot)
+        local filePath = path.join(tmpRoot, "seek-concurrent.txt")
+        fs.WriteFile(filePath, string.rep("a", 1024 * 1024))
+        local file = fs.File:Open(filePath, "r+")
+        local results = {}
+        local completed = 0
+
+        local function spawnOperation(name, operation)
+            task.spawn(function()
+                local ok, value = pcall(operation)
+                results[name] = { ok, value }
+                completed += 1
+            end)
+        end
+
+        for round = 1, 20 do
+            results = {}
+            completed = 0
+            spawnOperation("start", function() return file:Seek(0) end)
+            spawnOperation("offset", function() return file:Seek(512) end)
+            spawnOperation("read", function() return file:Read(16) end)
+            while completed < 3 do
+                task.wait(0.01)
+            end
+            expect(results.start[1]).toBe(true)
+            expect(results.offset[1]).toBe(true)
+            expect(results.read[1]).toBe(true)
+            expect(tostring(results.start[2]) == "0" or tostring(results.start[2]) == "512").toBe(true)
+            expect(tostring(results.offset[2]) == "0" or tostring(results.offset[2]) == "512").toBe(true)
+        end
+
+        file:Close()
+    end)
+
+    it("rejects Seek on append-mode handles", function()
+        fs.CreateDirectory(tmpRoot)
+        local filePath = path.join(tmpRoot, "append.txt")
+        fs.WriteFile(filePath, "data")
+        local file = fs.File:Open(filePath, "a+")
+        local ok, err = pcall(function()
+            file:Seek(0)
+        end)
+        expect(ok).toBe(false)
+        expect(tostring(err):find("append-mode", 1, true) ~= nil).toBe(true)
+        file:Close()
     end)
 
     it("rejects invalid File read sizes before allocation", function()
-        cleanup()
         fs.CreateDirectory(tmpRoot)
         local filePath = path.join(tmpRoot, "read-size.txt")
         fs.WriteFile(filePath, "data")
@@ -306,11 +384,9 @@ describe("fs", function()
         end
 
         file:Close()
-        cleanup()
     end)
 
     it("reads a file through a ReadStream", function()
-        cleanup()
         fs.CreateDirectory(tmpRoot)
         local filePath = path.join(tmpRoot, "stream.txt")
         fs.WriteFile(filePath, "stream contents")
@@ -333,7 +409,6 @@ describe("fs", function()
         conn2:Disconnect()
         stream:Close()
         expect(received).toBe("stream contents")
-        cleanup()
     end)
 
     it("rejects a non-string path in ReadFile", function()
@@ -353,7 +428,6 @@ describe("fs", function()
     end)
 
     it("rejects an invalid mode in File.Open", function()
-        cleanup()
         fs.CreateDirectory(tmpRoot)
         local filePath = path.join(tmpRoot, "handle.txt")
         local ok, err = pcall(function()
@@ -361,11 +435,9 @@ describe("fs", function()
         end)
         expect(ok).toBe(false)
         expect(tostring(err):find("invalid mode", 1, true) ~= nil).toBe(true)
-        cleanup()
     end)
 
     it("changes file permissions with SetPermissions and chmod", function()
-        cleanup()
         fs.CreateDirectory(tmpRoot)
         local filePath = path.join(tmpRoot, "perm.txt")
         fs.WriteFile(filePath, "perm content")
@@ -381,6 +453,5 @@ describe("fs", function()
         fs.chmod(filePath, 493) -- 0755
         local stChmod = fs.Stat(filePath)
         expect(stChmod.mode > 0).toBe(true)
-        cleanup()
     end)
 end)
