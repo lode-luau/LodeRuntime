@@ -1,0 +1,15 @@
+{
+  "name": "crypto",
+  "version": "0.1.0",
+  "description": "Lode cryptography module with native platform providers",
+  "author": "Lode Team",
+  "license": "MIT",
+  "libraries": {
+    "windows": {
+      "x64": "libs/windows/x64/crypto.dll"
+    }
+  },
+  "releaseTargets": [
+    { "platform": "windows", "architecture": "x64" }
+  ]
+}
