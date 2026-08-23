@@ -40,9 +40,15 @@ struct ValueConverter
         {
             return val;
         }
-        else if constexpr (std::is_same_v<CleanArg, std::string> || std::is_same_v<CleanArg, std::string_view>)
+        else if constexpr (std::is_same_v<CleanArg, std::string>)
         {
             return val.AsString();
+        }
+        else if constexpr (std::is_same_v<CleanArg, std::string_view>)
+        {
+            // Zero-copy: the view aliases the string owned by the value, which
+            // stays alive on the Lua stack for the duration of the native call.
+            return val.AsStringView();
         }
         else if constexpr (std::is_floating_point_v<CleanArg>)
         {
@@ -96,13 +102,21 @@ struct ValueReturner
         {
             return Value(result);
         }
-        else if constexpr (std::is_floating_point_v<CleanRet> || std::is_integral_v<CleanRet>)
+        else if constexpr (std::is_same_v<CleanRet, bool>)
+        {
+            // Must precede the integral checks: std::is_integral_v<bool> is
+            // true, and booleans need the dedicated Boolean path here.
+            return Value(result);
+        }
+        else if constexpr (std::is_floating_point_v<CleanRet>)
         {
             return Value(static_cast<double>(result));
         }
-        else if constexpr (std::is_same_v<CleanRet, bool>)
+        else if constexpr (std::is_integral_v<CleanRet>)
         {
-            return Value(result);
+            // Keep integral results on the integer path; converting through
+            // double loses precision above 2^53.
+            return Value(static_cast<int64_t>(result));
         }
         else
         {
