@@ -1,4 +1,4 @@
-# LodeRuntime [![nightly](https://github.com/lode-luau/LodeRuntime/actions/workflows/nightly.yml/badge.svg)](https://github.com/lode-luau/LodeRuntime/actions/workflows/nightly.yml)
+# LodeRuntime [![nightly](https://github.com/lode-luau/LodeRuntime/actions/workflows/nightly.yml/badge.svg)](https://github.com/lode-luau/LodeRuntime/actions/workflows/nightly.yml) [![Latest Nightly Release](https://img.shields.io/github/v/release/lode-luau/LodeRuntime?include_prereleases&label=latest%20nightly)](https://github.com/lode-luau/LodeRuntime/releases)
 
 A fast, modular runtime environment for executing Luau scripts.
 
