@@ -12,7 +12,12 @@ jobs:
   build-and-publish:
     runs-on: windows-latest
     steps:
+      # Full history and tags: the release-notes step walks commits and
+      # nightly tags to describe everything changed since the last build.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Compute nightly version
         id: version
@@ -308,6 +313,104 @@ jobs:
               "$hash  $archive" | Set-Content -Path "$archive.sha256" -Encoding ascii
           }
 
+      - name: Generate release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NIGHTLY_VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -uo pipefail
+          REPO="${GITHUB_REPOSITORY}"
+          WORKDIR="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
+          NOTES_FILE="$WORKDIR/release-notes.md"
+
+          # Newest existing nightly tag bounds the range; the very first
+          # nightly falls back to the whole history. PREV_TAG_IN exists only
+          # for local dry-runs of this script.
+          PREV_TAG="${PREV_TAG_IN:-$(git tag --list '1.0.0-nightly.*' --sort=-creatordate | head -n 1)}"
+          RANGE="${PREV_TAG:+$PREV_TAG..}HEAD"
+
+          # Collect unique merged PRs (and stray direct-push commits),
+          # oldest first, with one API lookup per commit.
+          declare -a ORDER=() NEW_LINES=()
+          declare -A SEEN=() PR_TITLE=() PR_LOGIN=() PR_SHA=() SHA_EMAIL=()
+
+          git log --reverse --format='%H%x09%h%x09%s%x09%ae' "$RANGE" > "$WORKDIR/_commits.tsv"
+          while IFS=$'\t' read -r sha short subject email; do
+            SHA_EMAIL["$sha"]="$email"
+            meta="$(gh api "repos/$REPO/commits/$sha/pulls" \
+              --jq '(map(select(.merged_at != null)) | first) as $p
+                    | if $p == null then ""
+                      else "\($p.number)\t\($p.user.login // "")\t\($p.title // "")" end' 2>/dev/null || true)"
+            if [ -n "$meta" ]; then
+              num="${meta%%$'\t'*}"
+              rest="${meta#*$'\t'}"
+              login="${rest%%$'\t'*}"
+              title="${rest#*$'\t'}"
+              if [ -z "${SEEN[pr:$num]:-}" ]; then
+                SEEN[pr:$num]=1
+                ORDER+=("pr:$num")
+                PR_TITLE[pr:$num]="$title"
+                PR_LOGIN[pr:$num]="$login"
+                PR_SHA[pr:$num]="$sha"
+              fi
+            else
+              # Commit without an associated pull request.
+              if [ -z "${SEEN[sha:$sha]:-}" ]; then
+                SEEN[sha:$sha]=1
+                ORDER+=("sha:$short")
+                PR_TITLE[sha:$short]="$subject"
+              fi
+            fi
+          done < "$WORKDIR/_commits.tsv"
+          rm -f "$WORKDIR/_commits.tsv"
+
+          {
+            echo "Automated nightly build."
+            echo
+            echo "## What's Changed"
+            echo
+            for key in "${ORDER[@]}"; do
+              case "$key" in
+                pr:*)
+                  num="${key#pr:}"
+                  echo "* ${PR_TITLE[$key]} by @${PR_LOGIN[$key]} in #$num"
+                  ;;
+                *)
+                  echo "* ${PR_TITLE[$key]} (${key#sha:})"
+                  ;;
+              esac
+            done
+            echo
+
+            if [ -n "$PREV_TAG" ]; then
+              git log --format='%ae' "$PREV_TAG" | sort -u > "$WORKDIR/_authors_before.txt"
+              declare -A NEW_SEEN=()
+              for key in "${ORDER[@]}"; do
+                case "$key" in pr:*) ;; *) continue ;; esac
+                login="${PR_LOGIN[$key]}"
+                email="${SHA_EMAIL[${PR_SHA[$key]}]:-}"
+                [ -n "$login" ] || continue
+                [ -n "$email" ] || continue
+                [ -z "${NEW_SEEN[$login]:-}" ] || continue
+                if ! grep -qxF "$email" "$WORKDIR/_authors_before.txt"; then
+                  NEW_SEEN["$login"]=1
+                  NEW_LINES+=("* @$login made their first contribution in #${key#pr:}")
+                fi
+              done
+              rm -f "$WORKDIR/_authors_before.txt"
+              if [ "${#NEW_LINES[@]}" -gt 0 ]; then
+                echo "## New Contributors"
+                echo
+                printf '%s\n' "${NEW_LINES[@]}"
+                echo
+              fi
+              echo "**Full Changelog**: https://github.com/$REPO/compare/$PREV_TAG...$NIGHTLY_VERSION"
+            fi
+          } > "$NOTES_FILE"
+
+          cat "$NOTES_FILE"
+
       - name: Publish nightly release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -320,5 +423,5 @@ jobs:
             lode-stdlib-*.zip `
             lode-stdlib-*.zip.sha256 `
             --title "Nightly ${{ steps.version.outputs.version }}" `
-            --notes "Automated nightly build. Runtime, bundled stdlib, individual stdlib artifacts, SDK, sanity suite, and CTest validated." `
+            --notes-file "${{ runner.temp }}/release-notes.md" `
             --prerelease
