@@ -13,6 +13,20 @@ namespace Lode
 class State;
 
 /**
+ * @brief Memory/CPU budget for the GC hook driven from EventLoop::Run().
+ *
+ * All sizes are in kilobytes; leaving a field at 0 disables that knob:
+ * stepSizeKB == 0 lets Luau pick its automatic step size, and zeroed soft/hard
+ * limits turn the memory thresholds off entirely (the default).
+ */
+struct LODE_API GcBudget
+{
+    int stepSizeKB = 0;     ///< Incremental GC step size; 0 = Luau automatic step size.
+    double softLimitKB = 0; ///< 0 = disabled; above this the hook runs an extra larger GC step.
+    double hardLimitKB = 0; ///< 0 = disabled; above this the hook forces a full collection.
+};
+
+/**
  * @brief Represents a libuv-based event loop for asynchronous operations.
  */
 class LODE_API EventLoop
@@ -32,6 +46,15 @@ public:
     /** @brief Stops the event loop. */
     void Stop();
 
+    /**
+     * @brief Configures the incremental GC driven from Run().
+     *
+     * The values are only stored here: a Run() already in progress keeps the
+     * budget it captured at entry and the new settings apply from the next
+     * Run() call onwards.
+     */
+    void SetGcBudget(const GcBudget& budget);
+
     /** @brief Closes the loop after all owned handles have been drained. */
     void Close();
 
@@ -40,6 +63,8 @@ public:
 
 private:
     uv_loop_t* loop_ = nullptr;
+    GcBudget gcBudget_;         ///< Disabled by default (all fields zero).
+    bool gcHookActive_ = false; ///< True while a Run() owns the GC prepare hook.
 };
 
 } // namespace Lode
