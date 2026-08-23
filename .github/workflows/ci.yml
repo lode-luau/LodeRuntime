@@ -3,14 +3,90 @@ name: ci
 on:
   pull_request:
     branches: [main]
+    # Keep this list in sync with the documentation-only filter in
+    # .github/scripts/generate-release-notes.sh: builds are pointless when
+    # every touched file is pure documentation. Manual dispatches are not
+    # affected because paths filters do not apply to them.
+    paths-ignore:
+      - '**.md'
+      - '**.txt'
+      - '.gitignore'
+      - '.gitattributes'
+      - 'LICENSE'
+      - 'LICENSE.*'
+      - 'docs/**'
+      - 'rfcs/**'
   push:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - '**.txt'
+      - '.gitignore'
+      - '.gitattributes'
+      - 'LICENSE'
+      - 'LICENSE.*'
+      - 'docs/**'
+      - 'rfcs/**'
 
 permissions:
   contents: read
 
 jobs:
+  # Semantic gate on top of paths-ignore: paths-ignore skips builds whose
+  # touched paths are all documentation, while this gate also skips ranges
+  # where every remaining source hunk is comments or whitespace noise,
+  # using the shared .github/scripts/is-real-change.sh classifier.
+  change-gate:
+    runs-on: ubuntu-latest
+    outputs:
+      real: ${{ steps.check.outputs.real }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Decide whether CI should build
+        id: check
+        shell: bash
+        run: |
+          set -uo pipefail
+          SHA="${{ github.sha }}"
+
+          case "${{ github.event_name }}" in
+            workflow_dispatch)
+              echo "Manual dispatch: building."
+              echo "real=true" >> "$GITHUB_OUTPUT"
+              exit 0 ;;
+            pull_request)
+              BASE="$(git merge-base "${{ github.event.pull_request.base.sha }}" HEAD)" ;;
+            push)
+              BASE="${{ github.event.before }}"
+              # Zero SHA on the first push of a branch or an unreachable base
+              # (force-push): compare against the tip of main instead.
+              if ! git rev-parse -q --verify "$BASE^{commit}" >/dev/null 2>&1; then
+                git fetch --quiet origin main
+                BASE="$(git merge-base FETCH_HEAD HEAD)"
+              fi ;;
+            *)
+              BASE="" ;;
+          esac
+
+          if [ -z "$BASE" ]; then
+            echo "No comparable base revision: building."
+            echo "real=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if bash .github/scripts/is-real-change.sh "$BASE" "$SHA"; then
+            echo "real=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Documentation/comment/whitespace-only range: skipping build."
+            echo "real=false" >> "$GITHUB_OUTPUT"
+          fi
+
   build-and-validate:
+    needs: change-gate
+    if: needs.change-gate.outputs.real == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
