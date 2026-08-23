@@ -45,6 +45,17 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Precision layer for the classifier: string-aware comment stripper.
+      # Version-pinned; the classifier falls back to git-only filters if
+      # this download ever fails.
+      - name: Install shush
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL -o "$HOME/.local/bin/shush" \
+            "https://github.com/carlosarraes/shush/releases/download/v0.3.3/shush-linux-x86_64"
+          chmod +x "$HOME/.local/bin/shush"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
       - name: Decide whether CI should build
         id: check
         shell: bash
