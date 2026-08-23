@@ -13,6 +13,11 @@
 # to its PR without any per-commit API calls. Direct pushes render as
 # short-sha lines. New contributors are resolved with one small search per
 # distinct author.
+#
+# Entries whose entire diff is documentation (markdown, txt, license, docs/
+# or rfcs/ trees, git metadata files) are omitted from the notes; mixed
+# changes always stay. Keep the pattern list in sync with the paths-ignore
+# block in .github/workflows/ci.yml.
 set -uo pipefail
 
 REPO="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"
@@ -21,6 +26,15 @@ WORKDIR="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
 NOTES_FILE="${NOTES_FILE:-$WORKDIR/release-notes.md}"
 OWNER="${REPO%%/*}"
 NAME="${REPO#*/}"
+
+# True when the given revision range carries a real change. Delegates to
+# the shared checker: documentation-only paths are noise, and source files
+# are compared semantically (comments and whitespace are ignored) when
+# Difftastic is available.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+has_real_change() {
+  bash "$SCRIPT_DIR/is-real-change.sh" "$@" > /dev/null
+}
 
 # Newest nightly tag bounds the diff; PREV_TAG_IN exists only for dry-runs.
 # Sort by name: lightweight tags fall back to commit dates under creatordate.
@@ -51,6 +65,7 @@ rm -f "$WORKDIR/_prmap.tsv"
 
 # --- First-parent walk: PR merges in order, direct pushes as fallbacks ---
 declare -a ORDER=() NEW_LINES=()
+OMITTED=0
 declare -A SEEN=() TITLE=() LOGIN=()
 
 while IFS=$'\t' read -r full short subject; do
@@ -59,6 +74,10 @@ while IFS=$'\t' read -r full short subject; do
     num="${BASH_REMATCH[1]}"
     key="pr:$num"
     [ -n "${SEEN[$key]:-}" ] && continue
+    if ! has_real_change "${full}^1" "$full"; then
+      OMITTED=$((OMITTED + 1))
+      continue
+    fi
     SEEN["$key"]=1
     ORDER+=("$key")
     meta="${OID2META[$full]:-}"
@@ -80,6 +99,10 @@ while IFS=$'\t' read -r full short subject; do
   else
     key="sha:$short"
     [ -n "${SEEN[$key]:-}" ] && continue
+    if ! has_real_change "${full}^" "$full"; then
+      OMITTED=$((OMITTED + 1))
+      continue
+    fi
     SEEN["$key"]=1
     ORDER+=("$key")
     TITLE["$key"]="$subject"
@@ -106,6 +129,11 @@ done < <(git log --first-parent --reverse --format='%H%x09%h%x09%s' "$RANGE")
           ;;
       esac
     done
+
+    if [ "$OMITTED" -gt 0 ]; then
+      echo "_$OMITTED documentation-only change(s) omitted._"
+    fi
+
     echo
 
     declare -A NEW_SEEN=()
