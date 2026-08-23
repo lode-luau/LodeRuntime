@@ -14,9 +14,6 @@ obj/
 *.a
 *.bin
 
-# Helper Scripts
-*.ps1
-
 # IDE
 .vscode/
 .idea/
