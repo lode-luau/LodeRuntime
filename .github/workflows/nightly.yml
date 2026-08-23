@@ -367,45 +367,50 @@ jobs:
 
           {
             echo "Automated nightly build."
-            echo
-            echo "## What's Changed"
-            echo
-            for key in "${ORDER[@]}"; do
-              case "$key" in
-                pr:*)
-                  num="${key#pr:}"
-                  echo "* ${PR_TITLE[$key]} by @${PR_LOGIN[$key]} in #$num"
-                  ;;
-                *)
-                  echo "* ${PR_TITLE[$key]} (${key#sha:})"
-                  ;;
-              esac
-            done
-            echo
 
-            if [ -n "$PREV_TAG" ]; then
-              git log --format='%ae' "$PREV_TAG" | sort -u > "$WORKDIR/_authors_before.txt"
-              declare -A NEW_SEEN=()
+            # Nothing merged since the previous nightly: publish plain
+            # notes without What's Changed, New Contributors, or compare.
+            if [ "${#ORDER[@]}" -gt 0 ]; then
+              echo
+              echo "## What's Changed"
+              echo
               for key in "${ORDER[@]}"; do
-                case "$key" in pr:*) ;; *) continue ;; esac
-                login="${PR_LOGIN[$key]}"
-                email="${SHA_EMAIL[${PR_SHA[$key]}]:-}"
-                [ -n "$login" ] || continue
-                [ -n "$email" ] || continue
-                [ -z "${NEW_SEEN[$login]:-}" ] || continue
-                if ! grep -qxF "$email" "$WORKDIR/_authors_before.txt"; then
-                  NEW_SEEN["$login"]=1
-                  NEW_LINES+=("* @$login made their first contribution in #${key#pr:}")
-                fi
+                case "$key" in
+                  pr:*)
+                    num="${key#pr:}"
+                    echo "* ${PR_TITLE[$key]} by @${PR_LOGIN[$key]} in #$num"
+                    ;;
+                  *)
+                    echo "* ${PR_TITLE[$key]} (${key#sha:})"
+                    ;;
+                esac
               done
-              rm -f "$WORKDIR/_authors_before.txt"
-              if [ "${#NEW_LINES[@]}" -gt 0 ]; then
-                echo "## New Contributors"
-                echo
-                printf '%s\n' "${NEW_LINES[@]}"
-                echo
+              echo
+
+              if [ -n "$PREV_TAG" ]; then
+                git log --format='%ae' "$PREV_TAG" | sort -u > "$WORKDIR/_authors_before.txt"
+                declare -A NEW_SEEN=()
+                for key in "${ORDER[@]}"; do
+                  case "$key" in pr:*) ;; *) continue ;; esac
+                  login="${PR_LOGIN[$key]}"
+                  email="${SHA_EMAIL[${PR_SHA[$key]}]:-}"
+                  [ -n "$login" ] || continue
+                  [ -n "$email" ] || continue
+                  [ -z "${NEW_SEEN[$login]:-}" ] || continue
+                  if ! grep -qxF "$email" "$WORKDIR/_authors_before.txt"; then
+                    NEW_SEEN["$login"]=1
+                    NEW_LINES+=("* @$login made their first contribution in #${key#pr:}")
+                  fi
+                done
+                rm -f "$WORKDIR/_authors_before.txt"
+                if [ "${#NEW_LINES[@]}" -gt 0 ]; then
+                  echo "## New Contributors"
+                  echo
+                  printf '%s\n' "${NEW_LINES[@]}"
+                  echo
+                fi
+                echo "**Full Changelog**: https://github.com/$REPO/compare/$PREV_TAG...$NIGHTLY_VERSION"
               fi
-              echo "**Full Changelog**: https://github.com/$REPO/compare/$PREV_TAG...$NIGHTLY_VERSION"
             fi
           } > "$NOTES_FILE"
 
