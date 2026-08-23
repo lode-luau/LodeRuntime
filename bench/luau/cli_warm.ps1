@@ -4,7 +4,7 @@
 #   powershell -ExecutionPolicy Bypass -File bench/luau/cli_warm.ps1 -Runtime build/bin/Release/lode.exe -Runs 20
 param(
     [string]$Runtime = "build/bin/Release/lode.exe",
-    [int]$Runs = 20,
+    [int]$Runs = 10,
     [string]$Script = "bench/fixtures/big.luau"
 )
 
@@ -19,8 +19,11 @@ for ($i = 0; $i -lt $Runs; $i++) {
     $times += $sw.ElapsedMilliseconds
 }
 
+# Arithmetic mean over the runs, matching the ns/op harnesses (7-10 repeats,
+# mean reported); min kept as a lower-bound diagnostic.
+$stats = $times | Measure-Object -Average
+$avg = [int][math]::Round($stats.Average)
 $sorted = @($times | Sort-Object)
-$median = $sorted[[int]($sorted.Count / 2)]
 $min = $sorted[0]
 
-Write-Output "cli_warm_ms: median=$median min=$min runs=$Runs"
+Write-Output "cli_warm_ms: avg=$avg min=$min runs=$Runs"

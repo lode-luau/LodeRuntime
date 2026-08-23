@@ -19,9 +19,9 @@
 //
 // Methodology: adaptive timing (google-benchmark min_time model) — a doubling
 // calibration probe estimates per-op cost, the iteration count targets a
-// ~400 ms repeat, and the number of repeats follows a ~2 s per-scenario
-// budget (3-10 repeats, median reported). Total runtime stays bounded even if
-// a scenario becomes orders of magnitude slower or faster.
+// ~400 ms repeat, and the number of repeats follows a ~3.6 s per-scenario
+// budget (7-10 repeats, arithmetic mean reported). Total runtime stays bounded
+// even if a scenario becomes orders of magnitude slower or faster.
 // Use Release builds only; numbers are only meaningful relative to each other
 // (baseline vs change), not as absolute throughput claims.
 #include "Lode/State.hpp"
@@ -48,8 +48,8 @@ namespace
 using Clock = std::chrono::steady_clock;
 
 constexpr double kRepeatMs = 400.0;    // target wall time per measured repeat
-constexpr double kBudgetMs = 2000.0;   // total per-scenario budget (repeats)
-constexpr int kMinRepeats = 3;
+constexpr double kBudgetMs = 3600.0;   // total per-scenario budget (repeats)
+constexpr int kMinRepeats = 7;
 constexpr int kMaxRepeats = 10;
 constexpr int64_t kMaxIterations = 1000000000;
 
@@ -98,9 +98,13 @@ void Measure(const char* name, const std::function<void()>& body)
         nsPerOp.push_back(ns / static_cast<double>(targetIters));
     }
 
-    std::sort(nsPerOp.begin(), nsPerOp.end());
-    double median = nsPerOp[nsPerOp.size() / 2];
-    std::printf("%-32s %12.2f ns/op\n", name, median);
+    // Arithmetic mean over the repeats: with 7-10 samples the averaging
+    // smooths run-to-run noise better than the old 3-10/median scheme.
+    double sum = 0.0;
+    for (double ns : nsPerOp)
+        sum += ns;
+    const double mean = sum / static_cast<double>(nsPerOp.size());
+    std::printf("%-32s %12.2f ns/op\n", name, mean);
 }
 
 struct Vec

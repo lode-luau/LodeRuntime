@@ -5,16 +5,16 @@
 --
 -- Methodology: adaptive timing (google-benchmark min_time model) — a doubling
 -- calibration probe estimates per-op cost, the iteration count targets a
--- ~400 ms repeat, and the number of repeats follows a ~2 s per-scenario
--- budget (3-10 repeats, median reported). Total runtime stays bounded even if
--- a scenario becomes orders of magnitude slower or faster.
+-- ~400 ms repeat, and the number of repeats follows a ~3.6 s per-scenario
+-- budget (7-10 repeats, arithmetic mean reported). Total runtime stays bounded
+-- even if a scenario becomes orders of magnitude slower or faster.
 -- Use Release builds only.
 
 export type BenchFn = (string, () -> ()) -> ()
 
 local kRepeatMs = 400.0
-local kBudgetMs = 2000.0
-local kMinRepeats = 3
+local kBudgetMs = 3600.0
+local kMinRepeats = 7
 local kMaxRepeats = 10
 local kMaxIterations = 1000000000
 
@@ -56,9 +56,14 @@ local function bench(name: string, fn: () -> ())
         table.insert(times, (dt * 1e9) / targetIters)
     end
 
-    table.sort(times)
-    local median = times[math.floor(#times / 2)]
-    print(string.format("%-32s %12.2f ns/op", name, median))
+    -- Arithmetic mean over the repeats: with 7-10 samples the averaging
+    -- smooths run-to-run noise better than the old 3-10/median scheme.
+    local sum = 0.0
+    for _, ns in times do
+        sum += ns
+    end
+    local mean = sum / #times
+    print(string.format("%-32s %12.2f ns/op", name, mean))
 end
 
 print("=== LodeRuntime Luau benchmarks ===")

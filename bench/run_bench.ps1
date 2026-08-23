@@ -17,7 +17,7 @@
 #    (binaries exist, fixture generation is deterministic, every benchmark
 #    exits 0 and emits its expected metrics). Any mechanical failure aborts.
 # 2. MEASURE: runs lode_bench (C++), the Luau scenarios, and the warm-CLI
-#    benchmark, collecting the median numbers each harness already reports.
+#    benchmark; every harness reports the arithmetic mean of 7-10 repeats.
 # 3. COMPARE OR RECORD: if the baseline is missing (or -RecordBaseline is
 #    given), the current run becomes the baseline; otherwise a delta table
 #    is printed against it. Deltas are informational unless -FailOnRegression
@@ -111,8 +111,8 @@ try {
     if (-not $selftest.run_luau_ok) { throw "bench/luau/run.luau did not finish cleanly" }
 
     $cliOut = Invoke-Checked "powershell" "cli_warm.ps1" @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $CliWarm)
-    $selftest.cli_warm_ok = ($cliOut -match "cli_warm_ms: median=\d+")
-    if (-not $selftest.cli_warm_ok) { throw "cli_warm did not report a median" }
+    $selftest.cli_warm_ok = ($cliOut -match "cli_warm_ms: avg=\d+")
+    if (-not $selftest.cli_warm_ok) { throw "cli_warm did not report an average" }
 
     # --- Measure ---
     Write-Host "== measuring =="
@@ -133,7 +133,7 @@ try {
         }
     }
     foreach ($line in ($cliOut -split "`r?`n")) {
-        if ($line -match '^cli_warm_ms: median=(\d+)\s+min=(\d+)') {
+        if ($line -match '^cli_warm_ms: avg=(\d+)\s+min=(\d+)') {
             $metrics.cli_warm_ms = [double]$Matches[1]
         }
     }
