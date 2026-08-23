@@ -27,6 +27,17 @@ class Metatable;
 class EventLoop;
 
 /**
+ * @brief Selects which functions Luau's native code generation compiles when
+ * bytecode executes.
+ */
+enum class CodeGenMode
+{
+    NativeModulesOnly, ///< Compile only functions from modules marked --!native (default).
+    AllFunctions,      ///< Compile every function regardless of module directives.
+    Off                ///< Skip native code generation; everything stays interpreted.
+};
+
+/**
  * @brief Represents an isolated Luau virtual machine instance or a thread state.
  * 
  * The State class is the central point of execution in Lode Runtime. It manages
@@ -96,6 +107,9 @@ public:
 
     void SetCliArgs(const std::vector<std::string>& args);
     [[nodiscard]] std::vector<std::string> GetCliArgs() const;
+
+    /** @brief Sets which functions native code generation compiles at execution time (default NativeModulesOnly). */
+    void SetCodeGenMode(CodeGenMode mode);
 
     void SetGlobal(const std::string& name, const Value& value);
     [[nodiscard]] Result<Value> GetGlobal(const std::string& name) const;
