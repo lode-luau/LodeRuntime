@@ -85,6 +85,13 @@ public:
 
 private:
     std::shared_ptr<Detail::PinnedRef> ref_;
+
+    // Cached data pointer/size captured at construction. The data block of a
+    // Luau buffer is stable for as long as the object stays pinned by ref_,
+    // so accessors can skip the registry roundtrip entirely.
+    uint8_t* cachedData_ = nullptr;
+    size_t cachedSize_ = 0;
+    bool hasCache_ = false;
 };
 
 } // namespace Lode
