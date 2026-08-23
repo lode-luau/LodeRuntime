@@ -9,7 +9,67 @@ permissions:
   contents: write
 
 jobs:
+  # Cheap gate for scheduled runs: skip the expensive Windows build when a
+  # nightly already shipped today and nothing changed since the last one.
+  # Manual dispatches always run.
+  nightly-guard:
+    runs-on: ubuntu-latest
+    outputs:
+      needed: ${{ steps.check.outputs.needed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Decide whether the nightly is needed
+        id: check
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        shell: bash
+        run: |
+          set -uo pipefail
+
+          # Manual dispatches always run, scheduled ones may be skipped.
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "Manual dispatch: running."
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Already shipped a nightly today?
+          DATE_UTC=$(date -u +%Y%m%d)
+          TODAY_COUNT=$(git ls-remote --tags origin \
+            "refs/tags/1.0.0-nightly.${DATE_UTC}-*" \
+            "refs/tags/1.0.0-nightly.${DATE_UTC}.*" | wc -l | tr -d ' ')
+          if [ "$TODAY_COUNT" -eq 0 ]; then
+            echo "No nightly published today yet: running."
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Anything committed since the most recent nightly tag?
+          # Sort by tag name (date-prefixed, version-aware): lightweight tags
+          # would otherwise fall back to commit dates under --sort=-creatordate.
+          PREV_TAG=$(git tag --list '1.0.0-nightly.*' | sort -rV | head -n 1)
+          if [ -z "$PREV_TAG" ]; then
+            echo "No previous nightly tag found: running."
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          NEW_COMMITS=$(git rev-list "${PREV_TAG}..HEAD" --count)
+          if [ "$NEW_COMMITS" -gt 0 ]; then
+            echo "$NEW_COMMITS new commit(s) since $PREV_TAG: running."
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "A nightly already ran today and nothing changed since $PREV_TAG: skipping."
+          echo "needed=false" >> "$GITHUB_OUTPUT"
+
   build-and-publish:
+    needs: nightly-guard
+    if: needs.nightly-guard.outputs.needed == 'true'
     runs-on: windows-latest
     steps:
       # Full history and tags: the release-notes step walks commits and
@@ -327,7 +387,7 @@ jobs:
           # Newest existing nightly tag bounds the range; the very first
           # nightly falls back to the whole history. PREV_TAG_IN exists only
           # for local dry-runs of this script.
-          PREV_TAG="${PREV_TAG_IN:-$(git tag --list '1.0.0-nightly.*' --sort=-creatordate | head -n 1)}"
+          PREV_TAG="${PREV_TAG_IN:-$(git tag --list '1.0.0-nightly.*' | sort -rV | head -n 1)}"
           RANGE="${PREV_TAG:+$PREV_TAG..}HEAD"
 
           # Collect unique merged PRs (and stray direct-push commits),
