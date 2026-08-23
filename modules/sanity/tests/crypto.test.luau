@@ -104,7 +104,16 @@ describe("crypto asymmetric", function()
     it("signs and encrypts with RSA-3072", function()
         local pair = crypto.generateKeyPair("rsa-3072")
         for _, algorithm in ipairs(signatureAlgorithms) do
-            local signature = crypto.sign(algorithm, pair.privateKey, "message")
+            -- TEMPORARY diagnostics: capture the failing key material so the
+            -- intermittent "invalid RSA private key" can be reproduced offline.
+            local okSign, signResult = pcall(crypto.sign, algorithm, pair.privateKey, "message")
+            if not okSign then
+                print("DIAG_RSA_BEGIN algorithm=" .. algorithm)
+                print(tostring(pair.privateKey))
+                print("DIAG_RSA_END")
+                error(tostring(signResult))
+            end
+            local signature = signResult
             expect(crypto.verify(algorithm, pair.publicKey, "message", signature)).toBe(true)
             expect(crypto.verify(algorithm, pair.publicKey, "other", signature)).toBe(false)
         end
