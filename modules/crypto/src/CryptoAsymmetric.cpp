@@ -241,17 +241,41 @@ BytesVector Blob(const BCRYPT_RSAKEY_BLOB& header, std::initializer_list<BytesVe
 {
     BytesVector out(sizeof(header)); std::memcpy(out.data(), &header, sizeof(header)); for (const auto& value : values) out.insert(out.end(), value.begin(), value.end()); return out;
 }
+// CNG key blobs use fixed-width big-endian fields, while parsed DER integers
+// keep minimal magnitude. Zero-pad up to the field width; values wider than
+// the width pass through untouched so CNG reports the mismatch instead of
+// this code silently truncating.
+BytesVector Padded(const BytesVector& value, size_t width)
+{
+    if (value.size() >= width) return value;
+    BytesVector padded(width - value.size(), 0);
+    padded.insert(padded.end(), value.begin(), value.end());
+    return padded;
+}
 BytesVector RsaPublicBlob(const RsaParts& k)
 {
     BCRYPT_RSAKEY_BLOB h{BCRYPT_RSAPUBLIC_MAGIC, static_cast<ULONG>(k.n.size()*8), static_cast<ULONG>(k.e.size()), static_cast<ULONG>(k.n.size()), 0, 0}; return Blob(h, {k.e, k.n});
 }
 BytesVector RsaPrivateBlob(const RsaParts& k)
 {
-    BCRYPT_RSAKEY_BLOB h{BCRYPT_RSAFULLPRIVATE_MAGIC, static_cast<ULONG>(k.n.size()*8), static_cast<ULONG>(k.e.size()), static_cast<ULONG>(k.n.size()), static_cast<ULONG>(k.p.size()), static_cast<ULONG>(k.q.size())}; return Blob(h, {k.e,k.n,k.p,k.q,k.dp,k.dq,k.qi,k.d});
+    // Field widths follow the CNG layout rules: primes and their CRT
+    // exponents occupy half the modulus width, d occupies the full modulus
+    // width. Minimal-magnitude integers are zero-padded back to those
+    // widths; skipping this makes imports fail whenever a component's top
+    // byte happens to be zero (intermittent per generated key).
+    const size_t modulusBytes = k.n.size();
+    const size_t halfBytes = (modulusBytes + 1) / 2;
+    BCRYPT_RSAKEY_BLOB h{BCRYPT_RSAFULLPRIVATE_MAGIC, static_cast<ULONG>(modulusBytes*8), static_cast<ULONG>(k.e.size()), static_cast<ULONG>(modulusBytes), static_cast<ULONG>(halfBytes), static_cast<ULONG>(halfBytes)};
+    return Blob(h, {k.e, Padded(k.n, modulusBytes), Padded(k.p, halfBytes), Padded(k.q, halfBytes), Padded(k.dp, halfBytes), Padded(k.dq, halfBytes), Padded(k.qi, halfBytes), Padded(k.d, modulusBytes)});
 }
 BytesVector EccBlob(ULONG magic, const EccParts& k, bool privateKey)
 {
-    BCRYPT_ECCKEY_BLOB h{magic, 32}; BytesVector out(sizeof(h)); std::memcpy(out.data(), &h, sizeof(h)); out.insert(out.end(), k.x.begin(), k.x.end()); out.insert(out.end(), k.y.begin(), k.y.end()); if (privateKey) out.insert(out.end(), k.d.begin(), k.d.end()); return out;
+    BCRYPT_ECCKEY_BLOB h{magic, 32}; BytesVector out(sizeof(h)); std::memcpy(out.data(), &h, sizeof(h));
+    // Coordinates and scalars can be one byte short when the top bit is
+    // clear; CNG expects fixed 32-byte fields for P-256.
+    for (const BytesVector* value : {&k.x, &k.y}) { const auto padded = Padded(*value, 32); out.insert(out.end(), padded.begin(), padded.end()); }
+    if (privateKey) { const auto padded = Padded(k.d, 32); out.insert(out.end(), padded.begin(), padded.end()); }
+    return out;
 }
 
 bool ExportKey(BCRYPT_KEY_HANDLE key, LPCWSTR type, BytesVector& out)
