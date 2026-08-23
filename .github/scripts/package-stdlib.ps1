@@ -6,7 +6,9 @@ param(
     [string]$Version
 )
 
-Set-StrictMode -Version Latest
+# No Set-StrictMode here on purpose: manifests may omit optional keys such
+# as dependencies, and the checks below rely on absent properties resolving
+# to $null.
 $ErrorActionPreference = 'Stop'
 
 $ver = $Version
