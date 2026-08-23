@@ -1,0 +1,4 @@
+# Workflow helper scripts must keep their native line endings so they run
+# identically in Actions and under local linters/shells.
+*.sh text eol=lf
+*.ps1 text eol=crlf
