@@ -27,6 +27,7 @@ struct State::Impl
     std::vector<std::string> modulePaths;
     std::unique_ptr<EventLoop> ownedEventLoop;
     EventLoop* eventLoop = nullptr;
+    CodeGenMode codeGenMode = CodeGenMode::NativeModulesOnly;
 };
 
 State::State() : L_(luaL_newstate()), ownsState_(true), impl_(std::make_unique<Impl>())
@@ -182,9 +183,17 @@ Result<int> State::ExecuteBytecodeWithResults(std::string_view bytecode, std::st
         return Error::Syntax("Bytecode load failed: " + errStr);
     }
 
-    if (Luau::CodeGen::isSupported())
+    // Native code generation honors the per-State mode set via SetCodeGenMode
+    // (CLI --codegen): off skips compilation entirely, all-functions passes no
+    // restriction flag so every function is compiled, and the default mirrors
+    // the historical behavior of compiling only --!native modules.
+    const CodeGenMode codeGenMode = impl_ ? impl_->codeGenMode : CodeGenMode::NativeModulesOnly;
+    if (codeGenMode != CodeGenMode::Off && Luau::CodeGen::isSupported())
     {
-        Luau::CodeGen::compile(co, -1, Luau::CodeGen::CodeGen_OnlyNativeModules);
+        if (codeGenMode == CodeGenMode::AllFunctions)
+            Luau::CodeGen::compile(co, -1, 0);
+        else
+            Luau::CodeGen::compile(co, -1, Luau::CodeGen::CodeGen_OnlyNativeModules);
     }
 
     int resStatus = lua_resume(co, nullptr, 0);
@@ -272,6 +281,12 @@ std::vector<std::string> State::GetCliArgs() const
     }
     lua_pop(L_, 1);
     return result;
+}
+
+void State::SetCodeGenMode(CodeGenMode mode)
+{
+    if (!impl_) return;
+    impl_->codeGenMode = mode;
 }
 
 void State::SetGlobal(const std::string& name, const Value& value)

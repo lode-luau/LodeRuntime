@@ -62,6 +62,18 @@ Buffer::Buffer(lua_State* L, int index)
     if (lua_type(L, index) == LUA_TBUFFER)
     {
         ref_ = std::make_shared<Detail::PinnedRef>(Detail::CaptureRef(L, index));
+
+        // The value is on the stack here, so resolve pointer/size without a
+        // registry roundtrip. Both stay valid while ref_ keeps the buffer
+        // pinned, letting every accessor skip lua_getref/lua_pop entirely.
+        size_t size = 0;
+        void* data = lua_tobuffer(L, index, &size);
+        if (data != nullptr || size != 0)
+        {
+            cachedData_ = static_cast<uint8_t*>(data);
+            cachedSize_ = size;
+            hasCache_ = true;
+        }
     }
 }
 
@@ -79,6 +91,7 @@ bool Buffer::IsValid() const
 void* Buffer::Data() const
 {
     if (!IsValid()) return nullptr;
+    if (hasCache_) return cachedData_;
     lua_getref(ref_->L, ref_->refId);
     void* ptr = lua_tobuffer(ref_->L, -1, nullptr);
     lua_pop(ref_->L, 1);
@@ -88,6 +101,7 @@ void* Buffer::Data() const
 size_t Buffer::Size() const
 {
     if (!IsValid()) return 0;
+    if (hasCache_) return cachedSize_;
     lua_getref(ref_->L, ref_->refId);
     size_t size = 0;
     lua_tobuffer(ref_->L, -1, &size);
@@ -98,6 +112,7 @@ size_t Buffer::Size() const
 std::span<uint8_t> Buffer::Span() const
 {
     if (!IsValid()) return {};
+    if (hasCache_) return std::span<uint8_t>(cachedData_, cachedSize_);
     lua_getref(ref_->L, ref_->refId);
     size_t size = 0;
     void* ptr = lua_tobuffer(ref_->L, -1, &size);

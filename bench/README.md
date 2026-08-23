@@ -11,7 +11,7 @@ bench/
   CMakeLists.txt            # lode_bench target (built only with -DLODE_BUILD_BENCH=ON)
   run_bench.ps1             # one script: self-test + measure + compare/record + save
   cpp/Bench.cpp             # C++ side measurements through the Lode public API
-  luau/run.luau             # Luau runner (adaptive timing, median ns/op)
+  luau/run.luau             # Luau runner (adaptive timing, mean ns/op)
   luau/scenarios/           # scenario scripts loaded by run.luau
   luau/cli_warm.ps1         # warm CLI startup measurement (compile-cache path)
   fixtures/big.luau         # ~2.5k line deterministic fixture for cli_warm
@@ -92,7 +92,7 @@ meaningless.
 
 | Scenario | Code path |
 |---|---|
-| `cli_warm_ms` | median warm-run wall time of a cached script (compile-cache hit path) |
+| `cli_warm_ms` | mean warm-run wall time of a cached script over 10 runs (compile-cache hit path) |
 
 ## Methodology
 
@@ -100,16 +100,17 @@ meaningless.
   timing is meaningless).
 - **Adaptive timing** (google-benchmark `min_time` model, in both harnesses):
   a doubling calibration probe estimates per-op cost, the iteration count
-  targets a ~400 ms repeat, and the number of repeats follows a ~2 s
-  per-scenario budget (3-10 repeats). Slow ops are sampled fewer times, fast
-  ops more — total runtime stays bounded (~30 s per harness) even if a
+  targets a ~400 ms repeat, and the number of repeats follows a ~3.6 s
+  per-scenario budget (7-10 repeats). Slow ops are sampled fewer times, fast
+  ops more — total runtime stays bounded (~60 s per harness) even if a
   scenario becomes orders of magnitude slower or faster.
 - `run_bench.ps1` self-tests the infrastructure first (binaries exist,
   fixture generation is deterministic, every benchmark exits 0 and emits its
   expected metrics); any mechanical failure aborts before measuring.
 - Warmup pass before measuring (caches, branch predictors, codegen).
-- **median** reported (robust against outliers/CPU noise).
-- Compare medians of the *same harness* on baseline vs change, **on the same
+- **arithmetic mean** over 7-10 repeats reported (averaging across more
+  repeats smooths run-to-run machine noise better than fewer/median samples).
+- Compare means of the *same harness* on baseline vs change, **on the same
   machine** — cross-machine or cross-session deltas are noise (locally the
   delta table is informational unless `-FailOnRegression` is passed).
 - **Decision rule**: a change counts as an improvement only when the targeted

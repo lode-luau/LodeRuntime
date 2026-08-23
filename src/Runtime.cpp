@@ -5,6 +5,7 @@
 #include "Lode/Logger.hpp"
 #include "Lode/Result.hpp"
 #include "Lode/EventLoop.hpp"
+#include "Lode/Gc.hpp"
 #include "Lode/Task.hpp"
 #include "CiGenerator.hpp"
 #include "GitResolver.hpp"
@@ -26,6 +27,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <optional>
 #include <sstream>
 #include <system_error>
 
@@ -314,6 +316,199 @@ bool IsHelpArgument(std::string_view argument)
     return argument == "--help" || argument == "-h";
 }
 
+// Performance tuning flags accepted before the first script/command argument.
+// Every field is optional: anything left unset keeps the previous behavior,
+// so passing none of these flags changes nothing.
+struct PerfSettings
+{
+    std::optional<int> optLevel;                  // --opt=N: compiler optimization level override
+    std::optional<Lode::CodeGenMode> codegenMode; // --codegen=native|all|off
+    std::optional<int> gcGoal;                    // --gc-goal=PCT
+    std::optional<int> gcStepmul;                 // --gc-stepmul=PCT
+    std::optional<int> gcStepsize;                // --gc-stepsize=KB
+    std::optional<double> memLimitMb;             // --mem-limit=MB (soft limit)
+};
+
+std::optional<int> ParseFlagInt(std::string_view value)
+{
+    if (value.empty() || value.size() > 9)
+        return std::nullopt;
+    int result = 0;
+    for (const char character : value)
+    {
+        if (character < '0' || character > '9')
+            return std::nullopt;
+        result = result * 10 + (character - '0');
+    }
+    return result;
+}
+
+std::optional<double> ParseFlagNumber(std::string_view value)
+{
+    if (value.empty())
+        return std::nullopt;
+    double result = 0.0;
+    double fraction = 0.1;
+    bool sawDigit = false;
+    bool sawDot = false;
+    for (const char character : value)
+    {
+        if (character >= '0' && character <= '9')
+        {
+            sawDigit = true;
+            if (sawDot)
+            {
+                result += static_cast<double>(character - '0') * fraction;
+                fraction *= 0.1;
+            }
+            else
+            {
+                result = result * 10.0 + static_cast<double>(character - '0');
+            }
+        }
+        else if (character == '.' && !sawDot)
+        {
+            sawDot = true;
+        }
+        else
+        {
+            return std::nullopt;
+        }
+    }
+    if (!sawDigit)
+        return std::nullopt;
+    return result;
+}
+
+// Recognizes one performance tuning flag. Returns:
+//  0 -> not a performance flag (the argument is left untouched),
+//  1 -> parsed and stored into `settings`,
+// -1 -> recognized but invalid (a friendly error was already logged).
+int ConsumePerfFlag(const std::string& argument, PerfSettings& settings)
+{
+    if (argument.rfind("--", 0) != 0)
+        return 0;
+
+    const size_t equals = argument.find('=');
+    const std::string name = equals == std::string::npos ? argument : argument.substr(0, equals);
+    const std::string value = equals == std::string::npos ? std::string() : argument.substr(equals + 1);
+
+    if (name == "--opt")
+    {
+        const std::optional<int> parsed = ParseFlagInt(value);
+        if (!parsed || *parsed > 2)
+        {
+            Lode::Logger::Error("Invalid --opt value '" + value + "'. Expected an integer between 0 and 2.");
+            return -1;
+        }
+        settings.optLevel = *parsed;
+        return 1;
+    }
+    if (name == "--codegen")
+    {
+        if (value == "native")
+            settings.codegenMode = Lode::CodeGenMode::NativeModulesOnly;
+        else if (value == "all")
+            settings.codegenMode = Lode::CodeGenMode::AllFunctions;
+        else if (value == "off")
+            settings.codegenMode = Lode::CodeGenMode::Off;
+        else
+        {
+            Lode::Logger::Error("Invalid --codegen value '" + value + "'. Expected native, all, or off.");
+            return -1;
+        }
+        return 1;
+    }
+    if (name == "--gc-goal")
+    {
+        const std::optional<int> parsed = ParseFlagInt(value);
+        if (!parsed || *parsed <= 0)
+        {
+            Lode::Logger::Error("Invalid --gc-goal value '" + value + "'. Expected a positive percentage (for example 300).");
+            return -1;
+        }
+        settings.gcGoal = *parsed;
+        return 1;
+    }
+    if (name == "--gc-stepmul")
+    {
+        const std::optional<int> parsed = ParseFlagInt(value);
+        if (!parsed || *parsed <= 0)
+        {
+            Lode::Logger::Error("Invalid --gc-stepmul value '" + value + "'. Expected a positive percentage (for example 200).");
+            return -1;
+        }
+        settings.gcStepmul = *parsed;
+        return 1;
+    }
+    if (name == "--gc-stepsize")
+    {
+        const std::optional<int> parsed = ParseFlagInt(value);
+        if (!parsed || *parsed <= 0)
+        {
+            Lode::Logger::Error("Invalid --gc-stepsize value '" + value + "'. Expected a positive size in kilobytes.");
+            return -1;
+        }
+        settings.gcStepsize = *parsed;
+        return 1;
+    }
+    if (name == "--mem-limit")
+    {
+        const std::optional<double> parsed = ParseFlagNumber(value);
+        if (!parsed || *parsed <= 0.0)
+        {
+            Lode::Logger::Error("Invalid --mem-limit value '" + value + "'. Expected a positive size in megabytes.");
+            return -1;
+        }
+        settings.memLimitMb = *parsed;
+        return 1;
+    }
+    return 0;
+}
+
+// Scans `arguments` from beginIndex and consumes every performance flag found
+// there, stopping at the first non-flag argument. Returns false after logging
+// a friendly error when any flag value is invalid; otherwise firstUnconsumed
+// receives the index of the first argument that was not consumed.
+bool ParsePerfArguments(const std::vector<std::string>& arguments, int beginIndex,
+                        PerfSettings& settings, int& firstUnconsumed)
+{
+    int index = beginIndex;
+    while (index < static_cast<int>(arguments.size()))
+    {
+        const int status = ConsumePerfFlag(arguments[static_cast<size_t>(index)], settings);
+        if (status < 0)
+            return false;
+        if (status == 0)
+            break;
+        ++index;
+    }
+    firstUnconsumed = index;
+    return true;
+}
+
+// Applies the parsed performance flags to a freshly created VM state. Flags
+// that were not given leave the corresponding setting at its default.
+void ApplyPerfSettings(Lode::State& vm, const PerfSettings& perf)
+{
+    if (perf.codegenMode)
+        vm.SetCodeGenMode(*perf.codegenMode);
+    if (perf.gcGoal)
+        Lode::Gc::SetGoal(vm, *perf.gcGoal);
+    if (perf.gcStepmul)
+        Lode::Gc::SetStepMultiplier(vm, *perf.gcStepmul);
+    if (perf.gcStepsize)
+        Lode::Gc::SetStepSize(vm, *perf.gcStepsize);
+    if (perf.memLimitMb)
+    {
+        Lode::GcBudget budget;
+        // Without an explicit --gc-stepsize, 0 lets Luau pick its automatic step size.
+        budget.stepSizeKB = perf.gcStepsize.value_or(0);
+        budget.softLimitKB = *perf.memLimitMb * 1024.0;
+        vm.GetEventLoop().SetGcBudget(budget);
+    }
+}
+
 void PrintMainHelp()
 {
     Lode::Logger::Info("Lode (lode) v1.0.0");
@@ -322,6 +517,7 @@ void PrintMainHelp()
     Lode::Logger::Info("       lode -c <code> [script-arguments]");
     Lode::Logger::Info("       lode <command> [options]");
     Lode::Logger::Info("Commands: init, add, install, pack, ci, help");
+    Lode::Logger::Info("Performance flags: --opt=<0-2> --codegen=native|all|off --gc-goal=<pct> --gc-stepmul=<pct> --gc-stepsize=<kb> --mem-limit=<mb>");
     Lode::Logger::Info("Run `lode <command> --help` for command-specific help.");
     Lode::Logger::Info("Run `lode` without arguments to start the interactive REPL.");
 }
@@ -372,10 +568,16 @@ void EmitExecutionError(std::string_view error, std::string_view sourceName)
     Lode::Logger::EmitDiagnostic(diagnostic);
 }
 
-bool CompileSource(std::string_view source, std::string_view sourceName, std::string& bytecode)
+bool CompileSource(std::string_view source, std::string_view sourceName, std::string& bytecode,
+                   const PerfSettings& perf)
 {
     std::vector<Lode::Diagnostic> diagnostics;
-    bytecode = Lode::Compiler::CompileWithResult(source, diagnostics, nullptr, sourceName);
+    // Resolve the options from source hotcomments so behavior matches the
+    // cached script path, then apply the --opt override when given.
+    lua_CompileOptions options = Lode::Compiler::ParseOptionsFromSource(source, sourceName);
+    if (perf.optLevel)
+        options.optimizationLevel = *perf.optLevel;
+    bytecode = Lode::Compiler::CompileWithResult(source, diagnostics, &options, sourceName);
     bool hasErrors = false;
     for (const Lode::Diagnostic& diagnostic : diagnostics)
     {
@@ -407,17 +609,19 @@ Lode::Result<Lode::State> CreateCliState(const fs::path& standardLibraryPath,
 
 int RunCommandCode(std::string_view source,
                    const fs::path& standardLibraryPath,
-                   const std::vector<std::string>& scriptArgs)
+                   const std::vector<std::string>& scriptArgs,
+                   const PerfSettings& perf)
 {
     std::string bytecode;
     constexpr std::string_view sourceName = "=(command line)";
-    if (!CompileSource(source, sourceName, bytecode))
+    if (!CompileSource(source, sourceName, bytecode, perf))
         return 1;
 
     auto stateResult = CreateCliState(standardLibraryPath, scriptArgs);
     if (stateResult.IsError())
         return 1;
     Lode::State vm = std::move(stateResult.GetValue());
+    ApplyPerfSettings(vm, perf);
 
     auto execution = vm.ExecuteBytecode(bytecode, sourceName);
     if (execution.IsError())
@@ -460,12 +664,13 @@ std::string FormatReplValue(const Lode::Value& value)
     return "<value>";
 }
 
-int RunRepl(const fs::path& standardLibraryPath)
+int RunRepl(const fs::path& standardLibraryPath, const PerfSettings& perf)
 {
     auto stateResult = CreateCliState(standardLibraryPath, {});
     if (stateResult.IsError())
         return 1;
     Lode::State vm = std::move(stateResult.GetValue());
+    ApplyPerfSettings(vm, perf);
 
     std::cout << "Lode REPL v1.0.0\n"
               << "Enter Luau code, .help for commands, or .exit to quit.\n";
@@ -511,7 +716,7 @@ int RunRepl(const fs::path& standardLibraryPath)
         else
         {
             std::string bytecode;
-            if (!CompileSource(source, "=(repl)", bytecode))
+            if (!CompileSource(source, "=(repl)", bytecode, perf))
                 continue;
             auto result = vm.ExecuteBytecodeWithResults(bytecode, "=(repl)", true);
             if (result.IsError())
@@ -539,8 +744,32 @@ int main(int argc, char* argv[])
     Lode::Logger::Initialize();
     const fs::path standardLibraryPath = FindStandardLibraryPath(fs::path(argv[0]));
 
+    // Performance tuning flags (--opt/--codegen/--gc-*/--mem-limit) are
+    // consumed from any position before the first script/command argument so
+    // they never leak into script arguments. Remaining arguments rotate into
+    // argv[1..], keeping every dispatch branch below unchanged.
+    PerfSettings perf;
+    int firstUnconsumed = 1;
+    if (argc >= 2)
+    {
+        std::vector<std::string> utf8Arguments;
+        utf8Arguments.reserve(static_cast<size_t>(argc));
+        for (int i = 0; i < argc; ++i)
+            utf8Arguments.push_back(PathToUtf8(fs::path(argv[i])));
+        if (!ParsePerfArguments(utf8Arguments, 1, perf, firstUnconsumed))
+            return 1;
+
+        const int consumed = firstUnconsumed - 1;
+        if (consumed > 0)
+        {
+            for (int i = 1; i + consumed < argc; ++i)
+                argv[i] = argv[i + consumed];
+            argc -= consumed;
+        }
+    }
+
     if (argc < 2)
-        return RunRepl(standardLibraryPath);
+        return RunRepl(standardLibraryPath, perf);
 
     const std::string firstArgument = PathToUtf8(fs::path(argv[1]));
     if (firstArgument == "--version" || firstArgument == "-V")
@@ -573,7 +802,7 @@ int main(int argc, char* argv[])
         std::vector<std::string> scriptArgs;
         for (int argumentIndex = 3; argumentIndex < argc; ++argumentIndex)
             scriptArgs.push_back(PathToUtf8(fs::path(argv[argumentIndex])));
-        return RunCommandCode(PathToUtf8(fs::path(argv[2])), standardLibraryPath, scriptArgs);
+        return RunCommandCode(PathToUtf8(fs::path(argv[2])), standardLibraryPath, scriptArgs, perf);
     }
     if (firstArgument == "init")
     {
@@ -1057,7 +1286,10 @@ int main(int argc, char* argv[])
         // so warm runs start near-instantly. Diagnostics are only produced on a
         // cache miss (first run or when the file changed).
         std::vector<Lode::Diagnostic> diagnostics;
-        bytecode = Lode::Compiler::CompileWithCache(content, filePathUtf8, nullptr, &diagnostics);
+        lua_CompileOptions options = Lode::Compiler::ParseOptionsFromSource(content, filePathUtf8);
+        if (perf.optLevel)
+            options.optimizationLevel = *perf.optLevel;
+        bytecode = Lode::Compiler::CompileWithCache(content, filePathUtf8, &options, &diagnostics);
 
         bool hasErrors = false;
         for (const auto& diag : diagnostics)
@@ -1093,6 +1325,8 @@ int main(int argc, char* argv[])
 
     if (!standardLibraryPath.empty())
         vm.SetStandardLibraryPath(PathToUtf8(standardLibraryPath));
+
+    ApplyPerfSettings(vm, perf);
 
     std::vector<std::string> scriptArgs;
     for (int i = 2; i < argc; ++i)
