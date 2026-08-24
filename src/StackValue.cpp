@@ -33,9 +33,16 @@ ValueType StackValue::GetType() const
     }
 }
 
-bool StackValue::IsNil() const { return lua_isnil(L_, index_); }
-bool StackValue::IsBoolean() const { return lua_isboolean(L_, index_); }
-bool StackValue::IsNumber() const { return lua_isnumber(L_, index_); }
+bool StackValue::IsNil() const { return lua_type(L_, index_) == LUA_TNIL; }
+// Strict type checks mirroring Lode::Value: the lua_is* helpers coerce
+// (lua_isstring accepts numbers, lua_isnumber accepts numeric strings),
+// which silently broke per-module type validation after the migration.
+bool StackValue::IsBoolean() const { return lua_type(L_, index_) == LUA_TBOOLEAN; }
+bool StackValue::IsNumber() const
+{
+    const int t = lua_type(L_, index_);
+    return t == LUA_TNUMBER || t == LUA_TINTEGER;
+}
 bool StackValue::IsVector() const { return lua_isvector(L_, index_); }
 bool StackValue::IsInteger() const
 {
@@ -43,12 +50,12 @@ bool StackValue::IsInteger() const
     if (!lua_isnumber(L_, index_)) return false;
     return Numeric::ToInt64(lua_tonumber(L_, index_), "value").IsOk();
 }
-bool StackValue::IsString() const { return lua_isstring(L_, index_); }
+bool StackValue::IsString() const { return lua_type(L_, index_) == LUA_TSTRING; }
 bool StackValue::IsBuffer() const { return lua_type(L_, index_) == LUA_TBUFFER; }
 bool StackValue::IsTable() const { return lua_istable(L_, index_); }
 bool StackValue::IsFunction() const { return lua_isfunction(L_, index_); }
 bool StackValue::IsThread() const { return lua_isthread(L_, index_); }
-bool StackValue::IsUserdata() const { return lua_isuserdata(L_, index_); }
+bool StackValue::IsUserdata() const { return lua_type(L_, index_) == LUA_TUSERDATA; }
 
 bool StackValue::AsBoolean() const
 {

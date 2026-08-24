@@ -19,21 +19,32 @@ namespace
 {
 struct Input
 {
-    Bytes bytes;
+    // Owns a copy of the bytes: the source Value may be a temporary (from
+    // StackValue::ToValue), so pointing into its string/buffer would be a
+    // use-after-free after the statement ends.
+    std::vector<uint8_t> owned;
+    Bytes bytes{};
     bool valid = false;
 };
 
 Input ReadBytes(const Lode::Value& value)
 {
+    Input out;
     if (value.IsString())
     {
         const auto view = value.AsStringView();
-        return {{ reinterpret_cast<const uint8_t*>(view.data()), view.size() }, true};
+        out.owned.assign(reinterpret_cast<const uint8_t*>(view.data()), reinterpret_cast<const uint8_t*>(view.data()) + view.size());
+        out.bytes = { out.owned.data(), out.owned.size() };
+        out.valid = true;
+        return out;
     }
     if (value.IsBuffer())
     {
         const auto span = value.AsSpan();
-        return {{ span.data(), span.size() }, true};
+        out.owned.assign(span.begin(), span.end());
+        out.bytes = { out.owned.data(), out.owned.size() };
+        out.valid = true;
+        return out;
     }
     return {};
 }
@@ -65,7 +76,9 @@ Lode::Value Error(Lode::State& vm, const std::string& operation, const std::stri
 bool RequireBytes(Lode::State& vm, Lode::StackArgs args, size_t index, const char* operation, Input& output)
 {
     if (index >= args.Size()) { Error(vm, operation, "expected binary input"); return false; }
-    output = ReadBytes(args[index].ToValue());
+    // Keep the converted Value alive for the duration of the copy.
+    const Lode::Value value = args[index].ToValue();
+    output = ReadBytes(value);
     if (!output.valid) { Error(vm, operation, "expected string or buffer"); return false; }
     if (output.bytes.size > kMaxInputBytes) { Error(vm, operation, "input exceeds limit"); return false; }
     return true;
