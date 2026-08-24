@@ -72,6 +72,26 @@ export type CryptoModule = {
     --- @return Decoded bytes.
     base64Decode: (text: ByteInput) -> buffer,
 
+    --- Encodes data as unpadded URL-safe Base64 ('-' and '_' alphabet).
+    --- @param data String or buffer input.
+    --- @return A buffer containing URL-safe Base64 ASCII bytes.
+    base64urlEncode: (data: ByteInput) -> buffer,
+
+    --- Decodes padded or unpadded URL-safe Base64 input.
+    --- @param text URL-safe Base64 string or buffer.
+    --- @return Decoded bytes.
+    base64urlDecode: (text: ByteInput) -> buffer,
+
+    --- Generates a random v4 UUID string.
+    --- @return A canonically formatted lowercase UUID.
+    randomUUID: () -> string,
+
+    --- Generates a random integer in [min, max] using the CSPRNG.
+    --- @param min Minimum value (defaults to 0).
+    --- @param max Maximum value (defaults to math.maxinteger).
+    --- @return A random integer in the closed interval.
+    randomInt: (min: number?, max: number?) -> number,
+
     --- Encodes DER bytes as PEM with the supplied label.
     --- @param label PEM label such as PUBLIC KEY or PRIVATE KEY.
     --- @param der DER-encoded bytes.
