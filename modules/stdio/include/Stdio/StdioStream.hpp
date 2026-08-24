@@ -94,20 +94,20 @@ struct STDIO_API StdioStream : std::enable_shared_from_this<StdioStream>
     void QueueRequest(const PendingRead& req);
     void StartFileRead();
 
-    Lode::Value MethodWrite(Lode::State& vm, const std::vector<Lode::Value>& args);
-    Lode::Value MethodWriteLine(Lode::State& vm, const std::vector<Lode::Value>& args);
-    Lode::Value MethodRead(Lode::State& vm, const std::vector<Lode::Value>& args);
-    Lode::Value MethodReadBuffer(Lode::State& vm, const std::vector<Lode::Value>& args);
-    Lode::Value MethodReadLine(Lode::State& vm, const std::vector<Lode::Value>& args);
-    Lode::Value MethodReadInto(Lode::State& vm, const std::vector<Lode::Value>& args);
-    Lode::Value MethodReadAsync(Lode::State& vm, const std::vector<Lode::Value>& args);
-    Lode::Value MethodReadBufferAsync(Lode::State& vm, const std::vector<Lode::Value>& args);
-    Lode::Value MethodReadIntoAsync(Lode::State& vm, const std::vector<Lode::Value>& args);
+    Lode::Value MethodWrite(Lode::State& vm, Lode::StackArgs args);
+    Lode::Value MethodWriteLine(Lode::State& vm, Lode::StackArgs args);
+    Lode::Value MethodRead(Lode::State& vm, Lode::StackArgs args);
+    Lode::Value MethodReadBuffer(Lode::State& vm, Lode::StackArgs args);
+    Lode::Value MethodReadLine(Lode::State& vm, Lode::StackArgs args);
+    Lode::Value MethodReadInto(Lode::State& vm, Lode::StackArgs args);
+    Lode::Value MethodReadAsync(Lode::State& vm, Lode::StackArgs args);
+    Lode::Value MethodReadBufferAsync(Lode::State& vm, Lode::StackArgs args);
+    Lode::Value MethodReadIntoAsync(Lode::State& vm, Lode::StackArgs args);
     Lode::Value MethodStartStreaming(Lode::State& vm);
     Lode::Value MethodStopStreaming(Lode::State& vm);
     Lode::Value MethodGetWindowSize(Lode::State& vm);
-    Lode::Value MethodSetMode(Lode::State& vm, const std::vector<Lode::Value>& args);
-    Lode::Value MethodSetRawMode(Lode::State& vm, const std::vector<Lode::Value>& args);
+    Lode::Value MethodSetMode(Lode::State& vm, Lode::StackArgs args);
+    Lode::Value MethodSetRawMode(Lode::State& vm, Lode::StackArgs args);
     Lode::Value MethodIsTTY(Lode::State& vm);
 
     void RequestClose();

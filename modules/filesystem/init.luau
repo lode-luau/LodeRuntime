@@ -264,6 +264,8 @@ export type FileSystemModule = {
     --- File interactions using streams and handles
     File: {
         --- Opens a file and returns a handle.
+        --- Modes: "r", "w", "a", "r+", "w+", "a+" plus the exclusive
+        --- variants "x", "wx", "ax" (fail when the file already exists).
         --- @return A FileHandle instance
         Open: (self: any, path: string, mode: string?) -> FileHandle
     },

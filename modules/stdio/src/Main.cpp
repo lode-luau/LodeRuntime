@@ -8,6 +8,9 @@
 #include "Lode/EventLoop.hpp"
 #include "Lode/Numeric.hpp"
 #include "Lode/ObjectWrap.hpp"
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -19,110 +22,110 @@ Lode::Table BuildStreamMethods(Lode::State& vm, const std::shared_ptr<lodestdio:
 {
     Lode::Table m = vm.CreateTable();
 
-    m.Set("Write", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    m.Set("Write", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodestdio::StdioStream>::Unwrap(vm2, 1);
         if (!self) { vm2.RaiseError("stdio Write: invalid StdioStream"); return Lode::Value(); }
         return self->MethodWrite(vm2, args);
     }));
 
-    m.Set("WriteLine", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    m.Set("WriteLine", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodestdio::StdioStream>::Unwrap(vm2, 1);
         if (!self) { vm2.RaiseError("stdio WriteLine: invalid StdioStream"); return Lode::Value(); }
         return self->MethodWriteLine(vm2, args);
     }));
 
-    m.Set("Read", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    m.Set("Read", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodestdio::StdioStream>::Unwrap(vm2, 1);
         if (!self) { vm2.RaiseError("stdio Read: invalid StdioStream"); return Lode::Value(); }
         return self->MethodRead(vm2, args);
     }));
 
-    m.Set("ReadBuffer", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    m.Set("ReadBuffer", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodestdio::StdioStream>::Unwrap(vm2, 1);
         if (!self) { vm2.RaiseError("stdio ReadBuffer: invalid StdioStream"); return Lode::Value(); }
         return self->MethodReadBuffer(vm2, args);
     }));
 
-    m.Set("ReadLine", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    m.Set("ReadLine", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodestdio::StdioStream>::Unwrap(vm2, 1);
         if (!self) { vm2.RaiseError("stdio ReadLine: invalid StdioStream"); return Lode::Value(); }
         return self->MethodReadLine(vm2, args);
     }));
 
-    m.Set("ReadInto", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    m.Set("ReadInto", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodestdio::StdioStream>::Unwrap(vm2, 1);
         if (!self) { vm2.RaiseError("stdio ReadInto: invalid StdioStream"); return Lode::Value(); }
         return self->MethodReadInto(vm2, args);
     }));
 
-    m.Set("ReadAsync", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    m.Set("ReadAsync", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodestdio::StdioStream>::Unwrap(vm2, 1);
         if (!self) { vm2.RaiseError("stdio ReadAsync: invalid StdioStream"); return Lode::Value(); }
         return self->MethodReadAsync(vm2, args);
     }));
 
-    m.Set("ReadBufferAsync", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    m.Set("ReadBufferAsync", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodestdio::StdioStream>::Unwrap(vm2, 1);
         if (!self) { vm2.RaiseError("stdio ReadBufferAsync: invalid StdioStream"); return Lode::Value(); }
         return self->MethodReadBufferAsync(vm2, args);
     }));
 
-    m.Set("ReadIntoAsync", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    m.Set("ReadIntoAsync", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodestdio::StdioStream>::Unwrap(vm2, 1);
         if (!self) { vm2.RaiseError("stdio ReadIntoAsync: invalid StdioStream"); return Lode::Value(); }
         return self->MethodReadIntoAsync(vm2, args);
     }));
 
-    m.Set("StartStreaming", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    m.Set("StartStreaming", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodestdio::StdioStream>::Unwrap(vm2, 1);
         if (!self) { vm2.RaiseError("stdio StartStreaming: invalid StdioStream"); return Lode::Value(); }
         return self->MethodStartStreaming(vm2);
     }));
 
-    m.Set("StopStreaming", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    m.Set("StopStreaming", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodestdio::StdioStream>::Unwrap(vm2, 1);
         if (!self) { vm2.RaiseError("stdio StopStreaming: invalid StdioStream"); return Lode::Value(); }
         return self->MethodStopStreaming(vm2);
     }));
 
-    m.Set("GetWindowSize", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    m.Set("GetWindowSize", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodestdio::StdioStream>::Unwrap(vm2, 1);
         if (!self) { vm2.RaiseError("stdio GetWindowSize: invalid StdioStream"); return Lode::Value(); }
         return self->MethodGetWindowSize(vm2);
     }));
 
-    m.Set("SetMode", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    m.Set("SetMode", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodestdio::StdioStream>::Unwrap(vm2, 1);
         if (!self) { vm2.RaiseError("stdio SetMode: invalid StdioStream"); return Lode::Value(); }
         return self->MethodSetMode(vm2, args);
     }));
 
-    m.Set("SetRawMode", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    m.Set("SetRawMode", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodestdio::StdioStream>::Unwrap(vm2, 1);
         if (!self) { vm2.RaiseError("stdio SetRawMode: invalid StdioStream"); return Lode::Value(); }
         return self->MethodSetRawMode(vm2, args);
     }));
 
-    m.Set("IsTTY", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    m.Set("IsTTY", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodestdio::StdioStream>::Unwrap(vm2, 1);
         if (!self) return Lode::Value(false);
         return self->MethodIsTTY(vm2);
     }));
 
-    m.Set("IsOpen", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    m.Set("IsOpen", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodestdio::StdioStream>::Unwrap(vm2, 1);
         if (!self) return Lode::Value(false);
         return Lode::Value(self->open && !self->closing && !self->closed);
     }));
 
-    m.Set("Close", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    m.Set("Close", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodestdio::StdioStream>::Unwrap(vm2, 1);
         if (!self) { vm2.RaiseError("stdio Close: invalid StdioStream"); return Lode::Value(); }
         self->RequestClose();
         return Lode::Value();
     }));
 
-    m.Set("Destroy", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    m.Set("Destroy", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodestdio::StdioStream>::Unwrap(vm2, 1);
         if (!self) { vm2.RaiseError("stdio Destroy: invalid StdioStream"); return Lode::Value(); }
         self->RequestClose();
@@ -147,6 +150,27 @@ Lode::Table BuildStreamMethods(Lode::State& vm, const std::shared_ptr<lodestdio:
 }
 
 } // namespace
+
+// Formats a number the way Luau's tostring() does: the shortest decimal
+// representation that round-trips back to the same double, so
+// stdio.print(0.1) renders "0.1" instead of std::to_string's "0.100000".
+static const char* FormatLuauNumber(double val)
+{
+    static thread_local char buf[40];
+    if (val == static_cast<int64_t>(val) && std::fabs(val) < 1e15)
+    {
+        snprintf(buf, sizeof(buf), "%lld", static_cast<long long>(static_cast<int64_t>(val)));
+        return buf;
+    }
+    for (int prec = 15; prec <= 17; ++prec)
+    {
+        snprintf(buf, sizeof(buf), "%.*g", prec, val);
+        if (strtod(buf, nullptr) == val)
+            return buf;
+    }
+    snprintf(buf, sizeof(buf), "%.17g", val);
+    return buf;
+}
 
 LODE_MODULE(vm)
 {
@@ -178,13 +202,13 @@ LODE_MODULE(vm)
     Lode::Value stderrVal = lodestdio::WrapStdioStream(vm, mgr->stderrStream, mgr->streamMethods);
 
     Lode::Table streamClass = vm.CreateTable();
-    streamClass.Set("Create", vm.CreateFunction([mgr](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    streamClass.Set("Create", vm.CreateFastFunction([mgr](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         if (mgr->shuttingDown)
         {
             vm2.RaiseError("stdio: runtime is shutting down");
             return Lode::Value();
         }
-        if (args.size() < 3 || !args[1].IsNumber() || !args[2].IsBoolean())
+        if (args.Size() < 3 || !args[1].IsNumber() || !args[2].IsBoolean())
         {
             vm2.RaiseError("stdio Create: expected fd (number) and readable (boolean)");
             return Lode::Value();
@@ -228,11 +252,7 @@ LODE_MODULE(vm)
         for (size_t i = 0; i < args.Size(); ++i) {
             if (i > 0) out += " ";
             if (args[i].IsString()) out += args[i].AsStringView();
-            else if (args[i].IsNumber()) {
-                double val = args[i].AsNumber();
-                if (val == static_cast<int64_t>(val)) out += std::to_string(static_cast<int64_t>(val));
-                else out += std::to_string(val);
-            }
+            else if (args[i].IsNumber()) out += FormatLuauNumber(args[i].AsNumber());
             else if (args[i].IsBoolean()) out += args[i].AsBoolean() ? "true" : "false";
             else out += "[Value]";
         }
@@ -247,11 +267,7 @@ LODE_MODULE(vm)
         for (size_t i = 0; i < args.Size(); ++i) {
             if (i > 0) out += " ";
             if (args[i].IsString()) out += args[i].AsStringView();
-            else if (args[i].IsNumber()) {
-                double val = args[i].AsNumber();
-                if (val == static_cast<int64_t>(val)) out += std::to_string(static_cast<int64_t>(val));
-                else out += std::to_string(val);
-            }
+            else if (args[i].IsNumber()) out += FormatLuauNumber(args[i].AsNumber());
             else if (args[i].IsBoolean()) out += args[i].AsBoolean() ? "true" : "false";
             else out += "[Value]";
         }
@@ -316,13 +332,13 @@ LODE_MODULE(vm)
 
     exports.Set("isTTY", exports.Get("IsTTY").GetValue());
 
-    exports.Set("select", vm.CreateFunction([stdinStream, stdoutStream](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    exports.Set("select", vm.CreateFastFunction([stdinStream, stdoutStream](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         if (!stdinStream || !stdoutStream || stdinStream->handleType != UV_TTY || stdoutStream->handleType != UV_TTY)
         {
             vm2.RaiseError("stdio.select requires a TTY terminal");
             return Lode::Value();
         }
-        if (args.size() < 2 || !args[0].IsString() || !args[1].IsTable())
+        if (args.Size() < 2 || !args[0].IsString() || !args[1].IsTable())
         {
             vm2.RaiseError("stdio.select: expected (prompt: string, options: {string})");
             return Lode::Value();
@@ -385,11 +401,14 @@ LODE_MODULE(vm)
                 stdinStream->cppOnData = prevOnData;
                 if (len == 0) return;
                 char ch = data[0];
-                if (ch == 3) // Ctrl+C
+                if (ch == 3) // Ctrl+C: cancel and wake the yielding caller
                 {
                     clear();
                     stdoutStream->WriteNative("\x1B[?25h", 6);
                     uv_tty_set_mode(reinterpret_cast<uv_tty_t*>(&stdinStream->ttyHandle), UV_TTY_MODE_NORMAL);
+                    // Resume the yielded thread with an error so it is never
+                    // left suspended forever.
+                    coro.ResumeError("stdio.select: cancelled by user");
                     return;
                 }
                 if (ch == '\r' || ch == '\n')

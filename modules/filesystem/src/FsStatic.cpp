@@ -436,7 +436,7 @@ static bool SubmitWork(Lode::State& vmOuter, FsWorkContext* ctx) {
 
 static Lode::Value CreateAsyncMethod(Lode::State& vmOuter, FsOp op, bool isBuffer = false) {
     lua_State* mainL = vmOuter.GetMainThread();
-    return vmOuter.CreateFunction([op, isBuffer, mainL](Lode::State& vm, const std::vector<Lode::Value>& args) -> Lode::Value {
+    return vmOuter.CreateFastFunction([op, isBuffer, mainL](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
         if (args.empty() || !args[0].IsString()) {
             vm.RaiseError("fs: expected string path as first argument");
             return Lode::Value();
@@ -452,7 +452,7 @@ static Lode::Value CreateAsyncMethod(Lode::State& vmOuter, FsOp op, bool isBuffe
             ctx->globPattern = ctx->targetPath;
         
         if (op == FsOp::WriteFile || op == FsOp::AppendFile) {
-            if (args.size() > 1) {
+            if (args.Size() > 1) {
                 if (args[1].IsString()) {
                     ctx->writeData = args[1].AsString();
                 } else if (args[1].IsBuffer()) {
@@ -462,16 +462,16 @@ static Lode::Value CreateAsyncMethod(Lode::State& vmOuter, FsOp op, bool isBuffe
                 }
             }
         } else if (op == FsOp::CopyFile || op == FsOp::Rename || op == FsOp::CreateSymlink) {
-            if (args.size() > 1 && args[1].IsString()) {
+            if (args.Size() > 1 && args[1].IsString()) {
                 ctx->destPath = args[1].AsString();
             } else {
                 delete ctx; vm.RaiseError("fs: expected string destination path as second argument"); return Lode::Value();
             }
         } else if (op == FsOp::ReadToBuffer) {
-            if (args.size() > 1 && args[1].IsBuffer()) {
-                ctx->userBuffer = args[1];
+            if (args.Size() > 1 && args[1].IsBuffer()) {
+                ctx->userBuffer = args[1].ToValue();
                 ctx->userBufferPtr = ctx->userBuffer.AsBuffer(&ctx->userBufferSize);
-                if (args.size() > 2 && args[2].IsNumber()) {
+                if (args.Size() > 2 && args[2].IsNumber()) {
                     auto offsetResult = Lode::Numeric::ToSize(args[2].AsNumber(), "buffer offset");
                     if (offsetResult.IsError())
                     {
@@ -486,11 +486,11 @@ static Lode::Value CreateAsyncMethod(Lode::State& vmOuter, FsOp op, bool isBuffe
             }
         } else if (op == FsOp::Rm) {
             int recIdx = 1;
-            if (args.size() > (size_t)recIdx && args[recIdx].IsBoolean()) {
+            if (args.Size() > (size_t)recIdx && args[recIdx].IsBoolean()) {
                 ctx->recursive = args[recIdx].AsBoolean();
             }
         } else if (op == FsOp::SetPermissions) {
-            if (args.size() < 2 || !args[1].IsNumber() || args[1].AsNumber() < 0 || args[1].AsNumber() > 0777 ||
+            if (args.Size() < 2 || !args[1].IsNumber() || args[1].AsNumber() < 0 || args[1].AsNumber() > 0777 ||
                 std::floor(args[1].AsNumber()) != args[1].AsNumber())
             {
                 delete ctx;

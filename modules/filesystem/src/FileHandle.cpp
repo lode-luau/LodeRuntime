@@ -24,10 +24,10 @@ namespace
 {
 constexpr size_t kMaxReadSize = 64ull * 1024 * 1024;
 
-bool ParseReadSize(Lode::State& vm, const std::vector<Lode::Value>& args, size_t& sizeOut)
+bool ParseReadSize(Lode::State& vm, Lode::StackArgs args, size_t& sizeOut)
 {
     sizeOut = 65536;
-    if (args.size() <= 1)
+    if (args.Size() <= 1)
         return true;
     if (!args[1].IsNumber())
     {
@@ -103,7 +103,7 @@ struct FileHandleCtx {
     }
 };
 
-Lode::Value FileHandle::MethodRead(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value FileHandle::MethodRead(Lode::State& vm, Lode::StackArgs args)
 {
     if (closed || closing) {
         vm.RaiseError("fs File:Read: file is closed");
@@ -152,7 +152,7 @@ Lode::Value FileHandle::MethodRead(Lode::State& vm, const std::vector<Lode::Valu
     return Lode::Value();
 }
 
-Lode::Value FileHandle::MethodReadBuffer(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value FileHandle::MethodReadBuffer(Lode::State& vm, Lode::StackArgs args)
 {
     if (closed || closing) {
         vm.RaiseError("fs File:ReadBuffer: file is closed");
@@ -204,14 +204,14 @@ Lode::Value FileHandle::MethodReadBuffer(Lode::State& vm, const std::vector<Lode
     return Lode::Value();
 }
 
-Lode::Value FileHandle::MethodWrite(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value FileHandle::MethodWrite(Lode::State& vm, Lode::StackArgs args)
 {
     if (closed || closing) {
         vm.RaiseError("fs File:Write: file is closed");
         return Lode::Value();
     }
     
-    if (args.size() < 2 || (!args[1].IsString() && !args[1].IsBuffer())) {
+    if (args.Size() < 2 || (!args[1].IsString() && !args[1].IsBuffer())) {
         vm.RaiseError("fs File:Write: data must be a string or buffer");
         return Lode::Value();
     }
@@ -328,7 +328,7 @@ void SeekAfter(uv_work_t* request, int status)
 }
 } // namespace
 
-Lode::Value FileHandle::MethodSeek(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value FileHandle::MethodSeek(Lode::State& vm, Lode::StackArgs args)
 {
     if (closed || closing)
     {
@@ -342,7 +342,7 @@ Lode::Value FileHandle::MethodSeek(Lode::State& vm, const std::vector<Lode::Valu
         return Lode::Value();
     }
 
-    if (args.size() < 2 || !args[1].IsNumber())
+    if (args.Size() < 2 || !args[1].IsNumber())
     {
         vm.RaiseError("fs File:Seek: offset must be an integer");
         return Lode::Value();
@@ -356,7 +356,7 @@ Lode::Value FileHandle::MethodSeek(Lode::State& vm, const std::vector<Lode::Valu
     }
 
     int whence = SEEK_SET;
-    if (args.size() > 2 && !args[2].IsNil())
+    if (args.Size() > 2 && !args[2].IsNil())
     {
         if (!args[2].IsString())
         {
@@ -396,7 +396,7 @@ Lode::Value FileHandle::MethodSeek(Lode::State& vm, const std::vector<Lode::Valu
     return Lode::Value();
 }
 
-Lode::Value FileHandle::MethodStat(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value FileHandle::MethodStat(Lode::State& vm, Lode::StackArgs args)
 {
     if (closed || closing) {
         vm.RaiseError("fs File:Stat: file is closed");
@@ -444,7 +444,7 @@ Lode::Value FileHandle::MethodStat(Lode::State& vm, const std::vector<Lode::Valu
     return Lode::Value();
 }
 
-Lode::Value FileHandle::MethodSync(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value FileHandle::MethodSync(Lode::State& vm, Lode::StackArgs args)
 {
     if (closed || closing) {
         vm.RaiseError("fs File:Sync: file is closed");

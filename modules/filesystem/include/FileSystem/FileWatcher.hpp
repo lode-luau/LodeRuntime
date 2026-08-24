@@ -33,8 +33,8 @@ public:
     
     static void OnEvent(uv_fs_event_t* handle, const char* filename, int events, int status);
     
-    Lode::Value MethodStart(Lode::State& vm, const std::vector<Lode::Value>& args);
-    Lode::Value MethodStop(Lode::State& vm, const std::vector<Lode::Value>& args);
+    Lode::Value MethodStart(Lode::State& vm, Lode::StackArgs args);
+    Lode::Value MethodStop(Lode::State& vm, Lode::StackArgs args);
 };
 
 Lode::Value WrapFileWatcher(Lode::State& vm, const std::shared_ptr<FileWatcher>& watcher, const Lode::Table& methods);

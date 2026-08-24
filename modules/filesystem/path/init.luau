@@ -51,6 +51,29 @@ export type PathModule = {
         --- The path to evaluate.
         p: string
     ) -> string,
+
+    --- Returns whether the path is absolute (lexical check).
+    isAbsolute: (p: string) -> boolean,
+
+    --- Lexically normalizes a path: collapses "." and ".." and duplicate
+    --- separators without touching the filesystem.
+    normalize: (p: string) -> string,
+
+    --- Computes the relative path from `from` to `to`. Relative inputs are
+    --- resolved against the current working directory.
+    relative: (from: string, to: string) -> string,
+
+    --- Splits a path into {root, dir, base, name, ext}.
+    parse: (p: string) -> {
+        root: string,
+        dir: string,
+        base: string,
+        name: string,
+        ext: string,
+    },
+
+    --- The platform-specific path component separator.
+    sep: string,
 }
 
 return {} :: PathModule

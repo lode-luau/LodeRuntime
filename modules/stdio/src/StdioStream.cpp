@@ -392,7 +392,7 @@ void StdioStream::QueueRequest(const PendingRead& req)
     StartReading();
 }
 
-Lode::Value StdioStream::MethodWrite(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value StdioStream::MethodWrite(Lode::State& vm, Lode::StackArgs args)
 {
     if (!open || closed || closing)
     {
@@ -402,7 +402,7 @@ Lode::Value StdioStream::MethodWrite(Lode::State& vm, const std::vector<Lode::Va
     if (args.empty())
         return Lode::Value();
 
-    size_t valIdx = (args.size() > 1 && !args[0].IsString() && !args[0].IsBuffer()) ? 1 : 0;
+    size_t valIdx = (args.Size() > 1 && !args[0].IsString() && !args[0].IsBuffer()) ? 1 : 0;
     const auto& arg = args[valIdx];
 
     if (arg.IsString())
@@ -424,7 +424,7 @@ Lode::Value StdioStream::MethodWrite(Lode::State& vm, const std::vector<Lode::Va
     return Lode::Value();
 }
 
-Lode::Value StdioStream::MethodWriteLine(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value StdioStream::MethodWriteLine(Lode::State& vm, Lode::StackArgs args)
 {
     if (!open || closed || closing)
     {
@@ -434,7 +434,7 @@ Lode::Value StdioStream::MethodWriteLine(Lode::State& vm, const std::vector<Lode
     if (args.empty())
         return Lode::Value();
 
-    size_t valIdx = (args.size() > 1 && !args[0].IsString() && !args[0].IsBuffer()) ? 1 : 0;
+    size_t valIdx = (args.Size() > 1 && !args[0].IsString() && !args[0].IsBuffer()) ? 1 : 0;
     const auto& arg = args[valIdx];
 
     if (arg.IsString())
@@ -460,7 +460,7 @@ Lode::Value StdioStream::MethodWriteLine(Lode::State& vm, const std::vector<Lode
     return Lode::Value();
 }
 
-Lode::Value StdioStream::MethodRead(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value StdioStream::MethodRead(Lode::State& vm, Lode::StackArgs args)
 {
     if (!readable || !open || closed)
     {
@@ -473,8 +473,8 @@ Lode::Value StdioStream::MethodRead(Lode::State& vm, const std::vector<Lode::Val
     req.isYield = true;
     req.coroutine = Lode::Coroutine(vm.GetLuaState());
 
-    size_t numIdx = (args.size() > 1 && !args[0].IsNumber()) ? 1 : 0;
-    if (args.size() > numIdx && args[numIdx].IsNumber())
+    size_t numIdx = (args.Size() > 1 && !args[0].IsNumber()) ? 1 : 0;
+    if (args.Size() > numIdx && args[numIdx].IsNumber())
     {
         auto res = Lode::Numeric::ToSize(args[numIdx].AsNumber(), "read length");
         if (res.IsError())
@@ -496,7 +496,7 @@ Lode::Value StdioStream::MethodRead(Lode::State& vm, const std::vector<Lode::Val
     return Lode::Value();
 }
 
-Lode::Value StdioStream::MethodReadBuffer(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value StdioStream::MethodReadBuffer(Lode::State& vm, Lode::StackArgs args)
 {
     if (!readable || !open || closed)
     {
@@ -510,8 +510,8 @@ Lode::Value StdioStream::MethodReadBuffer(Lode::State& vm, const std::vector<Lod
     req.coroutine = Lode::Coroutine(vm.GetLuaState());
     req.isBuffer = true;
 
-    size_t numIdx = (args.size() > 1 && !args[0].IsNumber()) ? 1 : 0;
-    if (args.size() > numIdx && args[numIdx].IsNumber())
+    size_t numIdx = (args.Size() > 1 && !args[0].IsNumber()) ? 1 : 0;
+    if (args.Size() > numIdx && args[numIdx].IsNumber())
     {
         auto res = Lode::Numeric::ToSize(args[numIdx].AsNumber(), "read length");
         if (res.IsError())
@@ -533,7 +533,7 @@ Lode::Value StdioStream::MethodReadBuffer(Lode::State& vm, const std::vector<Lod
     return Lode::Value();
 }
 
-Lode::Value StdioStream::MethodReadLine(Lode::State& vm, const std::vector<Lode::Value>&)
+Lode::Value StdioStream::MethodReadLine(Lode::State& vm, Lode::StackArgs)
 {
     if (!readable || !open || closed)
     {
@@ -558,7 +558,7 @@ Lode::Value StdioStream::MethodReadLine(Lode::State& vm, const std::vector<Lode:
     return Lode::Value();
 }
 
-Lode::Value StdioStream::MethodReadInto(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value StdioStream::MethodReadInto(Lode::State& vm, Lode::StackArgs args)
 {
     if (!readable || !open || closed)
     {
@@ -567,8 +567,8 @@ Lode::Value StdioStream::MethodReadInto(Lode::State& vm, const std::vector<Lode:
     }
     mainL = vm.GetMainThread();
 
-    size_t bufIdx = (args.size() > 1 && !args[0].IsBuffer()) ? 1 : 0;
-    if (args.size() <= bufIdx || !args[bufIdx].IsBuffer())
+    size_t bufIdx = (args.Size() > 1 && !args[0].IsBuffer()) ? 1 : 0;
+    if (args.Size() <= bufIdx || !args[bufIdx].IsBuffer())
     {
         vm.RaiseError("stdio ReadInto: expected buffer argument");
         return Lode::Value();
@@ -578,9 +578,9 @@ Lode::Value StdioStream::MethodReadInto(Lode::State& vm, const std::vector<Lode:
     req.isYield = true;
     req.coroutine = Lode::Coroutine(vm.GetLuaState());
     req.isInto = true;
-    req.targetBufferValue = args[bufIdx];
+    req.targetBufferValue = args[bufIdx].ToValue();
 
-    if (args.size() > bufIdx + 1 && args[bufIdx + 1].IsNumber())
+    if (args.Size() > bufIdx + 1 && args[bufIdx + 1].IsNumber())
     {
         auto res = Lode::Numeric::ToSize(args[bufIdx + 1].AsNumber(), "buffer offset");
         if (res.IsError())
@@ -596,7 +596,7 @@ Lode::Value StdioStream::MethodReadInto(Lode::State& vm, const std::vector<Lode:
     size_t maxAvail = (bSize > req.offset) ? (bSize - req.offset) : 0;
     size_t length = maxAvail;
 
-    if (args.size() > bufIdx + 2 && args[bufIdx + 2].IsNumber())
+    if (args.Size() > bufIdx + 2 && args[bufIdx + 2].IsNumber())
     {
         auto res = Lode::Numeric::ToSize(args[bufIdx + 2].AsNumber(), "read length");
         if (res.IsError())
@@ -619,7 +619,7 @@ Lode::Value StdioStream::MethodReadInto(Lode::State& vm, const std::vector<Lode:
     return Lode::Value();
 }
 
-Lode::Value StdioStream::MethodReadAsync(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value StdioStream::MethodReadAsync(Lode::State& vm, Lode::StackArgs args)
 {
     if (!readable || !open || closed)
     {
@@ -628,8 +628,8 @@ Lode::Value StdioStream::MethodReadAsync(Lode::State& vm, const std::vector<Lode
     }
     mainL = vm.GetMainThread();
 
-    size_t fnIdx = (args.size() > 1 && !args[0].IsFunction()) ? 1 : 0;
-    if (args.size() <= fnIdx || !args[fnIdx].IsFunction())
+    size_t fnIdx = (args.Size() > 1 && !args[0].IsFunction()) ? 1 : 0;
+    if (args.Size() <= fnIdx || !args[fnIdx].IsFunction())
     {
         vm.RaiseError("stdio ReadAsync: expected callback function");
         return Lode::Value();
@@ -637,9 +637,9 @@ Lode::Value StdioStream::MethodReadAsync(Lode::State& vm, const std::vector<Lode
 
     PendingRead req;
     req.isCallback = true;
-    req.callback = args[fnIdx];
+    req.callback = args[fnIdx].ToValue();
 
-    if (args.size() > fnIdx + 1 && args[fnIdx + 1].IsNumber())
+    if (args.Size() > fnIdx + 1 && args[fnIdx + 1].IsNumber())
     {
         auto res = Lode::Numeric::ToSize(args[fnIdx + 1].AsNumber(), "read length");
         if (res.IsError())
@@ -663,7 +663,7 @@ Lode::Value StdioStream::MethodReadAsync(Lode::State& vm, const std::vector<Lode
     return Lode::Value();
 }
 
-Lode::Value StdioStream::MethodReadBufferAsync(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value StdioStream::MethodReadBufferAsync(Lode::State& vm, Lode::StackArgs args)
 {
     if (!readable || !open || closed)
     {
@@ -672,8 +672,8 @@ Lode::Value StdioStream::MethodReadBufferAsync(Lode::State& vm, const std::vecto
     }
     mainL = vm.GetMainThread();
 
-    size_t fnIdx = (args.size() > 1 && !args[0].IsFunction()) ? 1 : 0;
-    if (args.size() <= fnIdx || !args[fnIdx].IsFunction())
+    size_t fnIdx = (args.Size() > 1 && !args[0].IsFunction()) ? 1 : 0;
+    if (args.Size() <= fnIdx || !args[fnIdx].IsFunction())
     {
         vm.RaiseError("stdio ReadBufferAsync: expected callback function");
         return Lode::Value();
@@ -681,10 +681,10 @@ Lode::Value StdioStream::MethodReadBufferAsync(Lode::State& vm, const std::vecto
 
     PendingRead req;
     req.isCallback = true;
-    req.callback = args[fnIdx];
+    req.callback = args[fnIdx].ToValue();
     req.isBuffer = true;
 
-    if (args.size() > fnIdx + 1 && args[fnIdx + 1].IsNumber())
+    if (args.Size() > fnIdx + 1 && args[fnIdx + 1].IsNumber())
     {
         auto res = Lode::Numeric::ToSize(args[fnIdx + 1].AsNumber(), "read length");
         if (res.IsError())
@@ -708,7 +708,7 @@ Lode::Value StdioStream::MethodReadBufferAsync(Lode::State& vm, const std::vecto
     return Lode::Value();
 }
 
-Lode::Value StdioStream::MethodReadIntoAsync(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value StdioStream::MethodReadIntoAsync(Lode::State& vm, Lode::StackArgs args)
 {
     if (!readable || !open || closed)
     {
@@ -717,8 +717,8 @@ Lode::Value StdioStream::MethodReadIntoAsync(Lode::State& vm, const std::vector<
     }
     mainL = vm.GetMainThread();
 
-    size_t bIdx = (args.size() > 2 && !args[0].IsBuffer()) ? 1 : 0;
-    if (args.size() <= bIdx + 1 || !args[bIdx].IsBuffer() || !args[bIdx + 1].IsFunction())
+    size_t bIdx = (args.Size() > 2 && !args[0].IsBuffer()) ? 1 : 0;
+    if (args.Size() <= bIdx + 1 || !args[bIdx].IsBuffer() || !args[bIdx + 1].IsFunction())
     {
         vm.RaiseError("stdio ReadIntoAsync: expected buffer and callback arguments");
         return Lode::Value();
@@ -726,11 +726,11 @@ Lode::Value StdioStream::MethodReadIntoAsync(Lode::State& vm, const std::vector<
 
     PendingRead req;
     req.isCallback = true;
-    req.targetBufferValue = args[bIdx];
-    req.callback = args[bIdx + 1];
+    req.targetBufferValue = args[bIdx].ToValue();
+    req.callback = args[bIdx + 1].ToValue();
     req.isInto = true;
 
-    if (args.size() > bIdx + 2 && args[bIdx + 2].IsNumber())
+    if (args.Size() > bIdx + 2 && args[bIdx + 2].IsNumber())
     {
         auto res = Lode::Numeric::ToSize(args[bIdx + 2].AsNumber(), "buffer offset");
         if (res.IsError())
@@ -746,7 +746,7 @@ Lode::Value StdioStream::MethodReadIntoAsync(Lode::State& vm, const std::vector<
     size_t maxAvail = (bSize > req.offset) ? (bSize - req.offset) : 0;
     size_t length = maxAvail;
 
-    if (args.size() > bIdx + 3 && args[bIdx + 3].IsNumber())
+    if (args.Size() > bIdx + 3 && args[bIdx + 3].IsNumber())
     {
         auto res = Lode::Numeric::ToSize(args[bIdx + 3].AsNumber(), "read length");
         if (res.IsError())
@@ -807,13 +807,13 @@ Lode::Value StdioStream::MethodGetWindowSize(Lode::State& vm)
     return Lode::Value(t);
 }
 
-Lode::Value StdioStream::MethodSetMode(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value StdioStream::MethodSetMode(Lode::State& vm, Lode::StackArgs args)
 {
     if (handleType != UV_TTY || !streamHandle)
         return Lode::Value();
 
-    size_t modeIdx = (args.size() > 1 && (args[0].IsUserdata() || args[0].IsTable())) ? 1 : 0;
-    if (args.size() <= modeIdx)
+    size_t modeIdx = (args.Size() > 1 && (args[0].IsUserdata() || args[0].IsTable())) ? 1 : 0;
+    if (args.Size() <= modeIdx)
         return Lode::Value();
 
     uv_tty_mode_t mode = UV_TTY_MODE_NORMAL;
@@ -846,13 +846,13 @@ Lode::Value StdioStream::MethodSetMode(Lode::State& vm, const std::vector<Lode::
     return Lode::Value();
 }
 
-Lode::Value StdioStream::MethodSetRawMode(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value StdioStream::MethodSetRawMode(Lode::State& vm, Lode::StackArgs args)
 {
     if (handleType != UV_TTY || !streamHandle)
         return Lode::Value();
 
-    size_t bIdx = (args.size() > 1 && (args[0].IsUserdata() || args[0].IsTable())) ? 1 : 0;
-    bool enable = (args.size() > bIdx && args[bIdx].IsBoolean()) ? args[bIdx].AsBoolean() : false;
+    size_t bIdx = (args.Size() > 1 && (args[0].IsUserdata() || args[0].IsTable())) ? 1 : 0;
+    bool enable = (args.Size() > bIdx && args[bIdx].IsBoolean()) ? args[bIdx].AsBoolean() : false;
 
     uv_tty_set_mode(reinterpret_cast<uv_tty_t*>(streamHandle), enable ? UV_TTY_MODE_RAW : UV_TTY_MODE_NORMAL);
     return Lode::Value();
@@ -966,8 +966,8 @@ void StdioStream::OnWritten(uv_write_t* req, int status)
 Lode::Value WrapStdioStream(Lode::State& vm, const std::shared_ptr<StdioStream>& stream, const Lode::Table& methods)
 {
     Lode::Table meta = vm.CreateTable();
-    meta.Set("__index", vm.CreateFunction([stream, methods](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
-        std::string key = (args.size() > 1 && args[1].IsString()) ? args[1].AsString() : "";
+    meta.Set("__index", vm.CreateFastFunction([stream, methods](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
+        std::string key = (args.Size() > 1 && args[1].IsString()) ? args[1].AsString() : "";
 
         if (key == "DataReceived") return stream->dataProxy;
         if (key == "EndOfStream") return stream->endProxy;
@@ -994,13 +994,13 @@ Lode::Value WrapStdioStream(Lode::State& vm, const std::shared_ptr<StdioStream>&
         return Lode::Value();
     }));
 
-    meta.Set("__newindex", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    meta.Set("__newindex", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         vm2.RaiseError("stdio: objects are read-only");
         return Lode::Value();
     }));
 
     meta.Set("__metatable", Lode::Value(std::string("StdioStream")));
-    meta.Set("__tostring", vm.CreateFunction([](Lode::State&, const std::vector<Lode::Value>&) -> Lode::Value {
+    meta.Set("__tostring", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs) -> Lode::Value {
         return Lode::Value(std::string("StdioStream"));
     }));
 
