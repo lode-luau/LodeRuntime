@@ -92,6 +92,10 @@ export type TcpSocket = {
     
     --- Closes the socket gracefully.
     Close: (self: TcpSocket) -> (),
+
+    --- Half-closes the socket: sends FIN so the remote sees EOF, but keeps
+    --- reading until the remote closes too. Idempotent.
+    End: (self: TcpSocket) -> (),
     
     --- Destroys the socket immediately.
     Destroy: (self: TcpSocket) -> (),
@@ -218,14 +222,17 @@ export type TcpModule = {
         Create: (self: any) -> TcpSocket
     },
     
-    --- Resolves a hostname to an IP address synchronously.
-    --- @return The resolved IP address
+    --- Resolves a hostname to an IP address.
+    --- Yields the calling coroutine only; the event loop keeps running while
+    --- the OS resolver works (uv_getaddrinfo on the libuv threadpool).
+    --- @return The first resolved IP address
     resolve: (
         --- The hostname to resolve
         host: string
     ) -> string,
     
-    --- Resolves a hostname to an IP address asynchronously.
+    --- Resolves a hostname to an IP address without yielding the caller;
+    --- delivers the result through a callback spawned on completion.
     resolveAsync: (
         --- The hostname to resolve
         host: string,

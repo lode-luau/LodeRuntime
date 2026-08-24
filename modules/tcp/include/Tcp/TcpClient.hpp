@@ -88,16 +88,25 @@ struct TCP_API TcpClient : std::enable_shared_from_this<TcpClient>
     void SendNative(const char* data, size_t size);
     void SendRawTls(const std::vector<uint8_t>& data);
 
-    Lode::Value MethodConnect(Lode::State& vm, const std::vector<Lode::Value>& args);
-    Lode::Value MethodSend(Lode::State& vm, const std::vector<Lode::Value>& args);
-    Lode::Value MethodSetNoDelay(Lode::State& vm, const std::vector<Lode::Value>& args);
-    Lode::Value MethodSetKeepAlive(Lode::State& vm, const std::vector<Lode::Value>& args);
+    Lode::Value MethodConnect(Lode::State& vm, Lode::StackArgs args);
+    Lode::Value MethodSend(Lode::State& vm, Lode::StackArgs args);
+    Lode::Value MethodSetNoDelay(Lode::State& vm, Lode::StackArgs args);
+    Lode::Value MethodSetKeepAlive(Lode::State& vm, Lode::StackArgs args);
     Lode::Value MethodLocalAddress(Lode::State& vm);
     Lode::Value MethodRemoteAddress(Lode::State& vm);
 
     void CloseHandles();
     void RequestClose();
     void FailConnect(const std::string& message);
+
+    // Reason delivered through the Disconnected signal (empty = clean close).
+    std::string closeReason;
+
+    // Half-close (End): sends FIN but keeps reading the remote half.
+    uv_shutdown_t shutdownReq{};
+    bool shutdownQueued = false;
+    Lode::Value MethodEnd(Lode::State& vm);
+    static void OnShutdown(uv_shutdown_t* req, int status);
     void CheckClosed();
     void FinishClosed();
 

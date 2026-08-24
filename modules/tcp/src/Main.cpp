@@ -16,7 +16,7 @@ Lode::Table BuildClientMethods(Lode::State& vm, const std::shared_ptr<lodetcp::T
 {
     Lode::Table m = vm.CreateTable();
 
-    m.Set("Connect", vm.CreateFunction([mgr](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    m.Set("Connect", vm.CreateFastFunction([mgr](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodetcp::TcpClient>::Unwrap(vm2, 1);
         if (!self)
         {
@@ -31,7 +31,7 @@ Lode::Table BuildClientMethods(Lode::State& vm, const std::shared_ptr<lodetcp::T
         return self->MethodConnect(vm2, args);
     }));
 
-    m.Set("Send", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    m.Set("Send", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodetcp::TcpClient>::Unwrap(vm2, 1);
         if (!self)
         {
@@ -41,7 +41,7 @@ Lode::Table BuildClientMethods(Lode::State& vm, const std::shared_ptr<lodetcp::T
         return self->MethodSend(vm2, args);
     }));
 
-    m.Set("Close", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    m.Set("Close", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodetcp::TcpClient>::Unwrap(vm2, 1);
         if (!self)
         {
@@ -52,7 +52,7 @@ Lode::Table BuildClientMethods(Lode::State& vm, const std::shared_ptr<lodetcp::T
         return Lode::Value();
     }));
 
-    m.Set("Destroy", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    m.Set("Destroy", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodetcp::TcpClient>::Unwrap(vm2, 1);
         if (!self)
         {
@@ -63,14 +63,25 @@ Lode::Table BuildClientMethods(Lode::State& vm, const std::shared_ptr<lodetcp::T
         return Lode::Value();
     }));
 
-    m.Set("IsConnected", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    // Half-close: send FIN, keep reading until the remote closes.
+    m.Set("End", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
+        auto self = Lode::ObjectWrap<lodetcp::TcpClient>::Unwrap(vm2, 1);
+        if (!self)
+        {
+            vm2.RaiseError("socket End: invalid TcpSocket");
+            return Lode::Value();
+        }
+        return self->MethodEnd(vm2);
+    }));
+
+    m.Set("IsConnected", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodetcp::TcpClient>::Unwrap(vm2, 1);
         if (!self)
             return Lode::Value(false);
         return Lode::Value(self->connected && !self->closing && !self->closed);
     }));
 
-    m.Set("LocalAddress", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    m.Set("LocalAddress", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodetcp::TcpClient>::Unwrap(vm2, 1);
         if (!self)
         {
@@ -80,7 +91,7 @@ Lode::Table BuildClientMethods(Lode::State& vm, const std::shared_ptr<lodetcp::T
         return self->MethodLocalAddress(vm2);
     }));
 
-    m.Set("RemoteAddress", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    m.Set("RemoteAddress", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodetcp::TcpClient>::Unwrap(vm2, 1);
         if (!self)
         {
@@ -90,7 +101,7 @@ Lode::Table BuildClientMethods(Lode::State& vm, const std::shared_ptr<lodetcp::T
         return self->MethodRemoteAddress(vm2);
     }));
 
-    m.Set("SetNoDelay", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    m.Set("SetNoDelay", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodetcp::TcpClient>::Unwrap(vm2, 1);
         if (!self)
         {
@@ -100,7 +111,7 @@ Lode::Table BuildClientMethods(Lode::State& vm, const std::shared_ptr<lodetcp::T
         return self->MethodSetNoDelay(vm2, args);
     }));
 
-    m.Set("SetKeepAlive", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    m.Set("SetKeepAlive", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodetcp::TcpClient>::Unwrap(vm2, 1);
         if (!self)
         {
@@ -117,7 +128,7 @@ Lode::Table BuildServerMethods(Lode::State& vm, const std::shared_ptr<lodetcp::T
 {
     Lode::Table m = vm.CreateTable();
 
-    m.Set("Listen", vm.CreateFunction([mgr](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    m.Set("Listen", vm.CreateFastFunction([mgr](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodetcp::TcpServer>::Unwrap(vm2, 1);
         if (!self)
         {
@@ -132,7 +143,7 @@ Lode::Table BuildServerMethods(Lode::State& vm, const std::shared_ptr<lodetcp::T
         return self->MethodListen(vm2, args);
     }));
 
-    m.Set("Close", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    m.Set("Close", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodetcp::TcpServer>::Unwrap(vm2, 1);
         if (!self)
         {
@@ -143,7 +154,7 @@ Lode::Table BuildServerMethods(Lode::State& vm, const std::shared_ptr<lodetcp::T
         return Lode::Value();
     }));
 
-    m.Set("Destroy", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    m.Set("Destroy", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodetcp::TcpServer>::Unwrap(vm2, 1);
         if (!self)
         {
@@ -154,14 +165,14 @@ Lode::Table BuildServerMethods(Lode::State& vm, const std::shared_ptr<lodetcp::T
         return Lode::Value();
     }));
 
-    m.Set("IsListening", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    m.Set("IsListening", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodetcp::TcpServer>::Unwrap(vm2, 1);
         if (!self)
             return Lode::Value(false);
         return Lode::Value(self->listening && !self->closing && !self->closed);
     }));
 
-    m.Set("LocalAddress", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    m.Set("LocalAddress", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodetcp::TcpServer>::Unwrap(vm2, 1);
         if (!self)
         {
@@ -187,7 +198,7 @@ LODE_MODULE(vm)
     mgr->serverMethods = BuildServerMethods(vm, mgr);
 
     Lode::Table tcpSocketClass = vm.CreateTable();
-    tcpSocketClass.Set("Create", vm.CreateFunction([mgr](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    tcpSocketClass.Set("Create", vm.CreateFastFunction([mgr](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         if (mgr->shuttingDown)
         {
             vm2.RaiseError("socket: runtime is shutting down");
@@ -204,7 +215,7 @@ LODE_MODULE(vm)
     }));
 
     Lode::Table serverClass = vm.CreateTable();
-    serverClass.Set("Create", vm.CreateFunction([mgr](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    serverClass.Set("Create", vm.CreateFastFunction([mgr](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         if (mgr->shuttingDown)
         {
             vm2.RaiseError("socket: runtime is shutting down");
@@ -214,7 +225,7 @@ LODE_MODULE(vm)
         server->mgr = mgr;
         server->mainL = mgr->mainL;
         server->loop = mgr->loop;
-        if (args.size() > 1 && !args[1].IsNil())
+        if (args.Size() > 1 && !args[1].IsNil())
         {
             if (!args[1].IsTable())
             {
@@ -251,8 +262,8 @@ LODE_MODULE(vm)
     exports.SetTable("Server", serverClass);
     exports.SetTable("TcpSocket", tcpSocketClass);
 
-    exports.Function("resolve", [mgr](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
-        if (args.size() < 1 || !args[0].IsString())
+    exports.Function("resolve", [mgr](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
+        if (args.Size() < 1 || !args[0].IsString())
         {
             vm2.RaiseError("socket.resolve: host must be a string");
             return Lode::Value();
@@ -277,8 +288,8 @@ LODE_MODULE(vm)
         return vm2.YieldThread();
     });
 
-    exports.Function("resolveAsync", [mgr](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
-        if (args.size() < 2 || !args[0].IsString() || !args[1].IsFunction())
+    exports.Function("resolveAsync", [mgr](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
+        if (args.Size() < 2 || !args[0].IsString() || !args[1].IsFunction())
         {
             vm2.RaiseError("socket.resolveAsync: expected host and callback");
             return Lode::Value();
@@ -294,7 +305,7 @@ LODE_MODULE(vm)
             vm2.RaiseError("socket.resolveAsync: runtime is shutting down");
             return Lode::Value();
         }
-        int r = lodetcp::StartResolve(vm2, mgr, host, Lode::Coroutine(), args[1]);
+        int r = lodetcp::StartResolve(vm2, mgr, host, Lode::Coroutine(), args[1].ToValue());
         if (r != 0)
         {
             vm2.RaiseError("socket.resolveAsync: " + std::string(uv_strerror(r)));

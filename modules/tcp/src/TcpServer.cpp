@@ -39,7 +39,7 @@ void TcpServer::UpdateAddresses()
     }
 }
 
-Lode::Value TcpServer::MethodListen(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value TcpServer::MethodListen(Lode::State& vm, Lode::StackArgs args)
 {
     if (closing || closed)
     {
@@ -51,7 +51,7 @@ Lode::Value TcpServer::MethodListen(Lode::State& vm, const std::vector<Lode::Val
         vm.RaiseError("socket Server: already listening");
         return Lode::Value();
     }
-    if (args.size() < 2 || !args[1].IsNumber())
+    if (args.Size() < 2 || !args[1].IsNumber())
     {
         vm.RaiseError("socket Server: port must be a number");
         return Lode::Value();
@@ -64,7 +64,7 @@ Lode::Value TcpServer::MethodListen(Lode::State& vm, const std::vector<Lode::Val
     }
     int port = static_cast<int>(portValue);
     std::string host;
-    if (args.size() > 2 && !args[2].IsNil())
+    if (args.Size() > 2 && !args[2].IsNil())
     {
         if (!args[2].IsString())
         {
@@ -75,14 +75,15 @@ Lode::Value TcpServer::MethodListen(Lode::State& vm, const std::vector<Lode::Val
     }
 
     std::memset(&tcp, 0, sizeof(tcp));
-    tcpInited = true;
     tcp.data = this;
     int r = uv_tcp_init(loop, &tcp);
     if (r != 0)
     {
+        // Keep tcpInited false so no later uv_close runs over a zeroed handle.
         BindFail(vm, std::string("tcp: ") + uv_strerror(r));
         return Lode::Value();
     }
+    tcpInited = true;
 
     struct sockaddr_storage addr;
     int namelen = 0;
@@ -114,7 +115,6 @@ void TcpServer::ListenNative(const std::string& host, int port)
     if (closing || closed || listening)
         return;
     std::memset(&tcp, 0, sizeof(tcp));
-    tcpInited = true;
     tcp.data = this;
     int r = uv_tcp_init(loop, &tcp);
     if (r != 0)
@@ -122,6 +122,7 @@ void TcpServer::ListenNative(const std::string& host, int port)
         BindFailNative(std::string("tcp: ") + uv_strerror(r));
         return;
     }
+    tcpInited = true;
 
     struct sockaddr_storage addr;
     int namelen = 0;
@@ -293,8 +294,8 @@ void TcpServer::OnConnection(uv_stream_t* server, int status)
 Lode::Value WrapServer(Lode::State& vm, const std::shared_ptr<TcpServer>& server, const Lode::Table& methods)
 {
     Lode::Table meta = vm.CreateTable();
-    meta.Set("__index", vm.CreateFunction([server, methods](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
-        std::string key = (args.size() > 1 && args[1].IsString()) ? args[1].AsString() : "";
+    meta.Set("__index", vm.CreateFastFunction([server, methods](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
+        std::string key = (args.Size() > 1 && args[1].IsString()) ? args[1].AsString() : "";
         if (key == "ClientConnected")
             return server->clientProxy;
         if (key == "ErrorOccurred")
@@ -304,12 +305,12 @@ Lode::Value WrapServer(Lode::State& vm, const std::shared_ptr<TcpServer>& server
             return value.GetValue();
         return Lode::Value();
     }));
-    meta.Set("__newindex", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    meta.Set("__newindex", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         vm2.RaiseError("socket: objects are read-only");
         return Lode::Value();
     }));
     meta.Set("__metatable", Lode::Value(std::string("Server")));
-    meta.Set("__tostring", vm.CreateFunction([](Lode::State&, const std::vector<Lode::Value>&) -> Lode::Value {
+    meta.Set("__tostring", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs) -> Lode::Value {
         return Lode::Value(std::string("Server"));
     }));
     Lode::ObjectWrap<TcpServer>::Wrap(vm, server, meta);

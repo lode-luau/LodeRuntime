@@ -51,7 +51,7 @@ struct TCP_API TcpServer : std::enable_shared_from_this<TcpServer>
 
     void ListenNative(const std::string& host, int port);
 
-    Lode::Value MethodListen(Lode::State& vm, const std::vector<Lode::Value>& args);
+    Lode::Value MethodListen(Lode::State& vm, Lode::StackArgs args);
     Lode::Value MethodLocalAddress(Lode::State& vm);
 
     void RequestClose();
