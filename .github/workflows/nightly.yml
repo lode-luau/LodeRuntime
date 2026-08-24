@@ -102,8 +102,11 @@ jobs:
       # 1. Set up the sccache tool. The Visual Studio (MSBuild) generator
       #    ignores CMAKE_<LANG>_COMPILER_LAUNCHER, so CI uses the Ninja
       #    generator (with separate Debug/Release trees), which honors it.
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@v0.0.8
+      #    Installed via choco: the sccache GitHub Action appends its own
+      #    stats section to the job summary, which the release notes should
+      #    not carry.
+      - name: Install sccache
+        run: choco install sccache -y --no-progress
 
       # 2. Restore-only cache of compiled C++ objects, falling back to the
       #    cache written by the ci workflow so main and nightly share hits.
