@@ -20,11 +20,43 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Compiler-cache tooling. The Visual Studio (MSBuild) generator ignores
+      # CMAKE_<LANG>_COMPILER_LAUNCHER, so this workflow uses the Ninja
+      # generator (same pattern as ci.yml) with ccache as the launcher.
+      - name: Enable MSVC toolchain
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install ccache
+        run: choco install ccache -y --no-progress
+
+      # Restore-only: the runner reuses a warm compiler cache to speed up the
+      # build, but this workflow never SAVES a cache entry back. Benchmarks
+      # measure compile-from-scratch machines fairly, and a cold cache cannot
+      # skew the timing comparison either way (the baseline was recorded the
+      # same way). Restore keys fall back to any recent ccache from this
+      # branch or from main.
+      - name: Restore ccache (no save)
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/ccache
+          key: ${{ runner.os }}-ccache-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-ccache-
+
       - name: Configure
-        run: cmake -B build -DLODE_BUILD_BENCH=ON
+        env:
+          CCACHE_DIR: ${{ runner.temp }}/ccache
+        run: >-
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl
+          -DLODE_BUILD_BENCH=ON
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build Release
-        run: cmake --build build --config Release
+        env:
+          CCACHE_DIR: ${{ runner.temp }}/ccache
+        run: cmake --build build
 
       # CI compares against its own committed baseline (bench/results/
       # ci-baseline.json), never against local-machine numbers: the runner
@@ -40,6 +72,11 @@ jobs:
           } else {
             ./bench/run_bench.ps1 -Baseline bench/results/ci-baseline.json -FailOnRegression
           }
+
+      - name: Show ccache stats
+        env:
+          CCACHE_DIR: ${{ runner.temp }}/ccache
+        run: ccache --show-stats
 
       - name: Upload benchmark results
         uses: actions/upload-artifact@v4
