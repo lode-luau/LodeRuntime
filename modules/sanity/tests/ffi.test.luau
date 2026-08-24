@@ -144,7 +144,7 @@ describe("ffi", function()
                 double pow(double x, double y);
                 size_t strnlen(const char* s, size_t maxlen);
                 float sqrtf(float x);
-                int abs(int value);                           
+                int abs(int value);
             ]])
 
             it("returns the current process id", function()
