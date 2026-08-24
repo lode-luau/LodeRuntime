@@ -80,10 +80,14 @@ export type UdpSocket = {
     ) -> (),
 
     --- Joins an IPv4 or IPv6 multicast group.
-    JoinGroup: (self: UdpSocket, group: string, interfaceName: string?) -> (),
+    --- The optional interface argument is the IP ADDRESS of the local
+    --- interface (not its name), as required by uv_udp_set_membership.
+    JoinGroup: (self: UdpSocket, group: string, interfaceAddr: string?) -> (),
 
-    --- Leaves a multicast group.
-    LeaveGroup: (self: UdpSocket, group: string, interfaceName: string?) -> (),
+    --- Leaves an IPv4 or IPv6 multicast group.
+    --- The optional interface argument is the IP ADDRESS of the local
+    --- interface (not its name).
+    LeaveGroup: (self: UdpSocket, group: string, interfaceAddr: string?) -> (),
 
     --- Enables or disables broadcast sends.
     SetBroadcast: (self: UdpSocket, enabled: boolean) -> (),

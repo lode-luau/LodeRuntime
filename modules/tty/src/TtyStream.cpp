@@ -100,7 +100,7 @@ void TtyStream::WriteNative(const char* data, size_t size)
     }
 }
 
-Lode::Value TtyStream::MethodWrite(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value TtyStream::MethodWrite(Lode::State& vm, Lode::StackArgs args)
 {
     if (closed || closing)
     {
@@ -112,7 +112,7 @@ Lode::Value TtyStream::MethodWrite(Lode::State& vm, const std::vector<Lode::Valu
         vm.RaiseError("tty Write: stream is not open");
         return Lode::Value();
     }
-    if (args.size() < 2 || (!args[1].IsString() && !args[1].IsBuffer()))
+    if (args.Size() < 2 || (!args[1].IsString() && !args[1].IsBuffer()))
     {
         vm.RaiseError("tty Write: data must be a string or buffer");
         return Lode::Value();
@@ -147,7 +147,7 @@ Lode::Value TtyStream::MethodWrite(Lode::State& vm, const std::vector<Lode::Valu
     return Lode::Value();
 }
 
-Lode::Value TtyStream::MethodWriteLine(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value TtyStream::MethodWriteLine(Lode::State& vm, Lode::StackArgs args)
 {
     if (closed || closing)
     {
@@ -159,7 +159,7 @@ Lode::Value TtyStream::MethodWriteLine(Lode::State& vm, const std::vector<Lode::
         vm.RaiseError("tty WriteLine: stream is not open");
         return Lode::Value();
     }
-    if (args.size() < 2 || !args[1].IsString())
+    if (args.Size() < 2 || !args[1].IsString())
     {
         vm.RaiseError("tty WriteLine: data must be a string");
         return Lode::Value();
@@ -170,7 +170,7 @@ Lode::Value TtyStream::MethodWriteLine(Lode::State& vm, const std::vector<Lode::
     return Lode::Value();
 }
 
-Lode::Value TtyStream::MethodRead(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value TtyStream::MethodRead(Lode::State& vm, Lode::StackArgs args)
 {
     if (closed || closing)
     {
@@ -193,7 +193,7 @@ Lode::Value TtyStream::MethodRead(Lode::State& vm, const std::vector<Lode::Value
         return Lode::Value();
     }
     int bytes = -1;
-    if (args.size() > 1 && !args[1].IsNil())
+    if (args.Size() > 1 && !args[1].IsNil())
     {
         if (!args[1].IsNumber())
         {
@@ -217,7 +217,7 @@ Lode::Value TtyStream::MethodRead(Lode::State& vm, const std::vector<Lode::Value
     return Lode::Value();
 }
 
-Lode::Value TtyStream::MethodReadBuffer(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value TtyStream::MethodReadBuffer(Lode::State& vm, Lode::StackArgs args)
 {
     if (closed || closing)
     {
@@ -240,7 +240,7 @@ Lode::Value TtyStream::MethodReadBuffer(Lode::State& vm, const std::vector<Lode:
         return Lode::Value();
     }
     int bytes = -1;
-    if (args.size() > 1 && !args[1].IsNil())
+    if (args.Size() > 1 && !args[1].IsNil())
     {
         if (!args[1].IsNumber())
         {
@@ -264,7 +264,7 @@ Lode::Value TtyStream::MethodReadBuffer(Lode::State& vm, const std::vector<Lode:
     return Lode::Value();
 }
 
-Lode::Value TtyStream::MethodReadLine(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value TtyStream::MethodReadLine(Lode::State& vm, Lode::StackArgs args)
 {
     (void)args;
     if (closed || closing)
@@ -334,14 +334,14 @@ Lode::Value TtyStream::MethodGetWindowSize(Lode::State& vm)
     return Lode::Value(result);
 }
 
-Lode::Value TtyStream::MethodSetMode(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value TtyStream::MethodSetMode(Lode::State& vm, Lode::StackArgs args)
 {
     if (closed || closing || !open)
     {
         vm.RaiseError("tty SetMode: stream is not open");
         return Lode::Value();
     }
-    if (args.size() < 2)
+    if (args.Size() < 2)
     {
         vm.RaiseError("tty SetMode: mode is required");
         return Lode::Value();
@@ -371,7 +371,12 @@ Lode::Value TtyStream::MethodSetMode(Lode::State& vm, const std::vector<Lode::Va
         vm.RaiseError("tty SetMode: mode must be a string or a number");
         return Lode::Value();
     }
-    uv_tty_set_mode(&tty, static_cast<uv_tty_mode_t>(m));
+    const int rc = uv_tty_set_mode(&tty, static_cast<uv_tty_mode_t>(m));
+    if (rc != 0)
+    {
+        vm.RaiseError(std::string("tty SetMode: ") + uv_strerror(rc));
+        return Lode::Value();
+    }
     return Lode::Value();
 }
 
@@ -511,8 +516,8 @@ void TtyStream::OnWritten(uv_write_t* req, int status)
 Lode::Value WrapTtyStream(Lode::State& vm, const std::shared_ptr<TtyStream>& stream, const Lode::Table& methods)
 {
     Lode::Table meta = vm.CreateTable();
-    meta.Set("__index", vm.CreateFunction([stream, methods](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
-        std::string key = (args.size() > 1 && args[1].IsString()) ? args[1].AsString() : "";
+    meta.Set("__index", vm.CreateFastFunction([stream, methods](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
+        std::string key = (args.Size() > 1 && args[1].IsString()) ? args[1].AsString() : "";
         if (key == "DataReceived")
             return stream->dataProxy;
         if (key == "EndOfStream")
@@ -524,12 +529,12 @@ Lode::Value WrapTtyStream(Lode::State& vm, const std::shared_ptr<TtyStream>& str
             return value.GetValue();
         return Lode::Value();
     }));
-    meta.Set("__newindex", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    meta.Set("__newindex", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         vm2.RaiseError("tty: objects are read-only");
         return Lode::Value();
     }));
     meta.Set("__metatable", Lode::Value(std::string("TtyStream")));
-    meta.Set("__tostring", vm.CreateFunction([](Lode::State&, const std::vector<Lode::Value>&) -> Lode::Value {
+    meta.Set("__tostring", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs) -> Lode::Value {
         return Lode::Value(std::string("TtyStream"));
     }));
     Lode::ObjectWrap<TtyStream>::Wrap(vm, stream, meta);

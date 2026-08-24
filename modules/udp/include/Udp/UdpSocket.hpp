@@ -46,13 +46,13 @@ struct UDP_API UdpSocket : std::enable_shared_from_this<UdpSocket>
     void FinishClosed();
     void StartReading();
 
-    Lode::Value MethodBind(Lode::State& vm, const std::vector<Lode::Value>& args);
-    Lode::Value MethodSend(Lode::State& vm, const std::vector<Lode::Value>& args);
-    Lode::Value MethodJoinGroup(Lode::State& vm, const std::vector<Lode::Value>& args);
-    Lode::Value MethodLeaveGroup(Lode::State& vm, const std::vector<Lode::Value>& args);
-    Lode::Value MethodSetBroadcast(Lode::State& vm, const std::vector<Lode::Value>& args);
-    Lode::Value MethodSetTTL(Lode::State& vm, const std::vector<Lode::Value>& args);
-    Lode::Value MethodSetMulticastLoop(Lode::State& vm, const std::vector<Lode::Value>& args);
+    Lode::Value MethodBind(Lode::State& vm, Lode::StackArgs args);
+    Lode::Value MethodSend(Lode::State& vm, Lode::StackArgs args);
+    Lode::Value MethodJoinGroup(Lode::State& vm, Lode::StackArgs args);
+    Lode::Value MethodLeaveGroup(Lode::State& vm, Lode::StackArgs args);
+    Lode::Value MethodSetBroadcast(Lode::State& vm, Lode::StackArgs args);
+    Lode::Value MethodSetTTL(Lode::State& vm, Lode::StackArgs args);
+    Lode::Value MethodSetMulticastLoop(Lode::State& vm, Lode::StackArgs args);
     Lode::Value MethodLocalAddress(Lode::State& vm);
 
     static int MakeSockAddr(const std::string& host, int port, struct sockaddr_storage& out, int& outLen);

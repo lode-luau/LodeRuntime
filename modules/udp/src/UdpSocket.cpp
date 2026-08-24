@@ -40,7 +40,7 @@ void UdpSocket::UpdateAddress()
     }
 }
 
-Lode::Value UdpSocket::MethodBind(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value UdpSocket::MethodBind(Lode::State& vm, Lode::StackArgs args)
 {
     if (closing || closed)
     {
@@ -52,12 +52,12 @@ Lode::Value UdpSocket::MethodBind(Lode::State& vm, const std::vector<Lode::Value
         vm.RaiseError("udp Bind: socket is already bound");
         return Lode::Value();
     }
-    if (args.size() < 2 || !args[1].IsString())
+    if (args.Size() < 2 || !args[1].IsString())
     {
         vm.RaiseError("udp Bind: host must be a string");
         return Lode::Value();
     }
-    if (args.size() < 3 || !args[2].IsNumber())
+    if (args.Size() < 3 || !args[2].IsNumber())
     {
         vm.RaiseError("udp Bind: port must be a number");
         return Lode::Value();
@@ -104,7 +104,7 @@ Lode::Value UdpSocket::MethodBind(Lode::State& vm, const std::vector<Lode::Value
     return Lode::Value();
 }
 
-Lode::Value UdpSocket::MethodSend(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value UdpSocket::MethodSend(Lode::State& vm, Lode::StackArgs args)
 {
     if (closing || closed)
     {
@@ -116,17 +116,17 @@ Lode::Value UdpSocket::MethodSend(Lode::State& vm, const std::vector<Lode::Value
         vm.RaiseError("udp Send: not bound, use Bind first");
         return Lode::Value();
     }
-    if (args.size() < 2 || (!args[1].IsString() && !args[1].IsBuffer()))
+    if (args.Size() < 2 || (!args[1].IsString() && !args[1].IsBuffer()))
     {
         vm.RaiseError("udp Send: data must be a string or buffer");
         return Lode::Value();
     }
-    if (args.size() < 3 || !args[2].IsString())
+    if (args.Size() < 3 || !args[2].IsString())
     {
         vm.RaiseError("udp Send: host must be a string");
         return Lode::Value();
     }
-    if (args.size() < 4 || !args[3].IsNumber())
+    if (args.Size() < 4 || !args[3].IsNumber())
     {
         vm.RaiseError("udp Send: port must be a number");
         return Lode::Value();
@@ -184,10 +184,10 @@ Lode::Value UdpSocket::MethodSend(Lode::State& vm, const std::vector<Lode::Value
     return Lode::Value();
 }
 
-static bool RequireUdpOptionString(Lode::State& vm, const std::vector<Lode::Value>& args,
+static bool RequireUdpOptionString(Lode::State& vm, Lode::StackArgs args,
                                    const char* method, std::string& value)
 {
-    if (args.size() < 2 || !args[1].IsString())
+    if (args.Size() < 2 || !args[1].IsString())
     {
         vm.RaiseError(std::string("udp ") + method + ": address must be a string");
         return false;
@@ -198,7 +198,14 @@ static bool RequireUdpOptionString(Lode::State& vm, const std::vector<Lode::Valu
 
 static bool RequireUdpOptionReady(Lode::State& vm, const UdpSocket& socket, const char* method)
 {
-    if (!socket.udpInited || socket.closed || socket.closing)
+    if (!socket.udpInited)
+    {
+        // Distinguish "never bound" from "closed": the old message claimed
+        // the socket was closed when it had simply never been bound.
+        vm.RaiseError(std::string("udp ") + method + ": not bound, use Bind first");
+        return false;
+    }
+    if (socket.closed || socket.closing)
     {
         vm.RaiseError(std::string("udp ") + method + ": socket is closed");
         return false;
@@ -206,14 +213,14 @@ static bool RequireUdpOptionReady(Lode::State& vm, const UdpSocket& socket, cons
     return true;
 }
 
-Lode::Value UdpSocket::MethodJoinGroup(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value UdpSocket::MethodJoinGroup(Lode::State& vm, Lode::StackArgs args)
 {
     if (!RequireUdpOptionReady(vm, *this, "JoinGroup")) return Lode::Value();
     std::string group;
     if (!RequireUdpOptionString(vm, args, "JoinGroup", group)) return Lode::Value();
     const char* interfaceName = nullptr;
     std::string interfaceValue;
-    if (args.size() > 2 && !args[2].IsNil())
+    if (args.Size() > 2 && !args[2].IsNil())
     {
         if (!args[2].IsString())
         {
@@ -232,14 +239,14 @@ Lode::Value UdpSocket::MethodJoinGroup(Lode::State& vm, const std::vector<Lode::
     return Lode::Value();
 }
 
-Lode::Value UdpSocket::MethodLeaveGroup(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value UdpSocket::MethodLeaveGroup(Lode::State& vm, Lode::StackArgs args)
 {
     if (!RequireUdpOptionReady(vm, *this, "LeaveGroup")) return Lode::Value();
     std::string group;
     if (!RequireUdpOptionString(vm, args, "LeaveGroup", group)) return Lode::Value();
     const char* interfaceName = nullptr;
     std::string interfaceValue;
-    if (args.size() > 2 && !args[2].IsNil())
+    if (args.Size() > 2 && !args[2].IsNil())
     {
         if (!args[2].IsString())
         {
@@ -258,10 +265,10 @@ Lode::Value UdpSocket::MethodLeaveGroup(Lode::State& vm, const std::vector<Lode:
     return Lode::Value();
 }
 
-Lode::Value UdpSocket::MethodSetBroadcast(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value UdpSocket::MethodSetBroadcast(Lode::State& vm, Lode::StackArgs args)
 {
     if (!RequireUdpOptionReady(vm, *this, "SetBroadcast")) return Lode::Value();
-    if (args.size() < 2 || !args[1].IsBoolean())
+    if (args.Size() < 2 || !args[1].IsBoolean())
     {
         vm.RaiseError("udp SetBroadcast: enabled must be a boolean");
         return Lode::Value();
@@ -271,10 +278,10 @@ Lode::Value UdpSocket::MethodSetBroadcast(Lode::State& vm, const std::vector<Lod
     return Lode::Value();
 }
 
-Lode::Value UdpSocket::MethodSetTTL(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value UdpSocket::MethodSetTTL(Lode::State& vm, Lode::StackArgs args)
 {
     if (!RequireUdpOptionReady(vm, *this, "SetTTL")) return Lode::Value();
-    if (args.size() < 2 || !args[1].IsNumber() || args[1].AsNumber() < 1 || args[1].AsNumber() > 255)
+    if (args.Size() < 2 || !args[1].IsNumber() || args[1].AsNumber() < 1 || args[1].AsNumber() > 255)
     {
         vm.RaiseError("udp SetTTL: ttl must be a number from 1 to 255");
         return Lode::Value();
@@ -284,10 +291,10 @@ Lode::Value UdpSocket::MethodSetTTL(Lode::State& vm, const std::vector<Lode::Val
     return Lode::Value();
 }
 
-Lode::Value UdpSocket::MethodSetMulticastLoop(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value UdpSocket::MethodSetMulticastLoop(Lode::State& vm, Lode::StackArgs args)
 {
     if (!RequireUdpOptionReady(vm, *this, "SetMulticastLoop")) return Lode::Value();
-    if (args.size() < 2 || !args[1].IsBoolean())
+    if (args.Size() < 2 || !args[1].IsBoolean())
     {
         vm.RaiseError("udp SetMulticastLoop: enabled must be a boolean");
         return Lode::Value();
@@ -416,6 +423,13 @@ void UdpSocket::OnRead(uv_udp_t* handle, ssize_t nread, const uv_buf_t* buf, con
             addressTable.Set("port", Lode::Value(static_cast<double>(port)));
             
             self->messageSig->Fire({Lode::Value(std::string(buf->base, static_cast<size_t>(nread))), Lode::Value(addressTable)});
+            if (flags & UV_UDP_PARTIAL)
+            {
+                // The datagram did not fit the receive buffer and was cut off.
+                // Never present truncated data as a complete datagram.
+                self->FireError("read: datagram from " + host + ":" + std::to_string(port) +
+                                " was truncated (UV_UDP_PARTIAL) and may be incomplete");
+            }
         }
     }
     else if (nread < 0)
@@ -439,8 +453,8 @@ void UdpSocket::OnSend(uv_udp_send_t* req, int status)
 Lode::Value WrapUdpSocket(Lode::State& vm, const std::shared_ptr<UdpSocket>& socket, const Lode::Table& methods)
 {
     Lode::Table meta = vm.CreateTable();
-    meta.Set("__index", vm.CreateFunction([socket, methods](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
-        std::string key = (args.size() > 1 && args[1].IsString()) ? args[1].AsString() : "";
+    meta.Set("__index", vm.CreateFastFunction([socket, methods](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
+        std::string key = (args.Size() > 1 && args[1].IsString()) ? args[1].AsString() : "";
         if (key == "MessageReceived")
             return socket->messageProxy;
         if (key == "ErrorOccurred")
@@ -450,12 +464,12 @@ Lode::Value WrapUdpSocket(Lode::State& vm, const std::shared_ptr<UdpSocket>& soc
             return value.GetValue();
         return Lode::Value();
     }));
-    meta.Set("__newindex", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    meta.Set("__newindex", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         vm2.RaiseError("udp: objects are read-only");
         return Lode::Value();
     }));
     meta.Set("__metatable", Lode::Value(std::string("UdpSocket")));
-    meta.Set("__tostring", vm.CreateFunction([](Lode::State&, const std::vector<Lode::Value>&) -> Lode::Value {
+    meta.Set("__tostring", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs) -> Lode::Value {
         return Lode::Value(std::string("UdpSocket"));
     }));
     Lode::ObjectWrap<UdpSocket>::Wrap(vm, socket, meta);

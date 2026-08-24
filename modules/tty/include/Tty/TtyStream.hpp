@@ -61,15 +61,15 @@ struct TTY_API TtyStream : std::enable_shared_from_this<TtyStream>
     std::string InitNative(int fd, bool readable);
     void WriteNative(const char* data, size_t size);
 
-    Lode::Value MethodWrite(Lode::State& vm, const std::vector<Lode::Value>& args);
-    Lode::Value MethodWriteLine(Lode::State& vm, const std::vector<Lode::Value>& args);
-    Lode::Value MethodRead(Lode::State& vm, const std::vector<Lode::Value>& args);
-    Lode::Value MethodReadBuffer(Lode::State& vm, const std::vector<Lode::Value>& args);
-    Lode::Value MethodReadLine(Lode::State& vm, const std::vector<Lode::Value>& args);
+    Lode::Value MethodWrite(Lode::State& vm, Lode::StackArgs args);
+    Lode::Value MethodWriteLine(Lode::State& vm, Lode::StackArgs args);
+    Lode::Value MethodRead(Lode::State& vm, Lode::StackArgs args);
+    Lode::Value MethodReadBuffer(Lode::State& vm, Lode::StackArgs args);
+    Lode::Value MethodReadLine(Lode::State& vm, Lode::StackArgs args);
     Lode::Value MethodStartStreaming(Lode::State& vm);
     Lode::Value MethodStopStreaming(Lode::State& vm);
     Lode::Value MethodGetWindowSize(Lode::State& vm);
-    Lode::Value MethodSetMode(Lode::State& vm, const std::vector<Lode::Value>& args);
+    Lode::Value MethodSetMode(Lode::State& vm, Lode::StackArgs args);
 
     void RequestClose();
     void FinishClosed();
