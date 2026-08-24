@@ -43,6 +43,16 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-ccache-
 
+      # Restore-only dependencies downloaded via FetchContent (saved by
+      # ci.yml), same ownership rule as the nightly workflow.
+      - name: Restore FetchContent (no save)
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/_deps
+          key: ${{ runner.os }}-fetchcontent-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-fetchcontent-
+
       - name: Configure
         env:
           CCACHE_DIR: ${{ runner.temp }}/ccache
@@ -50,6 +60,7 @@ jobs:
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
           -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl
           -DLODE_BUILD_BENCH=ON
+          -DFETCHCONTENT_BASE_DIR=${{ runner.temp }}/_deps
           -DCMAKE_C_COMPILER_LAUNCHER=ccache
           -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
