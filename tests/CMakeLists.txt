@@ -36,6 +36,10 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/native/marshal_module/CMakeLists.txt")
     add_subdirectory(native/marshal_module)
 endif()
 
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/native/ffi_module/CMakeLists.txt")
+    add_subdirectory(native/ffi_module)
+endif()
+
 function(lode_add_script_test test_name script_path)
     add_test(
         NAME ${test_name}
@@ -50,6 +54,14 @@ lode_add_script_test(integration_simd_bench      native/simd_bench.luau)
 lode_add_script_test(integration_marshal_bench   native/marshal_bench.luau)
 lode_add_script_test(integration_config_mismatch native/config_mismatch.luau)
 lode_add_script_test(integration_abi_mismatch  native/abi_mismatch.luau)
+
+# Keep the fixture path configuration-aware rather than relying on the system
+# loader search path. This also makes the test independent of the host libc.
+add_test(
+    NAME integration_ffi_module
+    COMMAND lode "${CMAKE_CURRENT_SOURCE_DIR}/native/ffi_module.luau" "$<TARGET_FILE:ffi_module>"
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+)
 
 # Package validation must reject malformed native artifact paths before any
 # package can be published.
