@@ -48,9 +48,9 @@ namespace
 using Clock = std::chrono::steady_clock;
 
 constexpr double kRepeatMs = 400.0;    // target wall time per measured repeat
-constexpr double kBudgetMs = 3600.0;   // total per-scenario budget (repeats)
-constexpr int kMinRepeats = 7;
-constexpr int kMaxRepeats = 10;
+constexpr double kBudgetMs = 7200.0;   // total per-scenario budget (repeats)
+constexpr int kMinRepeats = 12;
+constexpr int kMaxRepeats = 25;
 constexpr int64_t kMaxIterations = 1000000000;
 
 // Runs `body` for a time-based budget instead of a fixed iteration count:
@@ -98,13 +98,16 @@ void Measure(const char* name, const std::function<void()>& body)
         nsPerOp.push_back(ns / static_cast<double>(targetIters));
     }
 
-    // Arithmetic mean over the repeats: with 7-10 samples the averaging
-    // smooths run-to-run noise better than the old 3-10/median scheme.
-    double sum = 0.0;
-    for (double ns : nsPerOp)
-        sum += ns;
-    const double mean = sum / static_cast<double>(nsPerOp.size());
-    std::printf("%-32s %12.2f ns/op\n", name, mean);
+    // Median over the repeats: robust against scheduler/allocator outliers
+    // that inflate the arithmetic mean on shared CI runners. Noise can only
+    // ever slow a sample down, so the median tracks the true cost far better
+    // than the mean when repeats are few but long.
+    std::sort(nsPerOp.begin(), nsPerOp.end());
+    const size_t n = nsPerOp.size();
+    const double median = (n % 2 == 1)
+        ? nsPerOp[n / 2]
+        : (nsPerOp[n / 2 - 1] + nsPerOp[n / 2]) / 2.0;
+    std::printf("%-32s %12.2f ns/op\n", name, median);
 }
 
 struct Vec

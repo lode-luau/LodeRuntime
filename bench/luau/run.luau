@@ -13,9 +13,9 @@
 export type BenchFn = (string, () -> ()) -> ()
 
 local kRepeatMs = 400.0
-local kBudgetMs = 3600.0
-local kMinRepeats = 7
-local kMaxRepeats = 10
+local kBudgetMs = 7200.0
+local kMinRepeats = 12
+local kMaxRepeats = 25
 local kMaxIterations = 1000000000
 
 local function bench(name: string, fn: () -> ())
@@ -56,14 +56,16 @@ local function bench(name: string, fn: () -> ())
         table.insert(times, (dt * 1e9) / targetIters)
     end
 
-    -- Arithmetic mean over the repeats: with 7-10 samples the averaging
-    -- smooths run-to-run noise better than the old 3-10/median scheme.
-    local sum = 0.0
-    for _, ns in times do
-        sum += ns
-    end
-    local mean = sum / #times
-    print(string.format("%-32s %12.2f ns/op", name, mean))
+    -- Median over the repeats: robust against scheduler/GC/allocator
+    -- outliers that inflate the arithmetic mean on shared CI runners.
+    -- Noise can only ever slow a sample down, so the median tracks the true
+    -- cost far better than the mean when repeats are few but long.
+    table.sort(times)
+    local n = #times
+    local median = (n % 2 == 1)
+        and times[(n + 1) // 2]
+        or (times[n // 2] + times[n // 2 + 1]) / 2.0
+    print(string.format("%-32s %12.2f ns/op", name, median))
 end
 
 print("=== LodeRuntime Luau benchmarks ===")
