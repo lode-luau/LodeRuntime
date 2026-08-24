@@ -353,11 +353,101 @@ ProviderResult<KeyPairBytes> GenerateKeyPair(std::string_view algorithm)
     return ProviderResult<KeyPairBytes>::Failure("unsupported key pair algorithm");
 }
 
+// --- ECDSA signature interop helpers -------------------------------------
+// CNG produces/consumes raw fixed-width r||s pairs, but the interoperable
+// encoding for ECDSA signatures is the ASN.1 DER ECDSA-Sig-Value
+// SEQUENCE { INTEGER r, INTEGER s } used by OpenSSL/WebCrypto.
+
+// Converts a raw big-endian integer of half bytes into a minimal,
+// signed-INTEGER-encoded byte string (leading zeros stripped, 0x00 inserted
+// when the high bit would make it look negative).
+static BytesVector DerIntegerFromRaw(const unsigned char* p, size_t half)
+{
+    size_t i = 0;
+    while (i < half && p[i] == 0) ++i;
+    BytesVector v(p + i, p + half);
+    if (v.empty())
+        v.push_back(0x00);
+    else if (v[0] & 0x80)
+        v.insert(v.begin(), 0x00);
+    return v;
+}
+
+// Converts a raw r||s pair into DER. Returns an empty vector when the input
+// is not an even-sized raw pair.
+static BytesVector EcdsaRawToDer(const unsigned char* raw, size_t size)
+{
+    if (size == 0 || (size % 2) != 0)
+        return BytesVector();
+    const size_t half = size / 2;
+    const BytesVector r = DerIntegerFromRaw(raw, half);
+    const BytesVector s = DerIntegerFromRaw(raw + half, half);
+    const size_t body = 2 + r.size() + 2 + s.size();
+    BytesVector der;
+    der.reserve(body + 2);
+    der.push_back(0x30);
+    der.push_back(static_cast<unsigned char>(body));
+    der.push_back(0x02);
+    der.push_back(static_cast<unsigned char>(r.size()));
+    der.insert(der.end(), r.begin(), r.end());
+    der.push_back(0x02);
+    der.push_back(static_cast<unsigned char>(s.size()));
+    der.insert(der.end(), s.begin(), s.end());
+    return der;
+}
+
+// Parses a DER ECDSA-Sig-Value back into a fixed-width raw r||s pair.
+// Accepts only well-formed encodings; returns false otherwise.
+static bool EcdsaDerToRaw(const unsigned char* data, size_t size, unsigned char* out, size_t half)
+{
+    size_t pos = 0;
+    if (size < 6 || data[pos++] != 0x30)
+        return false;
+    size_t body = data[pos++];
+    if (body & 0x80)
+    {
+        const size_t n = body & 0x7f;
+        if (n > 2 || pos + n > size)
+            return false;
+        body = 0;
+        for (size_t i = 0; i < n; ++i)
+            body = (body << 8) | data[pos++];
+    }
+    if (body != size - pos)
+        return false;
+    std::memset(out, 0, half * 2);
+    for (int side = 0; side < 2; ++side)
+    {
+        if (pos + 2 > size || data[pos] != 0x02)
+            return false;
+        const size_t totalLen = data[pos + 1];
+        pos += 2;
+        if (totalLen == 0 || totalLen > half + 1 || pos + totalLen > size)
+            return false;
+        const unsigned char* v = data + pos;
+        size_t vlen = totalLen;
+        // A leading 0x00 is allowed only to mark the value positive.
+        if (v[0] == 0x00)
+        {
+            ++v;
+            --vlen;
+        }
+        else if (v[0] & 0x80)
+        {
+            return false; // negative INTEGER is invalid here
+        }
+        if (vlen == 0 || vlen > half)
+            return false;
+        std::memcpy(out + side * half + (half - vlen), v, vlen);
+        pos += totalLen; // skip the FULL original content incl. pad byte
+    }
+    return pos == size;
+}
 ProviderResult<BytesVector> Sign(std::string_view algorithm, Bytes privateKey, Bytes data)
 {
     auto digest=HashForSignature(algorithm, data); if(!digest.ok)return digest;
     KeyHandle key; if(algorithm.rfind("rsa-pss-sha", 0) == 0){const auto* hp=SignatureHash(algorithm); if(!hp)return Failure("unsupported RSA-PSS algorithm"); RsaParts parts;if(!RsaPartsFromPrivate(privateKey,parts))return Failure("invalid RSA private key");auto imported=ImportRsaPrivate(parts);if(!imported.ok)return Failure(imported.error.message);key=std::move(imported.value);BCRYPT_PSS_PADDING_INFO info{hp->name,static_cast<ULONG>(hp->size)};ULONG size=0;if(BCryptSignHash(key.value,&info,digest.value.data(),static_cast<ULONG>(digest.value.size()),nullptr,0,&size,BCRYPT_PAD_PSS)!=0||size>kMaxOutputBytes)return Failure("RSA-PSS signing failed");BytesVector sig(size);if(BCryptSignHash(key.value,&info,digest.value.data(),static_cast<ULONG>(digest.value.size()),sig.data(),size,&size,BCRYPT_PAD_PSS)!=0)return Failure("RSA-PSS signing failed");sig.resize(size);return ProviderResult<BytesVector>::Success(std::move(sig));}
-    if(algorithm=="ecdsa-p256-sha256"){EccParts parts;if(!EccPartsFromPrivate(privateKey,parts))return Failure("invalid P-256 private key");auto imported=ImportEccPrivate(parts,false);if(!imported.ok)return Failure(imported.error.message);key=std::move(imported.value);ULONG size=0;if(BCryptSignHash(key.value,nullptr,digest.value.data(),32,nullptr,0,&size,0)!=0||size>kMaxOutputBytes)return Failure("ECDSA signing failed");BytesVector sig(size);if(BCryptSignHash(key.value,nullptr,digest.value.data(),32,sig.data(),size,&size,0)!=0)return Failure("ECDSA signing failed");sig.resize(size);return ProviderResult<BytesVector>::Success(std::move(sig));}
+    if(algorithm=="ecdsa-p256-sha256"){EccParts parts;if(!EccPartsFromPrivate(privateKey,parts))return Failure("invalid P-256 private key");auto imported=ImportEccPrivate(parts,false);if(!imported.ok)return Failure(imported.error.message);key=std::move(imported.value);ULONG size=0;if(BCryptSignHash(key.value,nullptr,digest.value.data(),32,nullptr,0,&size,0)!=0||size>kMaxOutputBytes)return Failure("ECDSA signing failed");BytesVector sig(size);if(BCryptSignHash(key.value,nullptr,digest.value.data(),32,sig.data(),size,&size,0)!=0)return Failure("ECDSA signing failed");sig.resize(size);auto der=EcdsaRawToDer(sig.data(),sig.size());if(der.empty())return Failure("ECDSA signature encoding failed");return ProviderResult<BytesVector>::Success(std::move(der));}
     return Failure("unsupported signature algorithm");
 }
 
@@ -365,7 +455,7 @@ ProviderResult<bool> Verify(std::string_view algorithm, Bytes publicKey, Bytes d
 {
     auto digest=HashForSignature(algorithm, data); if(!digest.ok)return ProviderResult<bool>::Failure(digest.error.message);
     if(algorithm.rfind("rsa-pss-sha", 0) == 0){const auto* hp=SignatureHash(algorithm); if(!hp)return ProviderResult<bool>::Failure("unsupported RSA-PSS algorithm"); RsaParts parts;if(!RsaPartsFromPublic(publicKey,parts))return ProviderResult<bool>::Failure("invalid RSA public key");auto imported=ImportRsaPublic(parts);if(!imported.ok)return ProviderResult<bool>::Failure(imported.error.message);BCRYPT_PSS_PADDING_INFO info{hp->name,static_cast<ULONG>(hp->size)};const auto status=BCryptVerifySignature(imported.value.value,&info,digest.value.data(),static_cast<ULONG>(digest.value.size()),const_cast<PUCHAR>(signature.data),static_cast<ULONG>(signature.size),BCRYPT_PAD_PSS);return ProviderResult<bool>::Success(status==0);}
-    if(algorithm=="ecdsa-p256-sha256"){EccParts parts;if(!EccPartsFromPublic(publicKey,parts))return ProviderResult<bool>::Failure("invalid P-256 public key");auto imported=ImportEccPublic(parts,false);if(!imported.ok)return ProviderResult<bool>::Failure(imported.error.message);const auto status=BCryptVerifySignature(imported.value.value,nullptr,digest.value.data(),32,const_cast<PUCHAR>(signature.data),static_cast<ULONG>(signature.size),0);return ProviderResult<bool>::Success(status==0);}
+    if(algorithm=="ecdsa-p256-sha256"){EccParts parts;if(!EccPartsFromPublic(publicKey,parts))return ProviderResult<bool>::Failure("invalid P-256 public key");auto imported=ImportEccPublic(parts,false);if(!imported.ok)return ProviderResult<bool>::Failure(imported.error.message);unsigned char rawSig[64];const unsigned char* sigPtr;size_t sigSize;if(signature.size==64){sigPtr=signature.data;sigSize=64;}else if(EcdsaDerToRaw(signature.data,signature.size,rawSig,32)){sigPtr=rawSig;sigSize=64;}else return ProviderResult<bool>::Failure("invalid ECDSA signature encoding");const auto status=BCryptVerifySignature(imported.value.value,nullptr,digest.value.data(),32,const_cast<PUCHAR>(sigPtr),static_cast<ULONG>(sigSize),0);return ProviderResult<bool>::Success(status==0);}
     return ProviderResult<bool>::Failure("unsupported signature algorithm");
 }
 
@@ -381,7 +471,7 @@ ProviderResult<BytesVector> Decrypt(std::string_view algorithm, Bytes privateKey
 
 ProviderResult<BytesVector> Derive(std::string_view algorithm, Bytes privateKey, Bytes peerPublicKey)
 {
-    if(algorithm!="ecdh-p256")return Failure("unsupported key agreement algorithm"); EccParts privateParts,publicParts;if(!EccPartsFromPrivate(privateKey,privateParts)||!EccPartsFromPublic(peerPublicKey,publicParts))return Failure("invalid P-256 key");auto priv=ImportEccPrivate(privateParts,true);auto pub=ImportEccPublic(publicParts,true);if(!priv.ok||!pub.ok)return Failure(!priv.ok?priv.error.message:pub.error.message);SecretHandle secret;if(BCryptSecretAgreement(priv.value.value,pub.value.value,&secret.value,0)!=0)return Failure("ECDH agreement failed");ULONG size=0;if(BCryptDeriveKey(secret.value,BCRYPT_KDF_RAW_SECRET,nullptr,nullptr,0,&size,0)!=0||size==0||size>kMaxOutputBytes)return Failure("ECDH derivation failed");BytesVector output(size);if(BCryptDeriveKey(secret.value,BCRYPT_KDF_RAW_SECRET,nullptr,output.data(),size,&size,0)!=0)return Failure("ECDH derivation failed");output.resize(size);return ProviderResult<BytesVector>::Success(std::move(output));
+    if(algorithm!="ecdh-p256")return Failure("unsupported key agreement algorithm"); EccParts privateParts,publicParts;if(!EccPartsFromPrivate(privateKey,privateParts)||!EccPartsFromPublic(peerPublicKey,publicParts))return Failure("invalid P-256 key");auto priv=ImportEccPrivate(privateParts,true);auto pub=ImportEccPublic(publicParts,true);if(!priv.ok||!pub.ok)return Failure(!priv.ok?priv.error.message:pub.error.message);SecretHandle secret;if(BCryptSecretAgreement(priv.value.value,pub.value.value,&secret.value,0)!=0)return Failure("ECDH agreement failed");ULONG size=0;if(BCryptDeriveKey(secret.value,BCRYPT_KDF_RAW_SECRET,nullptr,nullptr,0,&size,0)!=0||size==0||size>kMaxOutputBytes)return Failure("ECDH derivation failed");BytesVector output(size);if(BCryptDeriveKey(secret.value,BCRYPT_KDF_RAW_SECRET,nullptr,output.data(),size,&size,0)!=0)return Failure("ECDH derivation failed");output.resize(size);/* BCRYPT_KDF_RAW_SECRET yields little-endian bytes; reverse to the standard big-endian shared secret used by OpenSSL/WebCrypto. */std::reverse(output.begin(),output.end());return ProviderResult<BytesVector>::Success(std::move(output));
 }
 }
 #else
