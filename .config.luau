@@ -27,6 +27,11 @@ return {
             tty = "modules/tty",
             pipe = "modules/pipe",
             crypto = "modules/crypto",
+            uuid = "modules/uuid",
+            dotenv = "modules/dotenv",
+            csv = "modules/csv",
+            url = "modules/url",
+            binary = "modules/binary",
         }
     }
 }
