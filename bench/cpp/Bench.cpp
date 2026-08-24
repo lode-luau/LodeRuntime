@@ -32,6 +32,7 @@
 #include "Lode/Compiler.hpp"
 #include "Lode/Json.hpp"
 #include "Lode/Logger.hpp"
+#include "Lode/Signal.hpp"
 #include "Platform/CrashHandler.hpp"
 #include <algorithm>
 #include <chrono>
@@ -231,6 +232,61 @@ int main()
     Measure("get_set_global", [&] {
         vm.SetGlobal("__bench_g", Lode::Value(3.0));
         (void)vm.GetGlobal("__bench_g");
+    });
+
+    // Argument-count curve for the fast closure path: isolates how argument
+    // boxing scales with arity through the full CallSingle round trip.
+    Lode::Value sumAll = vm.CreateFastFunction([](Lode::State&, Lode::StackArgs args) -> Lode::Value {
+        double s = 0.0;
+        for (size_t i = 0; i < args.Size(); ++i)
+            s += args[i].AsNumber();
+        return Lode::Value(s);
+    });
+    const Lode::Value one = Lode::Value(1.0);
+    const std::vector<Lode::Value> oneArg = { one };
+    const std::vector<Lode::Value> fourArgs = { one, one, one, one };
+    const std::vector<Lode::Value> sixteenArgs(16, one);
+    (void)sumAll.CallSingle(vm, one);
+    Measure("call_args_1", [&] {
+        (void)sumAll.CallSingle(vm, oneArg);
+    });
+    Measure("call_args_4", [&] {
+        (void)sumAll.CallSingle(vm, fourArgs);
+    });
+    Measure("call_args_16", [&] {
+        (void)sumAll.CallSingle(vm, sixteenArgs);
+    });
+
+    // Signal listener registration churn (Connect + Disconnect). Fire is
+    // deliberately NOT measured here: Fire enqueues task spawns that would
+    // accumulate without a running event loop.
+    auto benchSignal = Lode::Signal::Create(vm);
+    Lode::Value noopCb = vm.CreateFastFunction([](Lode::State&, Lode::StackArgs) -> Lode::Value {
+        return Lode::Value();
+    });
+    Measure("signal_connect_disconnect", [&] {
+        auto id = benchSignal->Connect(noopCb);
+        benchSignal->Disconnect(id);
+    });
+
+    // ObjectWrap dispatch: the pattern every native class uses (sys.Process,
+    // websocket server, ...). The callback unwraps the userdata self argument
+    // and reads a member, mirroring a typical method call.
+    struct BenchObj { double v = 2.0; };
+    Lode::Table objMeta = vm.CreateTable();
+    Lode::Value unwrapCall = vm.CreateFastFunction([&](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
+        auto self = Lode::ObjectWrap<BenchObj>::Unwrap(vm2, 1);
+        if (!self) return Lode::Value();
+        return Lode::Value(self->v * args.Size() > 1 ? args[1].AsNumber() : 1.0);
+    });
+    objMeta.Set("__index", unwrapCall);
+    auto obj = std::make_shared<BenchObj>();
+    Lode::ObjectWrap<BenchObj>::Wrap(vm, obj, objMeta);
+    Lode::Value objVal = vm.GetValue(-1);
+    vm.Pop(1);
+    (void)unwrapCall.CallSingle(vm, objVal, 3.0);
+    Measure("objectwrap_unwrap_call", [&] {
+        (void)unwrapCall.CallSingle(vm, objVal, 3.0);
     });
 
     // Precompiled bytecode execution (thread creation + ref + resume).

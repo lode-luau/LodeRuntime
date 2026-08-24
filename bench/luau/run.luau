@@ -78,6 +78,7 @@ local scenarios = {
     require("./scenarios/class_methods"),
     require("./scenarios/coroutines"),
     require("./scenarios/runtime_modules"),
+    require("./scenarios/stdlib_io"),
 }
 
 for _, scenario in scenarios do
