@@ -25,8 +25,11 @@ jobs:
       # prefixes) but never saves any back — ci.yml is the single cache
       # writer. Benchmark timing measures scenario execution, not build
       # time, so cache warmth does not skew results.
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@v0.0.8
+      # Installed via choco instead of mozilla-actions/sccache-action:
+      # that action writes its own sccache-stats section into the job
+      # summary, which would bury the benchmark results table.
+      - name: Install sccache
+        run: choco install sccache -y --no-progress
 
       - name: Restore sccache (no save)
         uses: actions/cache/restore@v4
