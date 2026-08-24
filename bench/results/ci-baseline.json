@@ -1,0 +1,45 @@
+{
+  "commit": "c22fda4",
+  "config": "Release",
+  "machine": "runnervm6iq3x",
+  "date": "2026-08-24T07:11:18+00:00",
+  "selftest": {
+    "fixture_deterministic": true,
+    "lode_bench_ok": true,
+    "run_luau_ok": true,
+    "fixture_runs": true,
+    "cli_warm_ok": true
+  },
+  "metrics": {
+    "cli_warm_ms": 30.0,
+    "cpp": {
+      "class_method_call": 861.74,
+      "buffer_read_write": 9.84,
+      "table_get_set": 102.62,
+      "protected_call": 4576.69,
+      "fast_closure_call": 575.78,
+      "state_create": 65358.65,
+      "slow_closure_call": 608.88,
+      "json_stringify": 4754.55,
+      "get_set_global": 97.38,
+      "class_builder_build": 3982.87,
+      "json_parse": 6715.44,
+      "table_value_conversion": 125.09
+    },
+    "luau": {
+      "json_parse": 7366.09,
+      "fs_read_file": 186482.67,
+      "fs_read_dir": 101704.07,
+      "class_method_call": 1533.09,
+      "native_roundtrip_ref": 2010.13,
+      "fs_write_file": 187683.55,
+      "path_resolve": 3664.69,
+      "native_roundtrip_string": 473.49,
+      "coroutine_spawn_resume": 296.76,
+      "fs_stat": 56278.66,
+      "native_square_call": 393.63,
+      "path_join": 1599.08,
+      "json_stringify": 5724.8
+    }
+  }
+}
