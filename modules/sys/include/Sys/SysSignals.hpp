@@ -23,7 +23,7 @@ struct SignalManager : std::enable_shared_from_this<SignalManager>
     bool shuttingDown = false;
     std::unordered_map<std::string, std::shared_ptr<SignalWatcher>> watchers;
 
-    Lode::Value Watch(Lode::State& state, const std::vector<Lode::Value>& args);
+    Lode::Value Watch(Lode::State& state, Lode::StackArgs args);
     void Shutdown();
 };
 

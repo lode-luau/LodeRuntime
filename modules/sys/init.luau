@@ -178,6 +178,26 @@ export type SysModule = {
     --- Returns the command-line arguments passed to the script as an array of strings.
     Args: () -> { string },
     GetArgs: () -> { string },
+
+    --- Returns the current process id.
+    GetPid: () -> number,
+
+    --- Returns the parent process id.
+    GetPpid: () -> number,
+
+    --- Returns the absolute path of the running executable.
+    GetExecPath: () -> string,
+
+    --- High-resolution monotonic clock in milliseconds (never goes back).
+    --- Use this for measuring elapsed time instead of os.clock (CPU time)
+    --- or os.time (wall time with second resolution).
+    GetMonotonicMs: () -> number,
+
+    --- Removes an environment variable. Missing variables are ignored.
+    UnsetEnv: (key: string) -> (),
+
+    --- Returns every environment variable as a table {name = value}.
+    EnvEntries: () -> { [string]: string },
 }
 
 return {} :: SysModule

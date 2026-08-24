@@ -48,10 +48,19 @@ static int ParseSignalName(const std::string& name)
 #ifdef SIGWINCH
     if (name == "SIGWINCH") return SIGWINCH;
 #endif
+#ifdef SIGBREAK
+    if (name == "SIGBREAK") return SIGBREAK; // Windows Ctrl+Break
+#endif
+#ifdef SIGUSR1
+    if (name == "SIGUSR1") return SIGUSR1;
+#endif
+#ifdef SIGUSR2
+    if (name == "SIGUSR2") return SIGUSR2;
+#endif
     return 0;
 }
 
-Lode::Value SignalManager::Watch(Lode::State& state, const std::vector<Lode::Value>& args)
+Lode::Value SignalManager::Watch(Lode::State& state, Lode::StackArgs args)
 {
     if (shuttingDown)
     {
@@ -111,7 +120,7 @@ void BindSysSignals(Lode::State& vm, Lode::Table& exports)
     auto manager = std::make_shared<SignalManager>();
     manager->vm = &vm;
     Lode::Task::RegisterShutdownHook(vm, [manager]() { manager->Shutdown(); });
-    exports.Set("Signal", vm.CreateFunction([manager](Lode::State& state, const std::vector<Lode::Value>& args) -> Lode::Value {
+    exports.Set("Signal", vm.CreateFastFunction([manager](Lode::State& state, Lode::StackArgs args) -> Lode::Value {
         return manager->Watch(state, args);
     }));
 }
