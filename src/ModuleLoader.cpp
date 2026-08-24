@@ -705,7 +705,9 @@ static ModuleLoadResult LoadModuleNoJump(lua_State* L, void* ctx, const char* pa
             }
         }
     } nativePathClear{L};
-    auto execResult = vm.ExecuteBytecodeWithResults(bytecode, modChunkName);
+    // errorOnYield: a module that yields at top level (async fs/net call
+    // during load) must fail loudly instead of silently resolving to nil.
+    auto execResult = vm.ExecuteBytecodeWithResults(bytecode, modChunkName, /*isMainScript*/ false, /*errorOnYield*/ true);
 
     if (execResult.IsError())
     {

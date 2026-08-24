@@ -10,6 +10,12 @@
 
 namespace Lode
 {
+namespace Detail
+{
+extern thread_local lua_State* g_moduleLoadCo;
+extern thread_local std::vector<Value>* g_moduleLoadSink;
+}
+
 namespace
 {
     // Creates a new thread on L and pins it through a registry reference.
@@ -51,6 +57,14 @@ namespace
             results.push_back(Value::FromLuaState(co, i));
         }
         lua_pop(co, top);
+
+        // Module-load capture: if this thread is a required module being
+        // loaded with the async pump (see State.cpp), hand its return values
+        // to the loader's sink instead of dropping them.
+        if (Detail::g_moduleLoadCo == co && Detail::g_moduleLoadSink)
+        {
+            *Detail::g_moduleLoadSink = results;
+        }
 
         return results;
     }

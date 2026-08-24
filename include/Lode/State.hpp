@@ -77,7 +77,7 @@ public:
      * thread is registered as the main thread for fatal-error reporting.
      * @return Result containing the number of returned values.
      */
-    Result<int> ExecuteBytecodeWithResults(std::string_view bytecode, std::string_view chunkName = "=main", bool isMainScript = false);
+    Result<int> ExecuteBytecodeWithResults(std::string_view bytecode, std::string_view chunkName = "=main", bool isMainScript = false, bool errorOnYield = false);
 
     /**
      * @brief Executes bytecode and captures the first returned value.

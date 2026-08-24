@@ -9,6 +9,11 @@
 #include "LuaError.hpp"
 #include "NativeClosure.hpp"
 #include "lua.h"
+
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include "uv.h"
 #include "lualib.h"
 #include "Luau/Compiler.h"
 #include "Luau/CodeGen.h"
@@ -223,9 +228,16 @@ Result<void> State::ExecuteBytecode(std::string_view bytecode, std::string_view 
     return Result<void>();
 }
 
-Result<int> State::ExecuteBytecodeWithResults(std::string_view bytecode, std::string_view chunkName, bool isMainScript)
+namespace Detail
+{
+thread_local lua_State* g_moduleLoadCo = nullptr;
+thread_local std::vector<Value>* g_moduleLoadSink = nullptr;
+}
+
+Result<int> State::ExecuteBytecodeWithResults(std::string_view bytecode, std::string_view chunkName, bool isMainScript, bool errorOnYield)
 {
     if (!L_) return Error::Runtime("State is null");
+    const int baseTop = lua_gettop(L_);
 
     // Wrap script execution in a Main Coroutine so root code can yield seamlessly
     lua_State* co = lua_newthread(L_);
@@ -259,7 +271,53 @@ Result<int> State::ExecuteBytecodeWithResults(std::string_view bytecode, std::st
             Luau::CodeGen::compile(co, -1, Luau::CodeGen::CodeGen_OnlyNativeModules);
     }
 
+    // Arm module-load capture: ResumeCore hands this thread's return values
+    // to the sink instead of dropping them when they complete asynchronously.
+    std::vector<Value> loadSink;
+    std::vector<Value>* prevSink = Detail::g_moduleLoadSink;
+    lua_State* prevCo = Detail::g_moduleLoadCo;
+    Detail::g_moduleLoadCo = co;
+    Detail::g_moduleLoadSink = &loadSink;
+
     int resStatus = lua_resume(co, nullptr, 0);
+
+    // Module-load mode (errorOnYield): a module may legitimately yield at
+    // top level by calling async fs/net natives. Instead of failing or
+    // silently resolving to nil, pump the event loop so those operations
+    // complete and the module coroutine finishes, bounded by a hard 5s
+    // timeout after which we fail loudly.
+    if (resStatus == LUA_YIELD && errorOnYield)
+    {
+        EventLoop* loop = impl_ ? impl_->eventLoop : nullptr;
+        if (!loop)
+        {
+            lua_unref(L_, coRef);
+            return Error::Runtime("Module yielded during require but no event loop is available");
+        }
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (lua_status(co) == LUA_YIELD)
+        {
+            if (std::chrono::steady_clock::now() > deadline)
+            {
+                lua_unref(L_, coRef);
+                return Error::Runtime("Module timed out after 5 seconds during require — an async call at module top-level never completed");
+            }
+            uv_run(loop->GetUVLoop(), UV_RUN_ONCE);
+        }
+        // Results were captured by ResumeCore into the sink: push them onto
+        // L_ so the require boundary receives the module's exports.
+        for (auto& v : loadSink)
+            v.PushToLuaState(L_);
+        lua_unref(L_, coRef);
+        Detail::g_moduleLoadSink = prevSink;
+        Detail::g_moduleLoadCo = prevCo;
+        return static_cast<int>(loadSink.size());
+    }
+
+    // Non-yield path (sync completion or plain error): restore capture state.
+    Detail::g_moduleLoadSink = prevSink;
+    Detail::g_moduleLoadCo = prevCo;
+
     if (resStatus != LUA_OK && resStatus != LUA_YIELD)
     {
         const char* msg = lua_tostring(co, -1);
