@@ -20,74 +20,76 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Compiler-cache tooling. The Visual Studio (MSBuild) generator ignores
-      # CMAKE_<LANG>_COMPILER_LAUNCHER, so this workflow uses the Ninja
-      # generator (same pattern as ci.yml) with ccache as the launcher.
-      - name: Enable MSVC toolchain
-        uses: ilammy/msvc-dev-cmd@v1
+      # Same caching behavior as the nightly workflow (which restores AND
+      # saves): sccache as the compiler launcher through the Ninja generator
+      # (MSBuild ignores CMAKE_<LANG>_COMPILER_LAUNCHER), with the cache
+      # entries shared across ci/nightly/benchmark via common restore-key
+      # prefixes. Benchmark timing measures scenario execution, not build
+      # time, so a warm compiler cache does not skew results.
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.8
 
-      - name: Install ccache
-        run: choco install ccache -y --no-progress
-
-      # Restore-only: the runner reuses a warm compiler cache to speed up the
-      # build, but this workflow never SAVES a cache entry back. Benchmarks
-      # measure compile-from-scratch machines fairly, and a cold cache cannot
-      # skew the timing comparison either way (the baseline was recorded the
-      # same way). Restore keys fall back to any recent ccache from this
-      # branch or from main.
-      - name: Restore ccache (no save)
-        uses: actions/cache/restore@v4
+      - name: Cache sccache
+        uses: actions/cache@v4
         with:
-          path: ${{ runner.temp }}/ccache
-          key: ${{ runner.os }}-ccache-${{ github.sha }}
+          path: ${{ runner.temp }}/sccache
+          key: ${{ runner.os }}-sccache-benchmark-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-ccache-
+            ${{ runner.os }}-sccache-benchmark-
+            ${{ runner.os }}-sccache-
 
-      # Restore-only dependencies downloaded via FetchContent (saved by
-      # ci.yml), same ownership rule as the nightly workflow.
-      - name: Restore FetchContent (no save)
-        uses: actions/cache/restore@v4
+      - name: Cache FetchContent
+        uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/_deps
           key: ${{ runner.os }}-fetchcontent-${{ hashFiles('CMakeLists.txt') }}
           restore-keys: |
             ${{ runner.os }}-fetchcontent-
 
+      - name: Enable MSVC toolchain
+        uses: ilammy/msvc-dev-cmd@v1
+
       - name: Configure
         env:
-          CCACHE_DIR: ${{ runner.temp }}/ccache
+          SCCACHE_DIR: ${{ runner.temp }}/sccache
         run: >-
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
           -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl
           -DLODE_BUILD_BENCH=ON
           -DFETCHCONTENT_BASE_DIR=${{ runner.temp }}/_deps
-          -DCMAKE_C_COMPILER_LAUNCHER=ccache
-          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          -DCMAKE_C_COMPILER_LAUNCHER=sccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
 
       - name: Build Release
         env:
-          CCACHE_DIR: ${{ runner.temp }}/ccache
+          SCCACHE_DIR: ${{ runner.temp }}/sccache
         run: cmake --build build
 
       # CI compares against its own committed baseline (bench/results/
       # ci-baseline.json), never against local-machine numbers: the runner
       # hardware is the public reference. The first run (or an explicit
       # record-baseline dispatch) records the baseline instead of gating.
+      # Full output — including the delta table — is mirrored into the job
+      # summary so regressions are visible without opening the log.
       - name: Run benchmarks (self-test + measure + compare + save)
         shell: pwsh
         run: |
           if ("${{ inputs.record-baseline }}" -eq "true") {
-            ./bench/run_bench.ps1 -Baseline bench/results/ci-baseline.json -RecordBaseline
+            ./bench/run_bench.ps1 -Baseline bench/results/ci-baseline.json -RecordBaseline 2>&1 | Tee-Object -Variable benchOut
           } elseif (-not (Test-Path bench/results/ci-baseline.json)) {
-            ./bench/run_bench.ps1 -Baseline bench/results/ci-baseline.json -RecordBaseline
+            ./bench/run_bench.ps1 -Baseline bench/results/ci-baseline.json -RecordBaseline 2>&1 | Tee-Object -Variable benchOut
           } else {
-            ./bench/run_bench.ps1 -Baseline bench/results/ci-baseline.json -FailOnRegression
+            ./bench/run_bench.ps1 -Baseline bench/results/ci-baseline.json -FailOnRegression 2>&1 | Tee-Object -Variable benchOut
           }
+          $code = $LASTEXITCODE
+          $table = $benchOut | Where-Object { $_ -match 'metric|REGRESSED|NEW|ns/op' }
+          ($table -join "`n") | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          exit $code
 
-      - name: Show ccache stats
+      - name: Show sccache stats
         env:
-          CCACHE_DIR: ${{ runner.temp }}/ccache
-        run: ccache --show-stats
+          SCCACHE_DIR: ${{ runner.temp }}/sccache
+        run: sccache --show-stats
 
       - name: Upload benchmark results
         uses: actions/upload-artifact@v4

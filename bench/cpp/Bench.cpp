@@ -146,6 +146,50 @@ int main()
         (void)identity.CallSingle(vm, 3.0);
     });
 
+    // Complete marshaling round trips (C++ -> Luau closure -> native callback
+    // -> back), one per native-closure path. Each callable sums two numbers,
+    // so the measured cost is dominated by the argument/result marshaling of
+    // its path rather than by the callback body.
+    Lode::Value marshalLegacy = vm.CreateFunction([](Lode::State&, const std::vector<Lode::Value>& args) -> Lode::Value {
+        double s = 0.0;
+        for (size_t i = 0; i < args.size(); ++i)
+            s += args[i].AsNumber();
+        return Lode::Value(s);
+    });
+
+    Lode::Value marshalFast = vm.CreateFastFunction([](Lode::State&, Lode::StackArgs args) -> Lode::Value {
+        double s = 0.0;
+        for (size_t i = 0; i < args.Size(); ++i)
+            s += args[i].AsNumber();
+        return Lode::Value(s);
+    });
+
+    Lode::Value marshalFastN = vm.CreateFastFunctionN([](Lode::State&, Lode::StackArgs args) -> int {
+        lua_State* argL = args.RawState();
+        double s = 0.0;
+        const int n = static_cast<int>(args.Size());
+        for (int i = 0; i < n; ++i)
+            s += args[static_cast<size_t>(i)].AsNumber();
+        lua_pushnumber(argL, s);
+        lua_pushinteger(argL, n);
+        return 2;
+    });
+
+    (void)marshalLegacy.CallSingle(vm, 3.0, 4.0);
+    Measure("marshal_legacy_complete", [&] {
+        (void)marshalLegacy.CallSingle(vm, 3.0, 4.0);
+    });
+
+    (void)marshalFast.CallSingle(vm, 3.0, 4.0);
+    Measure("marshal_fast_complete", [&] {
+        (void)marshalFast.CallSingle(vm, 3.0, 4.0);
+    });
+
+    (void)marshalFastN.CallSingle(vm, 3.0, 4.0);
+    Measure("marshal_fastn_complete", [&] {
+        (void)marshalFastN.CallSingle(vm, 3.0, 4.0);
+    });
+
     // Reference conversion: capture a table as a pinned Lode::Value.
     Lode::Table sharedTable = vm.CreateTable();
     Measure("table_value_conversion", [&] {
