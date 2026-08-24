@@ -1,5 +1,8 @@
 #include "Lode/StackValue.hpp"
 #include "Lode/Numeric.hpp"
+#include "Lode/Table.hpp"
+#include "Lode/Buffer.hpp"
+#include "Lode/Coroutine.hpp"
 #include "lua.h"
 
 #include <cstdint>
@@ -117,6 +120,43 @@ Result<double> StackValue::TryAsNumber() const
     return Error::Type("Value is not a number");
 }
 
+bool StackValue::IsLightUserdata() const { return lua_type(L_, index_) == LUA_TLIGHTUSERDATA; }
+
+void* StackValue::AsLightUserdata() const { return lua_touserdata(L_, index_); }
+
+Result<bool> StackValue::TryAsBoolean() const
+{
+    if (IsBoolean()) return AsBoolean();
+    return Error::Type("Value is not a boolean");
+}
+
+Result<int64_t> StackValue::TryAsInteger() const
+{
+    if (IsInteger()) return AsInteger();
+    return Error::Type("Value is not an integer");
+}
+
+Result<std::string> StackValue::TryAsString() const
+{
+    if (IsString()) return AsString();
+    return Error::Type("Value is not a string");
+}
+
+Buffer StackValue::AsBufferObj() const
+{
+    return ToValue().AsBufferObj();
+}
+
+Coroutine StackValue::AsCoroutine() const
+{
+    return ToValue().AsCoroutine();
+}
+
+Table StackValue::AsTable() const
+{
+    return ToValue().AsTable();
+}
+
 Value StackValue::ToValue() const
 {
     return Value::FromLuaState(L_, index_);
@@ -127,14 +167,14 @@ StackArgs::StackArgs(lua_State* L) : L_(L), numArgs_(lua_gettop(L)) {}
 
 size_t StackArgs::Size() const
 {
-    return numArgs_;
+    return numArgs_ < begin_ ? 0 : static_cast<size_t>(numArgs_ - begin_ + 1);
 }
 
 std::vector<Value> StackArgs::ToVector() const
 {
     std::vector<Value> vec;
-    vec.reserve(numArgs_);
-    for (int i = 1; i <= numArgs_; ++i)
+    vec.reserve(Size());
+    for (int i = begin_; i <= numArgs_; ++i)
     {
         vec.push_back(Value::FromLuaState(L_, i));
     }
@@ -143,8 +183,9 @@ std::vector<Value> StackArgs::ToVector() const
 
 StackValue StackArgs::operator[](size_t i) const
 {
-    // Lua stack starts at 1, but C++ APIs usually start at 0
-    return StackValue(L_, static_cast<int>(i) + 1);
+    // Lua stack starts at 1, but C++ APIs usually start at 0.
+    // begin_ supports sliced views (e.g. dropping the self argument).
+    return StackValue(L_, begin_ + static_cast<int>(i));
 }
 
 } // namespace Lode

@@ -141,6 +141,20 @@ public:
     [[nodiscard]] Value CreateFastFunction(const std::function<Value(State& vm, StackArgs args)>& fn);
 
     /**
+     * @brief Creates a fast, zero-allocation Luau function with zero-marshaling results.
+     *
+     * The bound callable reads its arguments through StackArgs (no Lode::Value
+     * boxing) AND pushes its own return values directly onto the Lua stack,
+     * returning their count. Compared to CreateFastFunction this removes the
+     * final Value boxing of the result and enables multi-value returns. Use
+     * for hot-path native functions; the callable must leave exactly the
+     * returned number of new values on the stack.
+     * @param fn The C++ lambda: int(State& vm, StackArgs args), pushing nresults.
+     * @return The created Function Value.
+     */
+    [[nodiscard]] Value CreateFastFunctionN(const std::function<int(State& vm, StackArgs args)>& fn);
+
+    /**
      * @brief Creates a new coroutine (thread) from a function.
      * @param fn The function to run in the coroutine.
      * @return The created Coroutine.
@@ -269,7 +283,7 @@ private:
     struct Impl;
     lua_State* L_ = nullptr;
     bool ownsState_ = true;
-    std::unique_ptr<Impl> impl_;
+    std::shared_ptr<Impl> impl_;
 };
 
 } // namespace Lode

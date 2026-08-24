@@ -24,6 +24,12 @@ void Exports::Function(const std::string& name, const std::function<Value(State&
     exportsTable_.Set(name, vm.CreateFunction(fn));
 }
 
+void Exports::Function(const std::string& name, const std::function<Value(State& vm, StackArgs args)>& fn)
+{
+    State vm(L_);
+    exportsTable_.Set(name, vm.CreateFastFunction(fn));
+}
+
 void Exports::Function(const std::string& name, const std::function<Value()>& fn)
 {
     Function(name, [fn](State&, const std::vector<Value>&) -> Value {

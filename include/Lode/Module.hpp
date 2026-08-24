@@ -54,6 +54,8 @@ public:
 
     /** @brief Binds a C++ lambda as a Luau function in the exports table. */
     void Function(const std::string& name, const std::function<Value(State& vm, const std::vector<Value>& args)>& fn);
+    /** @brief Binds a zero-marshaling C++ lambda (StackArgs reads) as a Luau function. */
+    void Function(const std::string& name, const std::function<Value(State& vm, StackArgs args)>& fn);
     /** @brief Binds a no-arg C++ lambda as a Luau function. */
     void Function(const std::string& name, const std::function<Value()>& fn);
     /** @brief Binds a string-to-string C++ lambda as a Luau function. */
