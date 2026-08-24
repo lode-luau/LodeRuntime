@@ -101,3 +101,20 @@ This guarantees that native C++ code uses the exact same resolution rules as sta
 
 ### 5. Multi-Return Support
 The Lode require implementation supports multiple return values from modules, storing the resulting tuples in a custom registry cache (`_LODE_MULTI_CACHE`). This allows `require` to properly forward all results from the executed module script.
+
+### 6. Top-Level Yield and Load Timeout
+When a module's top-level code calls async/event-loop natives (e.g. `fs.WriteFile`, `fs.ReadFile`, network operations), the module coroutine **yields** during load. The loader handles this explicitly:
+
+1. **Event-loop pump (up to 5 seconds).** After the initial resume returns `LUA_YIELD`, the loader runs the libuv loop (`uv_run UV_RUN_ONCE`) until the module coroutine finishes, so pending async operations complete naturally.
+2. **Loud timeout.** If the module is still suspended after 5 seconds, loading fails with:
+   ```
+   Module timed out after 5 seconds during require — an async call at module top-level never completed
+   ```
+3. **No silent nil.** A module that finishes without producing a value also fails loudly:
+   ```
+   Module finished during require but produced no return value
+   ```
+
+**Implementation notes:** while suspended, the module thread's return values are captured by the generic resume path into a thread-local sink (`ModuleLoadCapture.hpp`, keyed on the loading coroutine) and pushed onto the require boundary's stack when the pump completes. This keeps async-completing modules indistinguishable from synchronous ones for callers.
+
+**Authoring rule:** event-loop and fs/net natives belong inside functions called *after* load, never directly at module top-level. Top-level code should be synchronous setup; anything that must wait belongs in task/callback bodies.
