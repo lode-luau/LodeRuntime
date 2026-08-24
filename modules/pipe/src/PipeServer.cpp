@@ -60,7 +60,7 @@ void PipeServer::ListenNative(const std::string& path)
     listening = true;
 }
 
-Lode::Value PipeServer::MethodListen(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value PipeServer::MethodListen(Lode::State& vm, Lode::StackArgs args)
 {
     if (closing || closed)
     {
@@ -72,7 +72,7 @@ Lode::Value PipeServer::MethodListen(Lode::State& vm, const std::vector<Lode::Va
         vm.RaiseError("pipe Server: already listening");
         return Lode::Value();
     }
-    if (args.size() < 2 || !args[1].IsString())
+    if (args.Size() < 2 || !args[1].IsString())
     {
         vm.RaiseError("pipe Server: path must be a string");
         return Lode::Value();
@@ -86,23 +86,32 @@ Lode::Value PipeServer::MethodListen(Lode::State& vm, const std::vector<Lode::Va
     std::string path = NormalizePipePath(raw);
 
     std::memset(&pipe, 0, sizeof(pipe));
-    pipeInited = true;
     pipe.data = this;
     int r = uv_pipe_init(loop, &pipe, 0);
     if (r != 0)
     {
+        // Keep pipeInited false so no later uv_close runs over a zeroed handle.
         vm.RaiseError("pipe Server: " + std::string(uv_strerror(r)));
         return Lode::Value();
     }
+    pipeInited = true;
     r = uv_pipe_bind(&pipe, path.c_str());
     if (r != 0)
     {
+        // The handle is live at this point: close it before raising, or it
+        // leaks and keeps the event loop alive (mirrors TCP BindFail).
+        pipeClosed = true;
+        closing = true;
+        uv_close(reinterpret_cast<uv_handle_t*>(&pipe), OnHandleClosed);
         vm.RaiseError("pipe Server: " + std::string(uv_strerror(r)));
         return Lode::Value();
     }
     r = uv_listen(reinterpret_cast<uv_stream_t*>(&pipe), backlog, OnConnection);
     if (r != 0)
     {
+        pipeClosed = true;
+        closing = true;
+        uv_close(reinterpret_cast<uv_handle_t*>(&pipe), OnHandleClosed);
         vm.RaiseError("pipe Server: " + std::string(uv_strerror(r)));
         return Lode::Value();
     }
@@ -129,9 +138,14 @@ Lode::Value PipeServer::MethodAccept(Lode::State& vm)
     }
     if (!pendingAccepts.empty())
     {
-        auto stream = pendingAccepts.front();
-        pendingAccepts.pop_front();
-        return WrapPipeStream(vm, stream, mgr->streamMethods);
+        while (!pendingAccepts.empty())
+        {
+            auto stream = pendingAccepts.front().lock();
+            pendingAccepts.pop_front();
+            if (stream && !stream->closed && !stream->closing)
+                return WrapPipeStream(vm, stream, mgr->streamMethods);
+            // Expired or closed entries are skipped.
+        }
     }
     acceptCo = Lode::Coroutine(vm.GetLuaState());
     return vm.YieldThread();
@@ -245,8 +259,8 @@ void PipeServer::OnConnection(uv_stream_t* server, int status)
 Lode::Value WrapPipeServer(Lode::State& vm, const std::shared_ptr<PipeServer>& server, const Lode::Table& methods)
 {
     Lode::Table meta = vm.CreateTable();
-    meta.Set("__index", vm.CreateFunction([server, methods](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
-        std::string key = (args.size() > 1 && args[1].IsString()) ? args[1].AsString() : "";
+    meta.Set("__index", vm.CreateFastFunction([server, methods](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
+        std::string key = (args.Size() > 1 && args[1].IsString()) ? args[1].AsString() : "";
         if (key == "ConnectionReceived")
             return server->clientProxy;
         if (key == "ErrorOccurred")
@@ -256,12 +270,12 @@ Lode::Value WrapPipeServer(Lode::State& vm, const std::shared_ptr<PipeServer>& s
             return value.GetValue();
         return Lode::Value();
     }));
-    meta.Set("__newindex", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    meta.Set("__newindex", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         vm2.RaiseError("pipe: objects are read-only");
         return Lode::Value();
     }));
     meta.Set("__metatable", Lode::Value(std::string("PipeServer")));
-    meta.Set("__tostring", vm.CreateFunction([](Lode::State&, const std::vector<Lode::Value>&) -> Lode::Value {
+    meta.Set("__tostring", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs) -> Lode::Value {
         return Lode::Value(std::string("PipeServer"));
     }));
     Lode::ObjectWrap<PipeServer>::Wrap(vm, server, meta);

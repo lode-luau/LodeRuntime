@@ -66,11 +66,11 @@ std::string PipeStream::OpenFdNative(int fd)
     if (open || closing || closed)
         return "stream is already open or closed";
     std::memset(&pipe, 0, sizeof(pipe));
-    pipeInited = true;
     pipe.data = this;
     int r = uv_pipe_init(loop, &pipe, 0);
     if (r != 0)
         return std::string("pipe init: ") + uv_strerror(r);
+    pipeInited = true;
     r = uv_pipe_open(&pipe, fd);
     if (r != 0)
     {
@@ -86,7 +86,6 @@ void PipeStream::ConnectNative(const std::string& path)
     if (open || connectPending || closing || closed)
         return;
     std::memset(&pipe, 0, sizeof(pipe));
-    pipeInited = true;
     pipe.data = this;
     int r = uv_pipe_init(loop, &pipe, 0);
     if (r != 0)
@@ -94,6 +93,7 @@ void PipeStream::ConnectNative(const std::string& path)
         FailConnect(std::string("pipe init: ") + uv_strerror(r));
         return;
     }
+    pipeInited = true;
     std::memset(&connReq, 0, sizeof(connReq));
     connReq.data = this;
     uv_pipe_connect(&connReq, &pipe, path.c_str(), OnConnected);
@@ -121,7 +121,7 @@ void PipeStream::WriteNative(const char* data, size_t size)
     }
 }
 
-Lode::Value PipeStream::MethodConnect(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value PipeStream::MethodConnect(Lode::State& vm, Lode::StackArgs args)
 {
     if (open)
     {
@@ -138,7 +138,7 @@ Lode::Value PipeStream::MethodConnect(Lode::State& vm, const std::vector<Lode::V
         vm.RaiseError("pipe Connect: stream is closed");
         return Lode::Value();
     }
-    if (args.size() < 2 || !args[1].IsString())
+    if (args.Size() < 2 || !args[1].IsString())
     {
         vm.RaiseError("pipe Connect: path must be a string");
         return Lode::Value();
@@ -156,7 +156,6 @@ Lode::Value PipeStream::MethodConnect(Lode::State& vm, const std::vector<Lode::V
     connectCo = Lode::Coroutine(vm.GetLuaState());
 
     std::memset(&pipe, 0, sizeof(pipe));
-    pipeInited = true;
     pipe.data = this;
     int r = uv_pipe_init(loop, &pipe, 0);
     if (r != 0)
@@ -166,13 +165,14 @@ Lode::Value PipeStream::MethodConnect(Lode::State& vm, const std::vector<Lode::V
         vm.RaiseError("pipe Connect: " + std::string(uv_strerror(r)));
         return Lode::Value();
     }
+    pipeInited = true;
     std::memset(&connReq, 0, sizeof(connReq));
     connReq.data = this;
     uv_pipe_connect(&connReq, &pipe, path.c_str(), OnConnected);
     return vm.YieldThread();
 }
 
-Lode::Value PipeStream::MethodOpenFD(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value PipeStream::MethodOpenFD(Lode::State& vm, Lode::StackArgs args)
 {
     if (open)
     {
@@ -184,7 +184,7 @@ Lode::Value PipeStream::MethodOpenFD(Lode::State& vm, const std::vector<Lode::Va
         vm.RaiseError("pipe OpenFD: stream is closed");
         return Lode::Value();
     }
-    if (args.size() < 2 || !args[1].IsNumber())
+    if (args.Size() < 2 || !args[1].IsNumber())
     {
         vm.RaiseError("pipe OpenFD: fd must be a number");
         return Lode::Value();
@@ -204,7 +204,7 @@ Lode::Value PipeStream::MethodOpenFD(Lode::State& vm, const std::vector<Lode::Va
     return Lode::Value();
 }
 
-Lode::Value PipeStream::MethodWrite(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value PipeStream::MethodWrite(Lode::State& vm, Lode::StackArgs args)
 {
     if (closed || closing)
     {
@@ -216,7 +216,7 @@ Lode::Value PipeStream::MethodWrite(Lode::State& vm, const std::vector<Lode::Val
         vm.RaiseError("pipe Write: stream is not open");
         return Lode::Value();
     }
-    if (args.size() < 2 || (!args[1].IsString() && !args[1].IsBuffer()))
+    if (args.Size() < 2 || (!args[1].IsString() && !args[1].IsBuffer()))
     {
         vm.RaiseError("pipe Write: data must be a string or buffer");
         return Lode::Value();
@@ -251,7 +251,7 @@ Lode::Value PipeStream::MethodWrite(Lode::State& vm, const std::vector<Lode::Val
     return Lode::Value();
 }
 
-Lode::Value PipeStream::MethodWriteLine(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value PipeStream::MethodWriteLine(Lode::State& vm, Lode::StackArgs args)
 {
     if (closed || closing)
     {
@@ -263,7 +263,7 @@ Lode::Value PipeStream::MethodWriteLine(Lode::State& vm, const std::vector<Lode:
         vm.RaiseError("pipe WriteLine: stream is not open");
         return Lode::Value();
     }
-    if (args.size() < 2 || !args[1].IsString())
+    if (args.Size() < 2 || !args[1].IsString())
     {
         vm.RaiseError("pipe WriteLine: data must be a string");
         return Lode::Value();
@@ -274,7 +274,7 @@ Lode::Value PipeStream::MethodWriteLine(Lode::State& vm, const std::vector<Lode:
     return Lode::Value();
 }
 
-Lode::Value PipeStream::MethodRead(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value PipeStream::MethodRead(Lode::State& vm, Lode::StackArgs args)
 {
     if (!open)
     {
@@ -287,7 +287,7 @@ Lode::Value PipeStream::MethodRead(Lode::State& vm, const std::vector<Lode::Valu
         return Lode::Value();
     }
     int bytes = -1;
-    if (args.size() > 1 && !args[1].IsNil())
+    if (args.Size() > 1 && !args[1].IsNil())
     {
         if (!args[1].IsNumber())
         {
@@ -311,7 +311,7 @@ Lode::Value PipeStream::MethodRead(Lode::State& vm, const std::vector<Lode::Valu
     return Lode::Value();
 }
 
-Lode::Value PipeStream::MethodReadBuffer(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value PipeStream::MethodReadBuffer(Lode::State& vm, Lode::StackArgs args)
 {
     if (!open)
     {
@@ -324,7 +324,7 @@ Lode::Value PipeStream::MethodReadBuffer(Lode::State& vm, const std::vector<Lode
         return Lode::Value();
     }
     int bytes = -1;
-    if (args.size() > 1 && !args[1].IsNil())
+    if (args.Size() > 1 && !args[1].IsNil())
     {
         if (!args[1].IsNumber())
         {
@@ -348,7 +348,7 @@ Lode::Value PipeStream::MethodReadBuffer(Lode::State& vm, const std::vector<Lode
     return Lode::Value();
 }
 
-Lode::Value PipeStream::MethodReadLine(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value PipeStream::MethodReadLine(Lode::State& vm, Lode::StackArgs args)
 {
     (void)args;
     if (!open)
@@ -423,7 +423,9 @@ void PipeStream::FinishClosed()
         return;
     closed = true;
     open = false;
-    if (endSig)
+    // Only signal end-of-stream for streams that were actually opened at
+    // some point; Create-then-Close must not fire EndOfStream.
+    if (endSig && pipeInited)
         endSig->Fire(Lode::Value());
     mgr->RemoveStream(shared_from_this());
     selfGuard.reset();
@@ -435,6 +437,27 @@ void PipeStream::CheckYield(ssize_t nread, const uv_buf_t* buf)
     {
         if (nread != UV_EOF)
             FireError(std::string("pipe Read error: ") + uv_strerror(nread));
+        // At EOF, deliver whatever is still buffered so a pending Read or
+        // ReadLine never silently drops data by resuming with nil.
+        if (yieldThread && !lineBuffer.empty())
+        {
+            std::string rest = lineBuffer;
+            lineBuffer.clear();
+            if (yieldAsBuffer)
+            {
+                Lode::State vm(mainL);
+                Lode::Value bufVal = vm.CreateBuffer(rest.size());
+                void* ptr = bufVal.AsBuffer(nullptr);
+                if (ptr)
+                    std::memcpy(ptr, rest.data(), rest.size());
+                FinishYield(bufVal);
+            }
+            else
+            {
+                FinishYield(Lode::Value(rest));
+            }
+            return; // RequestClose follows through the close callback path
+        }
         RequestClose();
         return;
     }
@@ -581,8 +604,8 @@ void PipeStream::OnWritten(uv_write_t* req, int status)
 Lode::Value WrapPipeStream(Lode::State& vm, const std::shared_ptr<PipeStream>& stream, const Lode::Table& methods)
 {
     Lode::Table meta = vm.CreateTable();
-    meta.Set("__index", vm.CreateFunction([stream, methods](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
-        std::string key = (args.size() > 1 && args[1].IsString()) ? args[1].AsString() : "";
+    meta.Set("__index", vm.CreateFastFunction([stream, methods](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
+        std::string key = (args.Size() > 1 && args[1].IsString()) ? args[1].AsString() : "";
         if (key == "DataReceived")
             return stream->dataProxy;
         if (key == "EndOfStream")
@@ -594,12 +617,12 @@ Lode::Value WrapPipeStream(Lode::State& vm, const std::shared_ptr<PipeStream>& s
             return value.GetValue();
         return Lode::Value();
     }));
-    meta.Set("__newindex", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    meta.Set("__newindex", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         vm2.RaiseError("pipe: objects are read-only");
         return Lode::Value();
     }));
     meta.Set("__metatable", Lode::Value(std::string("PipeStream")));
-    meta.Set("__tostring", vm.CreateFunction([](Lode::State&, const std::vector<Lode::Value>&) -> Lode::Value {
+    meta.Set("__tostring", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs) -> Lode::Value {
         return Lode::Value(std::string("PipeStream"));
     }));
     Lode::ObjectWrap<PipeStream>::Wrap(vm, stream, meta);

@@ -67,13 +67,13 @@ struct PIPE_API PipeStream : std::enable_shared_from_this<PipeStream>
     void ConnectNative(const std::string& path);
     void WriteNative(const char* data, size_t size);
 
-    Lode::Value MethodConnect(Lode::State& vm, const std::vector<Lode::Value>& args);
-    Lode::Value MethodOpenFD(Lode::State& vm, const std::vector<Lode::Value>& args);
-    Lode::Value MethodWrite(Lode::State& vm, const std::vector<Lode::Value>& args);
-    Lode::Value MethodWriteLine(Lode::State& vm, const std::vector<Lode::Value>& args);
-    Lode::Value MethodRead(Lode::State& vm, const std::vector<Lode::Value>& args);
-    Lode::Value MethodReadBuffer(Lode::State& vm, const std::vector<Lode::Value>& args);
-    Lode::Value MethodReadLine(Lode::State& vm, const std::vector<Lode::Value>& args);
+    Lode::Value MethodConnect(Lode::State& vm, Lode::StackArgs args);
+    Lode::Value MethodOpenFD(Lode::State& vm, Lode::StackArgs args);
+    Lode::Value MethodWrite(Lode::State& vm, Lode::StackArgs args);
+    Lode::Value MethodWriteLine(Lode::State& vm, Lode::StackArgs args);
+    Lode::Value MethodRead(Lode::State& vm, Lode::StackArgs args);
+    Lode::Value MethodReadBuffer(Lode::State& vm, Lode::StackArgs args);
+    Lode::Value MethodReadLine(Lode::State& vm, Lode::StackArgs args);
     Lode::Value MethodStartStreaming(Lode::State& vm);
     Lode::Value MethodStopStreaming(Lode::State& vm);
 

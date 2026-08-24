@@ -101,7 +101,8 @@ export type PipeStream = {
     -- Signals
 
     --- Signal fired when data is received in streaming mode.
-    DataReceived: Signal<buffer>,
+    --- The payload is a byte string (raw chunk read from the pipe).
+    DataReceived: Signal<string>,
 
     --- Signal fired when the stream ends (EOF or closed).
     EndOfStream: Signal<>,

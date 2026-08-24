@@ -40,9 +40,11 @@ struct PIPE_API PipeServer : std::enable_shared_from_this<PipeServer>
     std::function<void(const std::string&)> cppOnError;
 
     // Hybrid accept: pending yield-based Accept() coroutine + queue of
-    // accepted streams not yet consumed by Accept().
+    // accepted streams not yet consumed by Accept(). Weak pointers keep the
+    // queue from immortalizing streams that were closed before being
+    // consumed.
     Lode::Coroutine acceptCo;
-    std::deque<std::shared_ptr<PipeStream>> pendingAccepts;
+    std::deque<std::weak_ptr<PipeStream>> pendingAccepts;
 
     std::shared_ptr<PipeServer> selfGuard;
 
@@ -51,7 +53,7 @@ struct PIPE_API PipeServer : std::enable_shared_from_this<PipeServer>
     void ListenNative(const std::string& path);
     void DeliverClient(const std::shared_ptr<PipeStream>& stream);
 
-    Lode::Value MethodListen(Lode::State& vm, const std::vector<Lode::Value>& args);
+    Lode::Value MethodListen(Lode::State& vm, Lode::StackArgs args);
     Lode::Value MethodAccept(Lode::State& vm);
 
     void RequestClose();
