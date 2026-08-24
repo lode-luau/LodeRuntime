@@ -223,7 +223,6 @@ try {
         }
     }
 
-    Write-Host (\"DEBUG: SummaryPath=[{0}] rows=[{1}] RecordBaseline=[{2}] baselineExists=[{3}]\" -f \$SummaryPath, \$rows.Count, \$RecordBaseline, (Test-Path \$Baseline))
     # --- GitHub step summary (Markdown) ---
     if ($SummaryPath -ne "" -and $rows.Count -gt 0) {
         $md = New-Object System.Collections.Generic.List[string]
