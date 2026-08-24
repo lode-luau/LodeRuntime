@@ -34,6 +34,8 @@
 #     [-OutDir path]            (default bench/results/)
 #     [-ThresholdPct n]         (default 5.0; regression warning threshold)
 #     [-FailOnRegression]       (exit 1 when any metric regresses past threshold)
+#     [-SummaryPath path]       append a Markdown results table to this file
+#                               (e.g. $env:GITHUB_STEP_SUMMARY in CI)
 #     [-RecordBaseline]         (overwrite the baseline with this run)
 
 param(
@@ -43,7 +45,8 @@ param(
     [string]$OutDir = "",
     [double]$ThresholdPct = 5.0,
     [switch]$FailOnRegression,
-    [switch]$RecordBaseline
+    [switch]$RecordBaseline,
+    [string]$SummaryPath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -198,6 +201,17 @@ try {
             $rows += [pscustomobject]@{ metric = "cli_warm_ms"; base = $null; new = $newCli; delta_pct = $null; flag = "NEW" }
         }
 
+        if ($rows.Count -eq 0 -and $SummaryPath -ne "") {
+            # Record mode: emit current metrics so the summary is still useful.
+            foreach ($p in $metrics.cpp.PSObject.Properties) {
+                $rows += [pscustomobject]@{ metric = "cpp.$($p.Name)"; base = $null; new = [double]$p.Value; delta_pct = $null; flag = "NEW" }
+            }
+            foreach ($p in $metrics.luau.PSObject.Properties) {
+                $rows += [pscustomobject]@{ metric = "luau.$($p.Name)"; base = $null; new = [double]$p.Value; delta_pct = $null; flag = "NEW" }
+            }
+            $rows += [pscustomobject]@{ metric = "cli_warm_ms"; base = $null; new = [double]$metrics.cli_warm_ms; delta_pct = $null; flag = "NEW" }
+        }
+
         if ($rows.Count -gt 0) {
             Write-Host "== comparison vs baseline (threshold $ThresholdPct%) =="
             Write-Host ("{0,-26} {1,12} {2,12} {3,10} {4}" -f "metric", "baseline", "now", "delta%", "flag")
@@ -207,6 +221,25 @@ try {
                 Write-Host ("{0,-26} {1,12} {2,12} {3,10} {4}" -f $r.metric, $b, ("{0:F2}" -f $r.new), $d, $r.flag)
             }
         }
+    }
+
+    # --- GitHub step summary (Markdown) ---
+    if ($SummaryPath -ne "" -and $rows.Count -gt 0) {
+        $md = New-Object System.Collections.Generic.List[string]
+        $md.Add("### Benchmark results")
+        $md.Add("")
+        if ($commit) { $md.Add("Commit: $commit") }
+        $md.Add("")
+        $md.Add("| metric | baseline | now | delta% | flag |")
+        $md.Add("|---|---:|---:|---:|---|")
+        foreach ($r in $rows) {
+            $b = if ($null -eq $r.base) { "-" } else { ("{0:F2}" -f $r.base) }
+            $d = if ($null -eq $r.delta_pct) { "-" } else { ("{0:+0.00;-0.00;0.00}%" -f $r.delta_pct) }
+            $flag = if ($r.flag -ne "") { "**$($r.flag)**" } else { "" }
+            $md.Add("| $($r.metric) | $b | $(('{0:F2}' -f $r.new)) | $d | $flag |")
+        }
+        [System.IO.File]::AppendAllText($SummaryPath, (($md -join "`n") + "`n"))
+        Write-Host "summary appended to $SummaryPath"
     }
 
     # --- Save ---

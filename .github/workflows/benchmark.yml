@@ -20,17 +20,16 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Same caching behavior as the nightly workflow (which restores AND
-      # saves): sccache as the compiler launcher through the Ninja generator
-      # (MSBuild ignores CMAKE_<LANG>_COMPILER_LAUNCHER), with the cache
-      # entries shared across ci/nightly/benchmark via common restore-key
-      # prefixes. Benchmark timing measures scenario execution, not build
-      # time, so a warm compiler cache does not skew results.
+      # Restore-only caching, mirroring the nightly workflow: this workflow
+      # consumes the entries written by ci.yml (via the common restore-key
+      # prefixes) but never saves any back — ci.yml is the single cache
+      # writer. Benchmark timing measures scenario execution, not build
+      # time, so cache warmth does not skew results.
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@v0.0.8
 
-      - name: Cache sccache
-        uses: actions/cache@v4
+      - name: Restore sccache (no save)
+        uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/sccache
           key: ${{ runner.os }}-sccache-benchmark-${{ github.sha }}
@@ -38,8 +37,8 @@ jobs:
             ${{ runner.os }}-sccache-benchmark-
             ${{ runner.os }}-sccache-
 
-      - name: Cache FetchContent
-        uses: actions/cache@v4
+      - name: Restore FetchContent (no save)
+        uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/_deps
           key: ${{ runner.os }}-fetchcontent-${{ hashFiles('CMakeLists.txt') }}
@@ -74,17 +73,16 @@ jobs:
       - name: Run benchmarks (self-test + measure + compare + save)
         shell: pwsh
         run: |
+          $args = @('-Baseline', 'bench/results/ci-baseline.json', '-SummaryPath', $env:GITHUB_STEP_SUMMARY)
           if ("${{ inputs.record-baseline }}" -eq "true") {
-            ./bench/run_bench.ps1 -Baseline bench/results/ci-baseline.json -RecordBaseline 2>&1 | Tee-Object -Variable benchOut
+            $args += '-RecordBaseline'
           } elseif (-not (Test-Path bench/results/ci-baseline.json)) {
-            ./bench/run_bench.ps1 -Baseline bench/results/ci-baseline.json -RecordBaseline 2>&1 | Tee-Object -Variable benchOut
+            $args += '-RecordBaseline'
           } else {
-            ./bench/run_bench.ps1 -Baseline bench/results/ci-baseline.json -FailOnRegression 2>&1 | Tee-Object -Variable benchOut
+            $args += '-FailOnRegression'
           }
-          $code = $LASTEXITCODE
-          $table = $benchOut | Where-Object { $_ -match 'metric|REGRESSED|NEW|ns/op' }
-          ($table -join "`n") | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
-          exit $code
+          ./bench/run_bench.ps1 @args
+          exit $LASTEXITCODE
 
       - name: Show sccache stats
         env:
