@@ -32,6 +32,7 @@ return {
             csv = "modules/csv",
             url = "modules/url",
             binary = "modules/binary",
+            ffi = "modules/ffi",
         }
     }
 }
