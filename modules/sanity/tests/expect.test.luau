@@ -1,5 +1,3 @@
---!strict
---!native
 
 -- Self-tests for the Sanity `expect` matchers.
 

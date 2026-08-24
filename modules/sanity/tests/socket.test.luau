@@ -1,5 +1,3 @@
---!strict
---!native
 
 local sanity = require("../init")
 local describe = sanity.describe

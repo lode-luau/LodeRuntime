@@ -17,7 +17,8 @@ export type AssertionError = {
 }
 
 local function fail(message: string, expected: any, received: any)
-    error({ kind = "AssertionError", message = message, expected = expected, received = received })
+    print(debug.traceback())
+    error({ kind = "AssertionError", message = message, expected = expected, received = received }, 2)
 end
 
 --- Recursive deep equality with cycle protection.
@@ -110,6 +111,15 @@ local function buildMatchers(actual: any, negate: boolean): Expect
         end
     end
 
+    -- Type guard for numeric matchers: a non-number actual must fail
+    -- regardless of negation, otherwise expect("abc").never.toBeGreaterThan(5)
+    -- would silently pass because typeof ~= "number" combines as "not equal".
+    local function requireNumber()
+        if typeof(actual) ~= "number" then
+            fail("expected a number, received " .. formatValue(actual), "number", actual)
+        end
+    end
+
     self.toBe = function(expected: any)
         check(actual == expected, "expected " .. formatValue(actual) .. " to be " .. formatValue(expected), expected)
     end
@@ -139,24 +149,29 @@ local function buildMatchers(actual: any, negate: boolean): Expect
     end
 
     self.toBeGreaterThan = function(n: number)
-        check(typeof(actual) == "number" and actual > n, "expected " .. formatValue(actual) .. " to be greater than " .. tostring(n), n)
+        requireNumber()
+        check(actual > n, "expected " .. formatValue(actual) .. " to be greater than " .. tostring(n), n)
     end
 
     self.toBeLessThan = function(n: number)
-        check(typeof(actual) == "number" and actual < n, "expected " .. formatValue(actual) .. " to be less than " .. tostring(n), n)
+        requireNumber()
+        check(actual < n, "expected " .. formatValue(actual) .. " to be less than " .. tostring(n), n)
     end
 
     self.toBeGreaterThanOrEqual = function(n: number)
-        check(typeof(actual) == "number" and actual >= n, "expected " .. formatValue(actual) .. " to be >= " .. tostring(n), n)
+        requireNumber()
+        check(actual >= n, "expected " .. formatValue(actual) .. " to be >= " .. tostring(n), n)
     end
 
     self.toBeLessThanOrEqual = function(n: number)
-        check(typeof(actual) == "number" and actual <= n, "expected " .. formatValue(actual) .. " to be <= " .. tostring(n), n)
+        requireNumber()
+        check(actual <= n, "expected " .. formatValue(actual) .. " to be <= " .. tostring(n), n)
     end
 
     self.toBeCloseTo = function(n: number, precision: number?)
+        requireNumber()
         local eps = 10 ^ -(precision or 2)
-        check(typeof(actual) == "number" and math.abs(actual - n) <= eps, "expected " .. formatValue(actual) .. " to be close to " .. tostring(n), n)
+        check(math.abs(actual - n) <= eps, "expected " .. formatValue(actual) .. " to be close to " .. tostring(n), n)
     end
 
     self.toContain = function(item: any)

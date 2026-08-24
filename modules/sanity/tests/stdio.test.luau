@@ -1,5 +1,3 @@
---!strict
---!native
 
 -- Standard I/O (stdio) module tests: API surface, stream objects (stdin, stdout, stderr),
 -- OOP methods, signals, error handling, and backward-compatible functions.

@@ -1,4 +1,3 @@
---!strict
 
 -- Regression tests for the native path module. Both path.join and
 -- path.resolve must stay lexical (no filesystem access): they used to call
@@ -121,5 +120,22 @@ describe("path error categorization", function()
         end)
         expect(ok).toBe(false)
         expect(tostring(err):find("path.extname: path must be a string", 1, true) ~= nil).toBe(true)
+    end)
+end)
+
+describe("path additions", function()
+    it("isAbsolute performs a lexical check", function()
+        expect(path.isAbsolute("C:/x/y")).toBe(true)
+        -- Em Windows, caminho com raiz mas sem drive nao e absoluto
+        expect(path.isAbsolute("/usr/local")).toBe(false)
+        expect(path.isAbsolute("\\\\server\\\\share")).toBe(true)
+        expect(path.isAbsolute("relative/x")).toBe(false)
+        expect(pcall(function() return path.isAbsolute(123) end)).toBe(false)
+    end)
+
+    it("normalize collapses dots and duplicate separators lexically", function()
+        expect(path.normalize("a//b/./c/../d")).toBe(path.join("a", "b", "d"))
+        expect(path.normalize("a/../..")).toBe("..")
+        expect(pcall(function() return path.normalize(5) end)).toBe(false)
     end)
 end)

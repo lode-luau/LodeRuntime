@@ -1,5 +1,3 @@
---!strict
---!native
 
 -- Regression tests for the native json module (Lode::Json).
 

@@ -1,5 +1,3 @@
---!strict
---!native
 
 -- Regression tests for callable values (__call metamethod) through the C++ Value call API.
 
