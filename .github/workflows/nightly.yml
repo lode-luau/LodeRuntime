@@ -105,10 +105,12 @@ jobs:
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@v0.0.8
 
-      # 2. Restore/save cache of compiled C++ objects, falling back to the
+      # 2. Restore-only cache of compiled C++ objects, falling back to the
       #    cache written by the ci workflow so main and nightly share hits.
-      - name: Cache sccache
-        uses: actions/cache@v4
+      #    The nightly never SAVES a cache entry back: ci.yml is the single
+      #    writer, keeping cache ownership unambiguous.
+      - name: Restore sccache (no save)
+        uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/sccache
           key: ${{ runner.os }}-sccache-nightly-${{ github.sha }}
@@ -116,11 +118,11 @@ jobs:
             ${{ runner.os }}-sccache-nightly-
             ${{ runner.os }}-sccache-
 
-      # 3. Restore/save dependencies downloaded via FetchContent. Both build
-      #    trees share one base via FETCHCONTENT_BASE_DIR so there is a single
-      #    source/download to cache.
-      - name: Cache FetchContent
-        uses: actions/cache@v4
+      # 3. Restore-only dependencies downloaded via FetchContent (saved by
+      #    ci.yml). Both build trees share one base via FETCHCONTENT_BASE_DIR
+      #    so there is a single source/download to cache.
+      - name: Restore FetchContent (no save)
+        uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/_deps
           key: ${{ runner.os }}-fetchcontent-${{ hashFiles('CMakeLists.txt') }}
