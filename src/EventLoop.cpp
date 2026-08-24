@@ -163,10 +163,41 @@ void EventLoop::SetGcBudget(const GcBudget& budget)
     gcBudget_ = budget;
 }
 
+void EventLoop::AddCloseHook(std::function<void()> hook)
+{
+    if (!hook)
+        return;
+    if (closing_)
+    {
+        hook();
+        return;
+    }
+    closeHooks_.push_back(std::move(hook));
+}
+
 void EventLoop::Close()
 {
     if (!loop_)
         return;
+
+    closing_ = true;
+    auto hooks = std::move(closeHooks_);
+    closeHooks_.clear();
+    for (auto& hook : hooks)
+    {
+        try
+        {
+            hook();
+        }
+        catch (const std::exception& error)
+        {
+            Logger::Error(std::string("Event-loop close hook failed: ") + error.what());
+        }
+        catch (...)
+        {
+            Logger::Error("Event-loop close hook failed with an unknown exception");
+        }
+    }
 
     uv_stop(loop_);
     uv_walk(loop_, CloseHandle, nullptr);

@@ -4,6 +4,9 @@
 
 #include "Lode/Export.hpp"
 
+#include <functional>
+#include <vector>
+
 struct uv_loop_s;
 typedef struct uv_loop_s uv_loop_t;
 
@@ -58,6 +61,15 @@ public:
     /** @brief Closes the loop after all owned handles have been drained. */
     void Close();
 
+    /**
+     * @brief Registers work that must run before libuv handles are closed.
+     *
+     * Native modules use this to make foreign entrypoints inert before the
+     * loop is torn down. Hooks run once, on the event-loop thread, at the
+     * beginning of Close().
+     */
+    void AddCloseHook(std::function<void()> hook);
+
     /** @brief Retrieves the underlying raw libuv loop pointer. */
     [[nodiscard]] uv_loop_t* GetUVLoop() const { return loop_; }
 
@@ -65,6 +77,8 @@ private:
     uv_loop_t* loop_ = nullptr;
     GcBudget gcBudget_;         ///< Disabled by default (all fields zero).
     bool gcHookActive_ = false; ///< True while a Run() owns the GC prepare hook.
+    std::vector<std::function<void()>> closeHooks_;
+    bool closing_ = false;
 };
 
 } // namespace Lode
