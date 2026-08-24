@@ -73,15 +73,13 @@ jobs:
       - name: Run benchmarks (self-test + measure + compare + save)
         shell: pwsh
         run: |
-          $args = @('-Baseline', 'bench/results/ci-baseline.json', '-SummaryPath', $env:GITHUB_STEP_SUMMARY)
-          if ("${{ inputs.record-baseline }}" -eq "true") {
-            $args += '-RecordBaseline'
-          } elseif (-not (Test-Path bench/results/ci-baseline.json)) {
-            $args += '-RecordBaseline'
+          $common = 'run_bench.ps1 -Baseline bench/results/ci-baseline.json -SummaryPath $env:GITHUB_STEP_SUMMARY'
+
+          if ("${{ inputs.record-baseline }}" -eq "true" -or -not (Test-Path 'bench/results/ci-baseline.json')) {
+            Invoke-Expression "./bench/$common -RecordBaseline"
           } else {
-            $args += '-FailOnRegression'
+            Invoke-Expression "./bench/$common -FailOnRegression"
           }
-          ./bench/run_bench.ps1 @args
           exit $LASTEXITCODE
 
       - name: Show sccache stats
