@@ -1,0 +1,1231 @@
+// Copyright (c) 2026 yanlvl99, Lode Runtime Contributors
+// SPDX-License-Identifier: MIT
+
+// ffi: call C functions exported by any dynamic library directly from Luau.
+//
+// Design highlights:
+//   * Declarations are parsed once at load time (CdefParser) into resolved
+//     prototypes; nothing is parsed per call.
+//   * Symbols are resolved once at bind time; a missing symbol fails the
+//     bind loudly instead of failing (or crashing) at first call.
+//   * Each prototype prepares a libffi call interface (ffi_cif) exactly
+//     once at bind time -- the "prepare the layout once, reuse it" pattern
+//     recommended upstream. Per call, the cost is argument extraction plus
+//     a single ffi_call through the cached plan.
+//   * The library handle is owned by a shared_ptr captured by every bound
+//     closure, so bound functions keep the library alive even after Close().
+//
+// Blocking calls run on the event-loop thread. callAsync dispatches a bound
+// call through libuv's worker pool and resumes the yielding coroutine.
+
+#include "Lode/Module.hpp"
+#include "Lode/Coroutine.hpp"
+#include "Lode/EventLoop.hpp"
+#include "Lode/Logger.hpp"
+#include "Lode/State.hpp"
+#include "Lode/Task.hpp"
+#include "Lode/Table.hpp"
+#include "lua.h"
+#include "lualib.h"
+
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
+#include <uv.h>
+
+#include <ffi.h>
+
+#include "CdefParser.hpp"
+#include "DynamicLibrary.hpp"
+#include "FfiTypes.hpp"
+
+#include <algorithm>
+#include <array>
+#include <cerrno>
+#include <cstring>
+#include <cwchar>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <thread>
+#include <unordered_map>
+#include <vector>
+
+namespace
+{
+
+[[noreturn]] void BindError(const std::string& message)
+{
+    throw std::runtime_error(message);
+}
+
+using namespace lodeffi;
+
+constexpr uint64_t kMaxSafeInteger = (uint64_t{1} << 53) - 1;
+
+thread_local int gLastError = 0;
+
+void CaptureLastError()
+{
+#if defined(_WIN32)
+    gLastError = static_cast<int>(GetLastError());
+#else
+    gLastError = errno;
+#endif
+}
+
+size_t ParseTypeSize(const std::string& declaration)
+{
+    // Reuse the actual cdef parser so sizeof and ffi.load cannot disagree on
+    // aliases, qualifiers, or pointer adjustments. The dummy parameter name
+    // is discarded after parsing.
+    const auto parsed = ParseCdef("void __ffi_sizeof(" + declaration + " value);");
+    if (parsed.prototypes.size() != 1 || parsed.prototypes.front().args.size() != 1)
+        BindError("ffi.sizeof: expected one C type");
+    return SizeOf(parsed.prototypes.front().args.front());
+}
+
+struct RawStructLayout
+{
+    size_t size = 0;
+    size_t alignment = 1;
+    std::unordered_map<std::string, size_t> offsets;
+};
+
+RawStructLayout ParseStructLayout(const std::string& fields)
+{
+    RawStructLayout layout;
+    size_t offset = 0;
+    size_t structAlignment = 1;
+    size_t begin = 0;
+    bool sawField = false;
+    while (begin < fields.size())
+    {
+        const size_t end = fields.find(';', begin);
+        std::string field = fields.substr(begin, end == std::string::npos ? std::string::npos : end - begin);
+        const auto first = field.find_first_not_of(" \t\r\n");
+        if (first != std::string::npos)
+        {
+            const auto last = field.find_last_not_of(" \t\r\n");
+            field = field.substr(first, last - first + 1);
+            size_t count = 1;
+            const size_t openBracket = field.find('[');
+            if (openBracket != std::string::npos)
+            {
+                const size_t closeBracket = field.find(']', openBracket);
+                if (closeBracket == std::string::npos)
+                    BindError("ffi.struct: expected ']' after array size");
+                const std::string extent = field.substr(openBracket + 1, closeBracket - openBracket - 1);
+                if (extent.empty()) BindError("ffi.struct: array field requires a fixed size");
+                count = static_cast<size_t>(std::stoull(extent));
+                if (count == 0) BindError("ffi.struct: array field size must not be zero");
+                field.erase(openBracket, closeBracket - openBracket + 1);
+                field.erase(field.find_last_not_of(" \t\r\n") + 1);
+            }
+            const auto parsed = ParseCdef("void __ffi_struct_field(" + field + ");");
+            if (parsed.prototypes.size() != 1 || parsed.prototypes.front().args.size() != 1)
+                BindError("ffi.struct: each field must have one supported C type");
+            const size_t nameBegin = field.find_last_of(" \t");
+            if (nameBegin == std::string::npos || nameBegin + 1 >= field.size())
+                BindError("ffi.struct: each field requires a name");
+            const std::string name = field.substr(nameBegin + 1);
+            const ArgClass type = parsed.prototypes.front().args.front();
+            const size_t alignment = AlignOf(type);
+            offset = (offset + alignment - 1) / alignment * alignment;
+            if (!layout.offsets.emplace(name, offset).second)
+                BindError("ffi.struct: duplicate field '" + name + "'");
+            offset += SizeOf(type) * count;
+            structAlignment = std::max(structAlignment, alignment);
+            sawField = true;
+        }
+        if (end == std::string::npos) break;
+        begin = end + 1;
+    }
+    if (!sawField)
+        BindError("ffi.struct: expected at least one field declaration");
+    layout.size = (offset + structAlignment - 1) / structAlignment * structAlignment;
+    layout.alignment = structAlignment;
+    return layout;
+}
+
+RawStructLayout ParseUnionLayout(const std::string& fields)
+{
+    RawStructLayout layout;
+    size_t begin = 0;
+    bool sawField = false;
+    while (begin < fields.size())
+    {
+        const size_t end = fields.find(';', begin);
+        const std::string field = fields.substr(begin, end == std::string::npos ? std::string::npos : end - begin);
+        if (field.find_first_not_of(" \t\r\n") != std::string::npos)
+        {
+            const RawStructLayout member = ParseStructLayout(field + ";");
+            layout.size = std::max(layout.size, member.size);
+            layout.alignment = std::max(layout.alignment, member.alignment);
+            for (const auto& [name, _] : member.offsets)
+            {
+                if (!layout.offsets.emplace(name, 0).second)
+                    BindError("ffi.union: duplicate field '" + name + "'");
+            }
+            sawField = true;
+        }
+        if (end == std::string::npos) break;
+        begin = end + 1;
+    }
+    if (!sawField) BindError("ffi.union: expected at least one field declaration");
+    layout.size = (layout.size + layout.alignment - 1) / layout.alignment * layout.alignment;
+    return layout;
+}
+
+// Everything needed to invoke one bound symbol. Prepared once at bind time;
+// captured by the per-function closures through a shared_ptr.
+struct BoundFunction
+{
+    ffi_cif cif{};
+    void* fn = nullptr;
+    RetKind ret = RetKind::Void;
+    size_t arity = 0;
+    std::vector<ArgClass> args;
+    std::vector<ffi_type*> argTypes;
+    struct BoundStructType
+    {
+        ffi_type type{};
+        std::vector<ffi_type*> elements;
+    };
+    std::vector<std::shared_ptr<BoundStructType>> argStructs;
+    std::shared_ptr<BoundStructType> retStruct;
+    std::vector<std::shared_ptr<BoundStructType>> ownedStructs;
+};
+
+ffi_type* FfiTypeForClass(ArgClass cls)
+{
+    switch (cls)
+    {
+        case ArgClass::F32: return &ffi_type_float;
+        case ArgClass::F64: return &ffi_type_double;
+        case ArgClass::Bool: return &ffi_type_uint8;
+        case ArgClass::I8: return &ffi_type_sint8;
+        case ArgClass::U8: return &ffi_type_uint8;
+        case ArgClass::I16: return &ffi_type_sint16;
+        case ArgClass::U16: return &ffi_type_uint16;
+        case ArgClass::I32: return &ffi_type_sint32;
+        case ArgClass::U32: return &ffi_type_uint32;
+        case ArgClass::I64: return &ffi_type_sint64;
+        case ArgClass::U64: return &ffi_type_uint64;
+        case ArgClass::Ptr:
+            return &ffi_type_pointer;
+    }
+    return &ffi_type_sint64;
+}
+
+const ffi_type* FfiTypeForReturn(RetKind ret)
+{
+    switch (ret)
+    {
+        case RetKind::Ptr: return &ffi_type_pointer;
+        case RetKind::F32: return &ffi_type_float;
+        case RetKind::F64: return &ffi_type_double;
+        case RetKind::Bool: return &ffi_type_uint8;
+        case RetKind::I8: return &ffi_type_sint8;
+        case RetKind::U8: return &ffi_type_uint8;
+        case RetKind::I16: return &ffi_type_sint16;
+        case RetKind::U16: return &ffi_type_uint16;
+        case RetKind::I32: return &ffi_type_sint32;
+        case RetKind::U32: return &ffi_type_uint32;
+        case RetKind::I64: return &ffi_type_sint64;
+        case RetKind::U64: return &ffi_type_uint64;
+        case RetKind::Struct: return nullptr;
+        default: return &ffi_type_sint32; // Void uses a harmless return slot
+    }
+}
+
+std::shared_ptr<BoundFunction> PrepareBoundFunction(
+    const DynamicLibrary& lib, const Prototype& proto,
+    const std::unordered_map<std::string, const StructLayout*>& structLayouts)
+{
+    auto bound = std::make_shared<BoundFunction>();
+
+    std::string symErr;
+    bound->fn = lib.Symbol(proto.name, &symErr);
+    if (bound->fn == nullptr)
+        BindError("ffi.load: " + symErr);
+
+    bound->ret = proto.ret;
+    bound->arity = proto.args.size();
+    bound->args = proto.args;
+
+    bound->argTypes.resize(proto.args.size());
+    bound->argStructs.resize(proto.args.size());
+    std::unordered_map<std::string, std::shared_ptr<BoundFunction::BoundStructType>> builtStructs;
+    auto buildStruct = [&](auto&& self, const std::string& name)
+        -> std::shared_ptr<BoundFunction::BoundStructType> {
+        if (const auto existing = builtStructs.find(name); existing != builtStructs.end())
+            return existing->second;
+        const auto layout = structLayouts.find(name);
+        if (layout == structLayouts.end())
+            BindError("ffi.load: missing layout for struct '" + name + "'");
+        auto aggregate = std::make_shared<BoundFunction::BoundStructType>();
+        builtStructs.emplace(name, aggregate);
+        aggregate->elements.reserve(layout->second->fields.size() + 1);
+        for (size_t field = 0; field < layout->second->fields.size(); ++field)
+        {
+            if (layout->second->fields[field] == ArgClass::Struct)
+                aggregate->elements.push_back(&self(self, layout->second->fieldStructNames[field])->type);
+            else
+                aggregate->elements.push_back(FfiTypeForClass(layout->second->fields[field]));
+        }
+        aggregate->elements.push_back(nullptr);
+        aggregate->type.type = FFI_TYPE_STRUCT;
+        aggregate->type.elements = aggregate->elements.data();
+        return aggregate;
+    };
+    for (size_t i = 0; i < proto.args.size(); ++i)
+    {
+        if (proto.args[i] != ArgClass::Struct)
+        {
+            bound->argTypes[i] = FfiTypeForClass(proto.args[i]);
+            continue;
+        }
+
+        auto aggregate = buildStruct(buildStruct, proto.argStructNames[i]);
+        bound->argTypes[i] = &aggregate->type;
+        bound->argStructs[i] = std::move(aggregate);
+    }
+
+    ffi_type* returnType = const_cast<ffi_type*>(FfiTypeForReturn(proto.ret));
+    if (proto.ret == RetKind::Struct)
+    {
+        auto aggregate = buildStruct(buildStruct, proto.retStructName);
+        returnType = &aggregate->type;
+        bound->retStruct = std::move(aggregate);
+    }
+
+    for (const auto& [_, aggregate] : builtStructs)
+        bound->ownedStructs.push_back(aggregate);
+
+    if (ffi_prep_cif(&bound->cif, FFI_DEFAULT_ABI,
+                     static_cast<unsigned>(proto.args.size()),
+                     returnType,
+                     bound->argTypes.data()) != FFI_OK)
+        BindError("ffi.load: failed to prepare call interface for '" + proto.name + "'");
+
+    return bound;
+}
+
+// Extracts one integer-class argument (integers, pointers, booleans, nil as
+// NULL, strings/buffers as borrowed data pointers valid for the duration of
+// the call). Returns false and fills *err on type mismatch.
+bool ExtractIntArg(const Lode::StackValue& v, uint64_t* out, std::string* err,
+                   std::string* stringStorage)
+{
+    switch (v.GetType())
+    {
+        case Lode::ValueType::Boolean:
+            *out = v.AsBoolean() ? 1 : 0;
+            return true;
+        case Lode::ValueType::Integer:
+            *out = static_cast<uint64_t>(v.AsInteger());
+            return true;
+        case Lode::ValueType::Number:
+            *out = static_cast<uint64_t>(static_cast<int64_t>(v.AsNumber()));
+            return true;
+        case Lode::ValueType::Buffer:
+        {
+            const auto span = v.AsSpan();
+            if (span.size() < sizeof(*out))
+            {
+                *err = "expected an 8-byte buffer for a 64-bit integer";
+                return false;
+            }
+            std::memcpy(out, span.data(), sizeof(*out));
+            return true;
+        }
+        default:
+            break;
+    }
+    *err = "expected an integer or boolean";
+    return false;
+}
+
+bool ExtractFloatArg(const Lode::StackValue& v, double* out, std::string* err)
+{
+    if (v.GetType() == Lode::ValueType::Number || v.GetType() == Lode::ValueType::Integer)
+    {
+        *out = v.AsNumber();
+        return true;
+    }
+    *err = "expected a number";
+    return false;
+}
+
+bool ExtractPointerArg(const Lode::StackValue& v, void** out, std::string* err,
+                       std::string* stringStorage)
+{
+    switch (v.GetType())
+    {
+        case Lode::ValueType::Nil:
+            *out = nullptr;
+            return true;
+        case Lode::ValueType::LightUserdata:
+            *out = v.AsLightUserdata();
+            return true;
+        case Lode::ValueType::Integer:
+            *out = reinterpret_cast<void*>(static_cast<uintptr_t>(v.AsInteger()));
+            return true;
+        case Lode::ValueType::Number:
+            *out = reinterpret_cast<void*>(static_cast<uintptr_t>(
+                static_cast<int64_t>(v.AsNumber())));
+            return true;
+        case Lode::ValueType::String:
+        {
+            *stringStorage = std::string(v.AsStringView());
+            *out = const_cast<char*>(stringStorage->c_str());
+            return true;
+        }
+        case Lode::ValueType::Buffer:
+        {
+            auto span = v.AsSpan();
+            *out = span.empty() ? nullptr : span.data();
+            return true;
+        }
+        case Lode::ValueType::Table:
+        {
+            const auto pointer = v.AsTable().Get("pointer");
+            if (pointer.IsOk() && pointer.GetValue().GetType() == Lode::ValueType::LightUserdata)
+            {
+                *out = pointer.GetValue().AsLightUserdata();
+                return true;
+            }
+            break;
+        }
+        default:
+            break;
+    }
+    *err = "expected number, string, buffer, pointer or nil";
+    return false;
+}
+
+struct CallbackState
+{
+    ffi_cif cif{};
+    std::vector<ArgClass> args;
+    RetKind ret = RetKind::Void;
+    std::vector<ffi_type*> argTypes;
+    Lode::Value function;
+    lua_State* luaState = nullptr;
+    std::thread::id ownerThread;
+    ffi_closure* closure = nullptr;
+    void* code = nullptr;
+    ~CallbackState() { if (closure != nullptr) ffi_closure_free(closure); }
+};
+
+Lode::Value CallbackArgument(ArgClass type, void* value)
+{
+    switch (type)
+    {
+        case ArgClass::Bool: return Lode::Value(static_cast<double>(*static_cast<uint8_t*>(value) != 0));
+        case ArgClass::I8: return Lode::Value(static_cast<double>(*static_cast<int8_t*>(value)));
+        case ArgClass::U8: return Lode::Value(static_cast<double>(*static_cast<uint8_t*>(value)));
+        case ArgClass::I16: return Lode::Value(static_cast<double>(*static_cast<int16_t*>(value)));
+        case ArgClass::U16: return Lode::Value(static_cast<double>(*static_cast<uint16_t*>(value)));
+        case ArgClass::I32: return Lode::Value(static_cast<double>(*static_cast<int32_t*>(value)));
+        case ArgClass::U32: return Lode::Value(static_cast<double>(*static_cast<uint32_t*>(value)));
+        case ArgClass::I64: return Lode::Value(static_cast<double>(*static_cast<int64_t*>(value)));
+        case ArgClass::U64: return Lode::Value(static_cast<double>(*static_cast<uint64_t*>(value)));
+        case ArgClass::F32: return Lode::Value(static_cast<double>(*static_cast<float*>(value)));
+        case ArgClass::F64: return Lode::Value(*static_cast<double*>(value));
+        case ArgClass::Ptr:
+        {
+            void* pointer = *static_cast<void**>(value);
+            return pointer == nullptr ? Lode::Value() : Lode::Value(pointer);
+        }
+        case ArgClass::Struct: return Lode::Value();
+    }
+    return Lode::Value();
+}
+
+void InvokeCallback(ffi_cif*, void* output, void** values, void* userdata)
+{
+    auto& callback = *static_cast<CallbackState*>(userdata);
+    if (output != nullptr && callback.ret != RetKind::Void)
+        std::memset(output, 0, callback.cif.rtype->size);
+    if (std::this_thread::get_id() != callback.ownerThread)
+    {
+        Lode::Logger::Error("ffi callback invoked from a non-runtime thread");
+        return;
+    }
+    std::vector<Lode::Value> args;
+    args.reserve(callback.args.size());
+    for (size_t i = 0; i < callback.args.size(); ++i)
+        args.push_back(CallbackArgument(callback.args[i], values[i]));
+    Lode::State vm(callback.luaState);
+    const auto result = callback.function.CallSingle(vm, args);
+    if (result.IsError())
+    {
+        Lode::Logger::Error("ffi callback failed: " + result.GetError().ErrorMessage());
+        return;
+    }
+    const double number = result.GetValue().IsNumber() ? result.GetValue().AsNumber() : 0.0;
+    switch (callback.ret)
+    {
+        case RetKind::Void: break;
+        case RetKind::Bool: *static_cast<uint8_t*>(output) = number != 0.0; break;
+        case RetKind::I8: *static_cast<int8_t*>(output) = static_cast<int8_t>(number); break;
+        case RetKind::U8: *static_cast<uint8_t*>(output) = static_cast<uint8_t>(number); break;
+        case RetKind::I16: *static_cast<int16_t*>(output) = static_cast<int16_t>(number); break;
+        case RetKind::U16: *static_cast<uint16_t*>(output) = static_cast<uint16_t>(number); break;
+        case RetKind::I32: *static_cast<int32_t*>(output) = static_cast<int32_t>(number); break;
+        case RetKind::U32: *static_cast<uint32_t*>(output) = static_cast<uint32_t>(number); break;
+        case RetKind::I64: *static_cast<int64_t*>(output) = static_cast<int64_t>(number); break;
+        case RetKind::U64: *static_cast<uint64_t*>(output) = static_cast<uint64_t>(number); break;
+        case RetKind::F32: *static_cast<float*>(output) = static_cast<float>(number); break;
+        case RetKind::F64: *static_cast<double*>(output) = number; break;
+        case RetKind::Ptr:
+            if (result.GetValue().GetType() == Lode::ValueType::LightUserdata)
+                *static_cast<void**>(output) = result.GetValue().AsLightUserdata();
+            else if (result.GetValue().GetType() == Lode::ValueType::Buffer)
+            {
+                const auto span = result.GetValue().AsSpan();
+                *static_cast<void**>(output) = span.empty() ? nullptr : span.data();
+            }
+            break;
+        default: break;
+    }
+}
+
+bool IsSafeLuauInteger(RetKind kind, uint64_t value)
+{
+    if (kind == RetKind::U64)
+        return value <= kMaxSafeInteger;
+    if (kind == RetKind::I64)
+    {
+        const int64_t signedValue = static_cast<int64_t>(value);
+        return signedValue >= -static_cast<int64_t>(kMaxSafeInteger) &&
+               signedValue <= static_cast<int64_t>(kMaxSafeInteger);
+    }
+    return true;
+}
+
+void PushResult(lua_State* L, RetKind kind, uint64_t intValue, double floatValue)
+{
+    switch (kind)
+    {
+        case RetKind::Void:
+            break;
+        case RetKind::Ptr:
+            if (intValue == 0)
+                lua_pushnil(L);
+            else
+                lua_pushlightuserdata(L, reinterpret_cast<void*>(intValue));
+            break;
+        case RetKind::Bool:
+            lua_pushnumber(L, (intValue & 0xffu) == 0 ? 0.0 : 1.0);
+            break;
+        case RetKind::I8:
+            lua_pushnumber(L, static_cast<double>(static_cast<int8_t>(intValue)));
+            break;
+        case RetKind::U8:
+            lua_pushnumber(L, static_cast<double>(static_cast<uint8_t>(intValue)));
+            break;
+        case RetKind::I16:
+            lua_pushnumber(L, static_cast<double>(static_cast<int16_t>(intValue)));
+            break;
+        case RetKind::U16:
+            lua_pushnumber(L, static_cast<double>(static_cast<uint16_t>(intValue)));
+            break;
+        case RetKind::I32:
+            lua_pushnumber(L, static_cast<double>(static_cast<int32_t>(intValue)));
+            break;
+        case RetKind::U32:
+            lua_pushnumber(L, static_cast<double>(static_cast<uint32_t>(intValue)));
+            break;
+        case RetKind::I64:
+            if (!IsSafeLuauInteger(kind, intValue))
+            {
+                void* output = lua_newbuffer(L, sizeof(intValue));
+                std::memcpy(output, &intValue, sizeof(intValue));
+            }
+            else
+                lua_pushnumber(L, static_cast<double>(static_cast<int64_t>(intValue)));
+            break;
+        case RetKind::U64:
+            if (!IsSafeLuauInteger(kind, intValue))
+            {
+                void* output = lua_newbuffer(L, sizeof(intValue));
+                std::memcpy(output, &intValue, sizeof(intValue));
+            }
+            else
+                lua_pushnumber(L, static_cast<double>(intValue));
+            break;
+        case RetKind::F32:
+        case RetKind::F64:
+            lua_pushnumber(L, floatValue);
+            break;
+    }
+}
+
+struct AsyncCall
+{
+    uv_work_t work{};
+    std::shared_ptr<DynamicLibrary> library;
+    std::shared_ptr<BoundFunction> bound;
+    Lode::Coroutine coroutine;
+    lua_State* state = nullptr;
+
+    alignas(16) std::array<uint64_t, kMaxArity> ints{};
+    std::array<void*, kMaxArity> pointers{};
+    alignas(16) std::array<double, kMaxArity> f64{};
+    alignas(16) std::array<float, kMaxArity> f32{};
+    std::array<std::string, kMaxArity> strings;
+    std::array<std::vector<uint8_t>, kMaxArity> buffers;
+    std::array<void*, kMaxArity> values{};
+
+    uint64_t intResult = 0;
+    double f64Result = 0.0;
+    float f32Result = 0.0f;
+    std::vector<uint8_t> structResult;
+    int lastError = 0;
+    std::string error;
+};
+
+bool PrepareAsyncArguments(AsyncCall& call, Lode::StackArgs args, size_t firstArgument,
+                           std::string* error)
+{
+    for (size_t i = 0; i < call.bound->arity; ++i)
+    {
+        const Lode::StackValue& value = args[firstArgument + i];
+        const ArgClass declared = call.bound->args[i];
+        if (declared == ArgClass::F32 || declared == ArgClass::F64)
+        {
+            double number = 0.0;
+            if (!ExtractFloatArg(value, &number, error)) return false;
+            if (declared == ArgClass::F32)
+            {
+                call.f32[i] = static_cast<float>(number);
+                call.values[i] = &call.f32[i];
+            }
+            else
+            {
+                call.f64[i] = number;
+                call.values[i] = &call.f64[i];
+            }
+        }
+        else if (declared == ArgClass::Ptr)
+        {
+            if (value.GetType() == Lode::ValueType::Buffer)
+            {
+                const auto span = value.AsSpan();
+                call.buffers[i].assign(span.begin(), span.end());
+                call.pointers[i] = call.buffers[i].empty() ? nullptr : call.buffers[i].data();
+            }
+            else if (!ExtractPointerArg(value, &call.pointers[i], error, &call.strings[i]))
+            {
+                return false;
+            }
+            call.values[i] = &call.pointers[i];
+        }
+        else if (declared == ArgClass::Struct)
+        {
+            if (value.GetType() != Lode::ValueType::Buffer)
+            {
+                *error = "expected a buffer for struct argument";
+                return false;
+            }
+            const auto span = value.AsSpan();
+            call.buffers[i].assign(span.begin(), span.end());
+            call.values[i] = call.buffers[i].data();
+        }
+        else
+        {
+            if (!ExtractIntArg(value, &call.ints[i], error, &call.strings[i])) return false;
+            call.values[i] = &call.ints[i];
+        }
+    }
+    return true;
+}
+
+void ExecuteAsync(uv_work_t* work)
+{
+    auto& call = *static_cast<AsyncCall*>(work->data);
+    if (call.bound->ret == RetKind::Struct)
+        call.structResult.resize(call.bound->retStruct->type.size);
+    void* result = call.bound->ret == RetKind::Struct
+                       ? static_cast<void*>(call.structResult.data())
+                       : call.bound->ret == RetKind::F32
+                       ? static_cast<void*>(&call.f32Result)
+                       : call.bound->ret == RetKind::F64 ? static_cast<void*>(&call.f64Result)
+                                                        : static_cast<void*>(&call.intResult);
+    ffi_call(&call.bound->cif, FFI_FN(call.bound->fn), result, call.values.data());
+#if defined(_WIN32)
+    call.lastError = static_cast<int>(GetLastError());
+#else
+    call.lastError = errno;
+#endif
+}
+
+void FinishAsync(uv_work_t* work, int status)
+{
+    std::unique_ptr<AsyncCall> call(static_cast<AsyncCall*>(work->data));
+    Lode::State vm(call->state);
+    gLastError = call->lastError;
+    if (status < 0)
+    {
+        call->error = std::string("ffi.callAsync: ") + uv_strerror(status);
+    }
+
+    if (!call->error.empty())
+    {
+        const auto resumed = call->coroutine.ResumeError(call->error);
+        if (resumed.IsError() && Lode::Task::IsMainThread(vm, call->coroutine.GetThreadState()))
+            Lode::Task::SetMainThreadError(vm, resumed.GetError().ErrorMessage());
+        return;
+    }
+
+    std::vector<Lode::Value> result;
+    switch (call->bound->ret)
+    {
+        case RetKind::Void: break;
+        case RetKind::Ptr:
+            result.emplace_back(call->intResult == 0 ? Lode::Value()
+                                                      : Lode::Value(reinterpret_cast<void*>(call->intResult)));
+            break;
+        case RetKind::Bool: result.emplace_back(static_cast<double>((call->intResult & 0xffu) != 0)); break;
+        // Keep asynchronous integer results consistent with the synchronous
+        // path, which uses lua_pushnumber for every integer return kind.
+        case RetKind::I8: result.emplace_back(static_cast<double>(static_cast<int8_t>(call->intResult))); break;
+        case RetKind::U8: result.emplace_back(static_cast<double>(static_cast<uint8_t>(call->intResult))); break;
+        case RetKind::I16: result.emplace_back(static_cast<double>(static_cast<int16_t>(call->intResult))); break;
+        case RetKind::U16: result.emplace_back(static_cast<double>(static_cast<uint16_t>(call->intResult))); break;
+        case RetKind::I32: result.emplace_back(static_cast<double>(static_cast<int32_t>(call->intResult))); break;
+        case RetKind::U32: result.emplace_back(static_cast<double>(static_cast<uint32_t>(call->intResult))); break;
+        case RetKind::I64:
+        case RetKind::U64:
+            if (IsSafeLuauInteger(call->bound->ret, call->intResult))
+                result.emplace_back(call->bound->ret == RetKind::I64
+                                        ? static_cast<double>(static_cast<int64_t>(call->intResult))
+                                        : static_cast<double>(call->intResult));
+            else
+            {
+                Lode::Value buffer = vm.CreateBuffer(sizeof(call->intResult));
+                std::memcpy(buffer.AsSpan().data(), &call->intResult, sizeof(call->intResult));
+                result.emplace_back(std::move(buffer));
+            }
+            break;
+        case RetKind::F32: result.emplace_back(static_cast<double>(call->f32Result)); break;
+        case RetKind::F64: result.emplace_back(call->f64Result); break;
+        case RetKind::Struct:
+        {
+            Lode::Value buffer = vm.CreateBuffer(call->structResult.size());
+            std::memcpy(buffer.AsSpan().data(), call->structResult.data(), call->structResult.size());
+            result.emplace_back(std::move(buffer));
+            break;
+        }
+    }
+    const auto resumed = call->coroutine.Resume(result);
+    if (resumed.IsError() && Lode::Task::IsMainThread(vm, call->coroutine.GetThreadState()))
+        Lode::Task::SetMainThreadError(vm, resumed.GetError().ErrorMessage());
+}
+
+// Builds the exports table for one loaded library: every parsed prototype
+// becomes a bound, eagerly-resolved fastN closure with a prepared ffi plan.
+Lode::Table BindLibrary(Lode::State& vm, std::shared_ptr<DynamicLibrary> lib,
+                        const CdefParseResult& parsed)
+{
+    Lode::Table exports = vm.CreateTable();
+    auto bindings = std::make_shared<std::unordered_map<std::string, std::shared_ptr<BoundFunction>>>();
+
+    std::unordered_map<std::string, const StructLayout*> structLayouts;
+    for (const StructLayout& layout : parsed.structs)
+        structLayouts.emplace(layout.name, &layout);
+
+    for (const Prototype& proto : parsed.prototypes)
+    {
+        auto bound = PrepareBoundFunction(*lib, proto, structLayouts);
+        bindings->emplace(proto.name, bound);
+
+        auto closure = [lib, bound](Lode::State& callVm, Lode::StackArgs args) -> int {
+            lua_State* L = args.RawState();
+            const size_t expected = bound->arity;
+            if (args.Size() != expected)
+            {
+                luaL_error(L, "ffi: expects %d argument(s), got %d",
+                           static_cast<int>(expected), static_cast<int>(args.Size()));
+                return 0;
+            }
+
+            // Argument storage: one slot per parameter; their addresses are
+            // handed to libffi. Integer-class values are stored bit-exact as
+            // uint64; float/double per their declared class. The declared
+            // class is recovered from the prepared cif, so the closure needs
+            // no duplicate capture state.
+            alignas(16) std::array<uint64_t, kMaxArity> ints{};
+            std::array<void*, kMaxArity> pointers{};
+            alignas(16) std::array<double, kMaxArity> flts{};
+            alignas(16) std::array<float, kMaxArity> f32Args{};
+            std::array<std::string, kMaxArity> stringStorage;
+            std::array<void*, kMaxArity> values{};
+            for (size_t i = 0; i < expected; ++i)
+            {
+                std::string err;
+                const ArgClass declared = bound->args[i];
+                if (declared == ArgClass::F32 || declared == ArgClass::F64)
+                {
+                    if (declared == ArgClass::F32)
+                    {
+                        double value = 0.0;
+                        if (!ExtractFloatArg(args[i], &value, &err))
+                            luaL_error(L, "ffi: argument %d: %s", static_cast<int>(i + 1),
+                                       err.c_str());
+                        f32Args[i] = static_cast<float>(value);
+                        values[i] = &f32Args[i];
+                    }
+                    else
+                    {
+                        if (!ExtractFloatArg(args[i], &flts[i], &err))
+                            luaL_error(L, "ffi: argument %d: %s", static_cast<int>(i + 1),
+                                       err.c_str());
+                        values[i] = &flts[i];
+                    }
+                }
+                else if (declared == ArgClass::Ptr)
+                {
+                    if (!ExtractPointerArg(args[i], &pointers[i], &err, &stringStorage[i]))
+                        luaL_error(L, "ffi: argument %d: %s", static_cast<int>(i + 1),
+                                   err.c_str());
+                    values[i] = &pointers[i];
+                }
+                else if (declared == ArgClass::Struct)
+                {
+                    if (args[i].GetType() != Lode::ValueType::Buffer)
+                        luaL_error(L, "ffi: argument %d: expected a buffer for struct argument",
+                                   static_cast<int>(i + 1));
+                    values[i] = const_cast<uint8_t*>(args[i].AsSpan().data());
+                }
+                else
+                {
+                    if (!ExtractIntArg(args[i], &ints[i], &err, &stringStorage[i]))
+                        luaL_error(L, "ffi: argument %d: %s", static_cast<int>(i + 1),
+                                   err.c_str());
+                    values[i] = &ints[i];
+                }
+            }
+
+            alignas(16) uint64_t intResult = 0;
+            alignas(16) double floatResult = 0.0;
+            alignas(16) float f32Result = 0.0f;
+            Lode::Value structResult;
+            if (bound->ret == RetKind::Struct)
+                structResult = callVm.CreateBuffer(bound->retStruct->type.size);
+            void* retSlot = bound->ret == RetKind::Struct
+                                ? static_cast<void*>(structResult.AsSpan().data())
+                                : bound->ret == RetKind::F32
+                                ? static_cast<void*>(&f32Result)
+                                : bound->ret == RetKind::F64 ? static_cast<void*>(&floatResult)
+                                                             : static_cast<void*>(&intResult);
+
+            ffi_call(&bound->cif, FFI_FN(bound->fn), retSlot, values.data());
+            CaptureLastError();
+
+            if (bound->ret == RetKind::Struct)
+                structResult.PushToLuaState(L);
+            else
+                PushResult(L, bound->ret, intResult,
+                           bound->ret == RetKind::F32 ? static_cast<double>(f32Result) : floatResult);
+            return bound->ret == RetKind::Void ? 0 : 1;
+        };
+
+        exports.Set(proto.name, vm.CreateFastFunctionN(closure));
+    }
+
+    exports.Set("callAsync", vm.CreateFastFunction([lib, bindings](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
+        if (args.Size() < 1 || !args[0].IsString())
+        {
+            vm.RaiseError("ffi.callAsync: expected a bound function name as the first argument");
+            return Lode::Value();
+        }
+
+        const std::string name = args[0].AsString();
+        const auto it = bindings->find(name);
+        if (it == bindings->end())
+        {
+            vm.RaiseError("ffi.callAsync: function '" + name + "' is not bound on this library");
+            return Lode::Value();
+        }
+
+        const auto& bound = it->second;
+        if (args.Size() - 1 != bound->arity)
+        {
+            vm.RaiseError("ffi.callAsync: '" + name + "' expects " +
+                          std::to_string(bound->arity) + " argument(s), got " +
+                          std::to_string(args.Size() - 1));
+            return Lode::Value();
+        }
+
+        auto call = std::make_unique<AsyncCall>();
+        call->library = lib;
+        call->bound = bound;
+        call->state = vm.GetLuaState();
+        call->coroutine = Lode::Coroutine(call->state);
+        call->work.data = call.get();
+        if (!PrepareAsyncArguments(*call, args, 1, &call->error))
+        {
+            vm.RaiseError("ffi.callAsync: " + call->error);
+            return Lode::Value();
+        }
+
+        const int queued = uv_queue_work(vm.GetEventLoop().GetUVLoop(), &call->work, ExecuteAsync, FinishAsync);
+        if (queued < 0)
+        {
+            vm.RaiseError(std::string("ffi.callAsync: ") + uv_strerror(queued));
+            return Lode::Value();
+        }
+
+        call.release();
+        vm.YieldThread();
+        return Lode::Value();
+    }));
+
+    // Optional explicit early release. Bound closures capture the shared_ptr,
+    // so calling them afterwards is still memory-safe; the underlying handle
+    // simply stays resident until the VM collects them.
+    auto close = vm.CreateFastFunction([lib](Lode::State&, Lode::StackArgs) -> Lode::Value {
+        lib->Close();
+        return Lode::Value();
+    });
+    exports.Set("close", close);
+    exports.Set("Close", close);
+
+    return exports;
+}
+
+} // namespace
+
+LODE_MODULE(vm)
+{
+    Lode::Table exports = vm.CreateTable();
+
+    auto parseLoadOptions = [](Lode::StackArgs args) -> DynamicLibraryOptions {
+        DynamicLibraryOptions options;
+        if (args.Size() < 3 || args[2].IsNil()) return options;
+        if (!args[2].IsTable())
+            BindError("ffi.load: options must be a table or nil");
+
+        const Lode::Table table = args[2].AsTable();
+        for (const std::string& key : table.GetKeys())
+        {
+            if (key != "searchDllDirectory")
+                BindError("ffi.load: unknown option '" + key + "'");
+        }
+
+        const auto value = table.Get("searchDllDirectory");
+        if (value.IsOk() && !value.GetValue().IsNil())
+        {
+            if (!value.GetValue().IsBoolean())
+                BindError("ffi.load: options.searchDllDirectory must be a boolean");
+            options.searchDllDirectory = value.GetValue().AsBoolean();
+        }
+        return options;
+    };
+
+    // ffi.load(name [, declarations]) -> library table
+    //
+    // Loads a dynamic library and optionally parses/binds a cdef subset of C
+    // declarations in one step:
+    //
+    //   local user32 = ffi.load("user32", [[
+    //       int MessageBoxW(void* hwnd, const char* text, const char* caption, unsigned flags);
+    //   ]])
+    //   user32.MessageBoxW(nil, "hi", "t", 0)
+    exports.Set("load", vm.CreateFastFunction([parseLoadOptions](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
+        if (args.Size() < 1 || !args[0].IsString())
+            BindError("ffi.load: expected a library name string");
+        if (args.Size() > 3)
+            BindError("ffi.load: expected name, optional declarations, and optional options");
+
+        const std::string name = args[0].AsString();
+        const DynamicLibraryOptions options = parseLoadOptions(args);
+
+        std::shared_ptr<DynamicLibrary> lib;
+        if (args.Size() >= 2 && !args[1].IsNil())
+        {
+            if (!args[1].IsString())
+                BindError("ffi.load: declarations must be a string");
+            const std::string decls = args[1].AsString();
+
+            // Parse before opening so syntax errors never leave a half-loaded
+            // library behind. Exceptions propagate to the closure wrapper,
+            // which converts them into Luau errors on the same code path as
+            // every other native callback.
+            std::string openErr;
+            lib = DynamicLibrary::Open(name, options, &openErr);
+            if (lib == nullptr)
+                BindError("ffi.load: cannot open '" + name + "': " + openErr);
+
+            return Lode::Value(BindLibrary(vm, std::move(lib), ParseCdef(decls)));
+        }
+
+        std::string openErr;
+        lib = DynamicLibrary::Open(name, options, &openErr);
+        if (lib == nullptr)
+            BindError("ffi.load: cannot open '" + name + "': " + openErr);
+        return Lode::Value(BindLibrary(vm, std::move(lib), {}));
+    }));
+
+    // ffi.C(declarations) binds symbols visible from the current process.
+    // It is intentionally a function rather than a permanent table: each
+    // declaration block is parsed and resolved eagerly like ffi.load.
+    exports.Set("C", vm.CreateFastFunction([](Lode::State& callVm, Lode::StackArgs args) -> Lode::Value {
+        if (args.Size() != 1 || !args[0].IsString())
+            BindError("ffi.C: declarations must be a string");
+
+        std::string openErr;
+        const auto lib = DynamicLibrary::OpenSelf(&openErr);
+        if (lib == nullptr)
+            BindError("ffi.C: cannot open the current process: " + openErr);
+        return Lode::Value(BindLibrary(callVm, lib, ParseCdef(args[0].AsString())));
+    }));
+
+    exports.Set("lastError", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs args) -> Lode::Value {
+        if (args.Size() != 0)
+            BindError("ffi.lastError: expected no arguments");
+        return Lode::Value(static_cast<double>(gLastError));
+    }));
+
+    // ffi.new(bytes) / ffi.new("type") returns raw, zero-initialized
+    // Luau-owned memory. The cdef author controls its layout and passes the
+    // buffer to pointer parameters without wrapper ownership machinery.
+    exports.Set("new", vm.CreateFastFunction([](Lode::State& callVm, Lode::StackArgs args) -> Lode::Value {
+        if (args.Size() != 1)
+            BindError("ffi.new: expected a byte size number or C type string");
+        if (args[0].IsString())
+            return callVm.CreateBuffer(ParseTypeSize(args[0].AsString()));
+        if (args[0].IsNumber())
+        {
+            const double size = args[0].AsNumber();
+            if (size < 0)
+                BindError("ffi.new: byte size must not be negative");
+            return callVm.CreateBuffer(static_cast<size_t>(size));
+        }
+        BindError("ffi.new: expected a byte size number or C type string");
+    }));
+
+    exports.Set("sizeof", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs args) -> Lode::Value {
+        if (args.Size() != 1 || !args[0].IsString())
+            BindError("ffi.sizeof: expected one C type string");
+        return Lode::Value(static_cast<double>(ParseTypeSize(args[0].AsString())));
+    }));
+
+    exports.Set("struct", vm.CreateFastFunction([](Lode::State& callVm, Lode::StackArgs args) -> Lode::Value {
+        if (args.Size() != 1 || !args[0].IsString())
+            BindError("ffi.struct: expected C field declarations as a string");
+        return callVm.CreateBuffer(ParseStructLayout(args[0].AsString()).size);
+    }));
+
+    exports.Set("union", vm.CreateFastFunction([](Lode::State& callVm, Lode::StackArgs args) -> Lode::Value {
+        if (args.Size() != 1 || !args[0].IsString())
+            BindError("ffi.union: expected C field declarations as a string");
+        return callVm.CreateBuffer(ParseUnionLayout(args[0].AsString()).size);
+    }));
+
+    exports.Set("offsetof", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs args) -> Lode::Value {
+        if (args.Size() != 2 || !args[0].IsString() || !args[1].IsString())
+            BindError("ffi.offsetof: expected field declarations and a field name");
+        const RawStructLayout layout = ParseStructLayout(args[0].AsString());
+        const auto field = layout.offsets.find(args[1].AsString());
+        if (field == layout.offsets.end())
+            BindError("ffi.offsetof: unknown field '" + args[1].AsString() + "'");
+        return Lode::Value(static_cast<double>(field->second));
+    }));
+
+    // Copies bytes out of caller-owned C memory. These helpers deliberately
+    // do not track ownership or validate raw addresses: FFI pointers are a
+    // low-level contract, while the returned string/buffer is Luau-owned.
+    exports.Set("string", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs args) -> Lode::Value {
+        if (args.Size() < 1 || args.Size() > 2)
+            BindError("ffi.string: expected a pointer and optional byte count");
+        void* pointer = nullptr;
+        std::string storage;
+        std::string error;
+        if (!ExtractPointerArg(args[0], &pointer, &error, &storage) || pointer == nullptr)
+            BindError("ffi.string: expected a non-NULL pointer, string, or buffer");
+        if (args.Size() == 1)
+            return Lode::Value(std::string(static_cast<const char*>(pointer)));
+        if (args[1].GetType() != Lode::ValueType::Number &&
+            args[1].GetType() != Lode::ValueType::Integer)
+            BindError("ffi.string: byte count must be a number");
+        const size_t bytes = static_cast<size_t>(args[1].AsNumber());
+        return Lode::Value(std::string(static_cast<const char*>(pointer), bytes));
+    }));
+
+    exports.Set("copy", vm.CreateFastFunction([](Lode::State& callVm, Lode::StackArgs args) -> Lode::Value {
+        if (args.Size() != 2)
+            BindError("ffi.copy: expected a pointer and byte count");
+        void* pointer = nullptr;
+        std::string storage;
+        std::string error;
+        if (!ExtractPointerArg(args[0], &pointer, &error, &storage) || pointer == nullptr)
+            BindError("ffi.copy: expected a non-NULL pointer, string, or buffer");
+        if (args[1].GetType() != Lode::ValueType::Number &&
+            args[1].GetType() != Lode::ValueType::Integer)
+            BindError("ffi.copy: byte count must be a number");
+        const size_t bytes = static_cast<size_t>(args[1].AsNumber());
+        Lode::Value output = callVm.CreateBuffer(bytes);
+        std::memcpy(output.AsSpan().data(), pointer, bytes);
+        return output;
+    }));
+
+    exports.Set("wstring", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs args) -> Lode::Value {
+#if defined(_WIN32)
+        if (args.Size() < 1 || args.Size() > 2)
+            BindError("ffi.wstring: expected a UTF-16 pointer and optional code-unit count");
+        void* pointer = nullptr;
+        std::string storage;
+        std::string error;
+        if (!ExtractPointerArg(args[0], &pointer, &error, &storage) || pointer == nullptr)
+            BindError("ffi.wstring: expected a non-NULL UTF-16 pointer");
+        const wchar_t* wide = static_cast<const wchar_t*>(pointer);
+        int units = 0;
+        if (args.Size() == 1)
+            units = static_cast<int>(std::wcslen(wide));
+        else
+        {
+            if (!args[1].IsNumber()) BindError("ffi.wstring: code-unit count must be a number");
+            units = static_cast<int>(args[1].AsNumber());
+        }
+        const int bytes = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide, units,
+                                              nullptr, 0, nullptr, nullptr);
+        if (bytes == 0 && units != 0) BindError("ffi.wstring: invalid UTF-16 input");
+        std::string utf8(static_cast<size_t>(bytes), '\0');
+        if (bytes != 0)
+            WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide, units,
+                                utf8.data(), bytes, nullptr, nullptr);
+        return Lode::Value(utf8);
+#else
+        BindError("ffi.wstring: UTF-16 helpers are only available on Windows");
+#endif
+    }));
+
+    exports.Set("wbuffer", vm.CreateFastFunction([](Lode::State& callVm, Lode::StackArgs args) -> Lode::Value {
+#if defined(_WIN32)
+        if (args.Size() != 1 || !args[0].IsString())
+            BindError("ffi.wbuffer: expected one UTF-8 string");
+        const std::string text = args[0].AsString();
+        const int units = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(),
+                                              static_cast<int>(text.size()), nullptr, 0);
+        if (units == 0 && !text.empty()) BindError("ffi.wbuffer: invalid UTF-8 input");
+        Lode::Value output = callVm.CreateBuffer((static_cast<size_t>(units) + 1) * sizeof(wchar_t));
+        auto* wide = reinterpret_cast<wchar_t*>(output.AsSpan().data());
+        if (units != 0)
+            MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), static_cast<int>(text.size()),
+                                wide, units);
+        wide[units] = L'\0';
+        return output;
+#else
+        BindError("ffi.wbuffer: UTF-16 helpers are only available on Windows");
+#endif
+    }));
+
+    // Forms a raw address without attaching lifetime or bounds metadata. It
+    // is intentionally just byte-address arithmetic for low-level callers.
+    exports.Set("ptr", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs args) -> Lode::Value {
+        if (args.Size() < 1 || args.Size() > 2)
+            BindError("ffi.ptr: expected a pointer-like value and optional byte offset");
+        void* pointer = nullptr;
+        std::string storage;
+        std::string error;
+        if (!ExtractPointerArg(args[0], &pointer, &error, &storage))
+            BindError("ffi.ptr: " + error);
+        intptr_t offset = 0;
+        if (args.Size() == 2)
+        {
+            if (!args[1].IsNumber())
+                BindError("ffi.ptr: byte offset must be a number");
+            offset = static_cast<intptr_t>(args[1].AsNumber());
+        }
+        const uintptr_t address = static_cast<uintptr_t>(reinterpret_cast<uintptr_t>(pointer)) + offset;
+        return address == 0 ? Lode::Value() : Lode::Value(reinterpret_cast<void*>(address));
+    }));
+
+    exports.Set("fill", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs args) -> Lode::Value {
+        if (args.Size() != 3)
+            BindError("ffi.fill: expected destination, byte value, and byte count");
+        void* destination = nullptr;
+        std::string storage;
+        std::string error;
+        if (!ExtractPointerArg(args[0], &destination, &error, &storage) || destination == nullptr)
+            BindError("ffi.fill: expected a non-NULL destination pointer");
+        if (!args[1].IsNumber() || !args[2].IsNumber())
+            BindError("ffi.fill: byte value and count must be numbers");
+        std::memset(destination, static_cast<int>(args[1].AsNumber()),
+                    static_cast<size_t>(args[2].AsNumber()));
+        return Lode::Value(destination);
+    }));
+
+    exports.Set("move", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs args) -> Lode::Value {
+        if (args.Size() != 3)
+            BindError("ffi.move: expected destination, source, and byte count");
+        void* destination = nullptr;
+        void* source = nullptr;
+        std::string destinationStorage;
+        std::string sourceStorage;
+        std::string error;
+        if (!ExtractPointerArg(args[0], &destination, &error, &destinationStorage) || destination == nullptr)
+            BindError("ffi.move: expected a non-NULL destination pointer");
+        if (!ExtractPointerArg(args[1], &source, &error, &sourceStorage) || source == nullptr)
+            BindError("ffi.move: expected a non-NULL source pointer");
+        if (!args[2].IsNumber())
+            BindError("ffi.move: byte count must be a number");
+        std::memmove(destination, source, static_cast<size_t>(args[2].AsNumber()));
+        return Lode::Value(destination);
+    }));
+
+    exports.Set("callback", vm.CreateFastFunction([](Lode::State& callVm, Lode::StackArgs args) -> Lode::Value {
+        if (args.Size() != 2 || !args[0].IsString() || !args[1].IsFunction())
+            BindError("ffi.callback: expected one callback declaration and one function");
+        const CdefParseResult parsed = ParseCdef(args[0].AsString());
+        if (parsed.prototypes.size() != 1)
+            BindError("ffi.callback: declaration must contain exactly one function");
+        const Prototype& prototype = parsed.prototypes.front();
+        if (prototype.ret == RetKind::Struct)
+            BindError("ffi.callback: struct returns are not supported");
+        for (ArgClass type : prototype.args)
+            if (type == ArgClass::Struct)
+                BindError("ffi.callback: struct arguments are not supported");
+
+        auto callback = std::make_shared<CallbackState>();
+        callback->args = prototype.args;
+        callback->ret = prototype.ret;
+        callback->function = Lode::Value::FromLuaState(args.RawState(), 2);
+        callback->luaState = callVm.GetLuaState();
+        callback->ownerThread = std::this_thread::get_id();
+        for (ArgClass type : prototype.args)
+            callback->argTypes.push_back(FfiTypeForClass(type));
+        if (ffi_prep_cif(&callback->cif, FFI_DEFAULT_ABI,
+                         static_cast<unsigned>(callback->argTypes.size()),
+                         const_cast<ffi_type*>(FfiTypeForReturn(callback->ret)),
+                         callback->argTypes.data()) != FFI_OK)
+            BindError("ffi.callback: failed to prepare callback ABI");
+        callback->closure = static_cast<ffi_closure*>(ffi_closure_alloc(sizeof(ffi_closure), &callback->code));
+        if (callback->closure == nullptr)
+            BindError("ffi.callback: failed to allocate closure");
+        if (ffi_prep_closure_loc(callback->closure, &callback->cif, InvokeCallback,
+                                 callback.get(), callback->code) != FFI_OK)
+            BindError("ffi.callback: failed to prepare closure");
+
+        Lode::Table handle = callVm.CreateTable();
+        handle.Set("pointer", Lode::Value(callback->code));
+        const Lode::Value close = callVm.CreateFastFunction([callback](Lode::State&, Lode::StackArgs) -> Lode::Value {
+            return Lode::Value();
+        });
+        handle.Set("close", close);
+        handle.Set("Close", close);
+        return Lode::Value(handle);
+    }));
+
+    return {exports};
+}

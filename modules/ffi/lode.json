@@ -1,0 +1,21 @@
+{
+  "name": "ffi",
+  "version": "0.1.0",
+  "description": "Lode foreign function interface: call C symbols from any dynamic library",
+  "author": "Lode Team",
+  "license": "MIT",
+  "libraries": {
+    "windows": {
+      "x64": "libs/windows/x64/ffi.dll"
+    },
+    "linux": {
+      "x64": "libs/linux/x64/ffi.so"
+    },
+    "macos": {
+      "x64": "libs/macos/x64/ffi.dylib"
+    }
+  },
+  "releaseTargets": [
+    { "platform": "windows", "architecture": "x64" }
+  ]
+}
