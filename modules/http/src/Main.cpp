@@ -23,7 +23,7 @@ LODE_MODULE(vm)
     mgr->serverMethods = lodehttp::BuildServerMethods(vm, mgr);
 
     Lode::Table httpClientClass = vm.CreateTable();
-    httpClientClass.Set("Create", vm.CreateFunction([mgr](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    httpClientClass.Set("Create", vm.CreateFastFunction([mgr](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         if (mgr->shuttingDown)
         {
             vm2.RaiseError("http: runtime is shutting down");
@@ -33,11 +33,12 @@ LODE_MODULE(vm)
         client->mgr = mgr;
         client->mainL = mgr->mainL;
         client->loop = mgr->loop;
-        const Lode::Value* clientOptions = nullptr;
-        if (args.size() > 1)
-            clientOptions = &args[1];
+        Lode::Value clientOptionsValue;
+        if (args.Size() > 1)
+            clientOptionsValue = args[1].ToValue();
         else if (!args.empty())
-            clientOptions = &args[0];
+            clientOptionsValue = args[0].ToValue();
+        const Lode::Value* clientOptions = &clientOptionsValue;
         if (clientOptions && !clientOptions->IsNil())
         {
             if (!clientOptions->IsTable())
@@ -79,7 +80,7 @@ LODE_MODULE(vm)
     }));
 
     Lode::Table serverClass = vm.CreateTable();
-    serverClass.Set("Create", vm.CreateFunction([mgr](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    serverClass.Set("Create", vm.CreateFastFunction([mgr](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         if (mgr->shuttingDown)
         {
             vm2.RaiseError("http: runtime is shutting down");
@@ -92,7 +93,7 @@ LODE_MODULE(vm)
         server->responseMethods = lodehttp::BuildResponseMethods(vm2);
         server->InitSignals(vm2);
 
-        for (const auto& a : args)
+        for (const auto a : args)
         {
             if (a.IsTable())
             {
@@ -177,7 +178,7 @@ LODE_MODULE(vm)
     exports.SetTable("HttpClient", httpClientClass);
     exports.SetTable("StatusCodes", statusCodes);
 
-    exports.Function("fetch", [mgr](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    exports.Function("fetch", [mgr](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         if (mgr->shuttingDown)
         {
             vm2.RaiseError("http: runtime is shutting down");
@@ -205,9 +206,9 @@ LODE_MODULE(vm)
         req->taskCtx = Lode::Coroutine(vm2.GetLuaState());
         client->activeRequests.push_back(req);
 
-        if (args.size() > 1)
+        if (args.Size() > 1)
         {
-            if (!lodehttp::ParseFetchOptions(vm2, args[1], req->opts))
+            if (!lodehttp::ParseFetchOptions(vm2, args[1].ToValue(), req->opts))
             {
                 req->taskCtx = Lode::Coroutine();
                 client->activeRequests.pop_back();

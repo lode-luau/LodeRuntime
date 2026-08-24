@@ -931,18 +931,18 @@ Lode::Table HttpClient::BuildResponseTable(Lode::State& vm, const std::shared_pt
     Lode::Table bodyObj = vm.CreateTable();
     std::string rawBody = res->body;
 
-    bodyObj.Set("AsTable", vm.CreateFunction([rawBody](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    bodyObj.Set("AsTable", vm.CreateFastFunction([rawBody](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto parsed = Lode::Json::Parse(vm2, rawBody);
         if (parsed.IsError()) { vm2.RaiseError(parsed.GetError().ErrorMessage()); return Lode::Value(); }
         return parsed.GetValue();
     }));
 
-    bodyObj.Set("AsJson", vm.CreateFunction([rawBody](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
-        if (args.size() > 1 && !args[1].IsNil() && !args[1].IsBoolean()) {
+    bodyObj.Set("AsJson", vm.CreateFastFunction([rawBody](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
+        if (args.Size() > 1 && !args[1].IsNil() && !args[1].IsBoolean()) {
             vm2.RaiseError("expected pretty as boolean");
             return Lode::Value();
         }
-        bool pretty = args.size() > 1 && args[1].IsBoolean() ? args[1].AsBoolean() : false;
+        bool pretty = args.Size() > 1 && args[1].IsBoolean() ? args[1].AsBoolean() : false;
         
         auto parsed = Lode::Json::Parse(vm2, rawBody);
         if (parsed.IsError()) {
@@ -961,7 +961,7 @@ Lode::Table HttpClient::BuildResponseTable(Lode::State& vm, const std::shared_pt
     }));
 
     Lode::Table bodyMeta = vm.CreateTable();
-    bodyMeta.Set("__tostring", vm.CreateFunction([rawBody](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    bodyMeta.Set("__tostring", vm.CreateFastFunction([rawBody](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         return Lode::Value(rawBody);
     }));
     bodyObj.SetMetatable(bodyMeta);
@@ -1052,7 +1052,7 @@ Lode::Value HttpClient::MethodClose(Lode::State& vm)
     return Lode::Value();
 }
 
-Lode::Value HttpClient::MethodRequestAsync(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value HttpClient::MethodRequestAsync(Lode::State& vm, Lode::StackArgs args)
 {
     if (closed) { vm.RaiseError("HttpClient is closed"); return Lode::Value(); }
     if (args.empty() || !args[0].IsString()) { vm.RaiseError("Expected url as string"); return Lode::Value(); }
@@ -1061,9 +1061,9 @@ Lode::Value HttpClient::MethodRequestAsync(Lode::State& vm, const std::vector<Lo
     auto req = AcquireRequest(url);
     req->isAsync = true;
 
-    if (args.size() > 1)
+    if (args.Size() > 1)
     {
-        if (!ParseFetchOptions(vm, args[1], req->opts))
+        if (!ParseFetchOptions(vm, args[1].ToValue(), req->opts))
         {
             req->taskCtx = Lode::Coroutine();
             req->dnsDone = true;
@@ -1085,7 +1085,7 @@ Lode::Value HttpClient::MethodRequestAsync(Lode::State& vm, const std::vector<Lo
     return Lode::Value();
 }
 
-Lode::Value HttpClient::MethodRequest(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value HttpClient::MethodRequest(Lode::State& vm, Lode::StackArgs args)
 {
     if (closed) { vm.RaiseError("HttpClient is closed"); return Lode::Value(); }
     if (args.empty() || !args[0].IsString()) { vm.RaiseError("Expected url as string"); return Lode::Value(); }
@@ -1094,9 +1094,9 @@ Lode::Value HttpClient::MethodRequest(Lode::State& vm, const std::vector<Lode::V
     auto req = AcquireRequest(url);
     req->isAsync = false;
 
-    if (args.size() > 1)
+    if (args.Size() > 1)
     {
-        if (!ParseFetchOptions(vm, args[1], req->opts))
+        if (!ParseFetchOptions(vm, args[1].ToValue(), req->opts))
         {
             req->taskCtx = Lode::Coroutine();
             req->dnsDone = true;
@@ -1126,20 +1126,20 @@ Lode::Value HttpClient::MethodRequest(Lode::State& vm, const std::vector<Lode::V
 Lode::Value WrapClient(Lode::State& vm, const std::shared_ptr<HttpClient>& client, const Lode::Table& methods)
 {
     Lode::Table meta = vm.CreateTable();
-    meta.Set("__index", vm.CreateFunction([client, methods](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
-        std::string key = (args.size() > 1 && args[1].IsString()) ? args[1].AsString() : "";
+    meta.Set("__index", vm.CreateFastFunction([client, methods](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
+        std::string key = (args.Size() > 1 && args[1].IsString()) ? args[1].AsString() : "";
         if (key == "ResponseReceived") return client->responseProxy;
         if (key == "ErrorOccurred") return client->errorProxy;
         auto value = methods.Get(key);
         if (value.IsOk() && !value.GetValue().IsNil()) return value.GetValue();
         return Lode::Value();
     }));
-    meta.Set("__newindex", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    meta.Set("__newindex", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         vm2.RaiseError("HttpClient: objects are read-only");
         return Lode::Value();
     }));
     meta.Set("__metatable", Lode::Value(std::string("HttpClient")));
-    meta.Set("__tostring", vm.CreateFunction([](Lode::State&, const std::vector<Lode::Value>&) -> Lode::Value {
+    meta.Set("__tostring", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs) -> Lode::Value {
         return Lode::Value(std::string("HttpClient"));
     }));
     Lode::ObjectWrap<HttpClient>::Wrap(vm, client, meta);
@@ -1152,24 +1152,22 @@ Lode::Table BuildClientMethods(Lode::State& vm, const std::shared_ptr<HttpManage
 {
     Lode::Table m = vm.CreateTable();
 
-    m.Set("Request", vm.CreateFunction([mgr](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    m.Set("Request", vm.CreateFastFunction([mgr](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<HttpClient>::Unwrap(vm2, 1);
         if (!self) { vm2.RaiseError("HttpClient Request: invalid HttpClient"); return Lode::Value(); }
         if (mgr->shuttingDown) { vm2.RaiseError("HttpClient Request: runtime is shutting down"); return Lode::Value(); }
         // args[0] is self, args[1...] is real arguments
-        std::vector<Lode::Value> actualArgs(args.begin() + 1, args.end());
-        return self->MethodRequest(vm2, actualArgs);
+        return self->MethodRequest(vm2, args.Slice(1));
     }));
 
-    m.Set("RequestAsync", vm.CreateFunction([mgr](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    m.Set("RequestAsync", vm.CreateFastFunction([mgr](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<HttpClient>::Unwrap(vm2, 1);
         if (!self) { vm2.RaiseError("HttpClient RequestAsync: invalid HttpClient"); return Lode::Value(); }
         if (mgr->shuttingDown) { vm2.RaiseError("HttpClient RequestAsync: runtime is shutting down"); return Lode::Value(); }
-        std::vector<Lode::Value> actualArgs(args.begin() + 1, args.end());
-        return self->MethodRequestAsync(vm2, actualArgs);
+        return self->MethodRequestAsync(vm2, args.Slice(1));
     }));
 
-    m.Set("Close", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    m.Set("Close", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<HttpClient>::Unwrap(vm2, 1);
         if (!self) { vm2.RaiseError("HttpClient Close: invalid HttpClient"); return Lode::Value(); }
         self->RequestClose();

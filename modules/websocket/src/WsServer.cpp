@@ -78,7 +78,7 @@ void WsServer::OnTcpError(const std::string& err)
     FireError(err);
 }
 
-Lode::Value WsServer::MethodListen(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value WsServer::MethodListen(Lode::State& vm, Lode::StackArgs args)
 {
     if (closing || closed)
     {
@@ -90,7 +90,7 @@ Lode::Value WsServer::MethodListen(Lode::State& vm, const std::vector<Lode::Valu
         vm.RaiseError("websocket Server: already listening");
         return Lode::Value();
     }
-    if (args.size() < 2 || !args[1].IsNumber())
+    if (args.Size() < 2 || !args[1].IsNumber())
     {
         vm.RaiseError("websocket Server: port must be a number");
         return Lode::Value();
@@ -103,7 +103,7 @@ Lode::Value WsServer::MethodListen(Lode::State& vm, const std::vector<Lode::Valu
     }
     int port = static_cast<int>(portValue);
     std::string host;
-    if (args.size() > 2 && !args[2].IsNil())
+    if (args.Size() > 2 && !args[2].IsNil())
     {
         if (!args[2].IsString())
         {
@@ -186,23 +186,23 @@ void WsServer::FinishClosed()
 Lode::Value WrapServer(Lode::State& vm, const std::shared_ptr<WsServer>& server, const Lode::Table& methods)
 {
     Lode::Table meta = vm.CreateTable();
-    meta.Set("__index", vm.CreateFunction([server, methods](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
-        std::string key = (args.size() > 1 && args[1].IsString()) ? args[1].AsString() : "";
+    meta.Set("__index", vm.CreateFastFunction([server, methods](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
+        const std::string_view key = (args.Size() > 1 && args[1].IsString()) ? args[1].AsStringView() : std::string_view();
         if (key == "ClientConnected")
             return server->clientProxy;
         if (key == "ErrorOccurred")
             return server->errorProxy;
-        auto value = methods.Get(key);
+        auto value = methods.Get(std::string(key));
         if (value.IsOk() && !value.GetValue().IsNil())
             return value.GetValue();
         return Lode::Value();
     }));
-    meta.Set("__newindex", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    meta.Set("__newindex", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         vm2.RaiseError("websocket: objects are read-only");
         return Lode::Value();
     }));
     meta.Set("__metatable", Lode::Value(std::string("WebSocketServer")));
-    meta.Set("__tostring", vm.CreateFunction([](Lode::State&, const std::vector<Lode::Value>&) -> Lode::Value {
+    meta.Set("__tostring", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs) -> Lode::Value {
         return Lode::Value(std::string("WebSocketServer"));
     }));
     Lode::ObjectWrap<WsServer>::Wrap(vm, server, meta);

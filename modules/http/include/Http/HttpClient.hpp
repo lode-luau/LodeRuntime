@@ -142,8 +142,8 @@ struct HttpClient : std::enable_shared_from_this<HttpClient>
     void FireError(const std::string& message);
     void FireResponse(const std::shared_ptr<HttpResponseData>& res);
     
-    Lode::Value MethodRequest(Lode::State& vm, const std::vector<Lode::Value>& args);
-    Lode::Value MethodRequestAsync(Lode::State& vm, const std::vector<Lode::Value>& args);
+    Lode::Value MethodRequest(Lode::State& vm, Lode::StackArgs args);
+    Lode::Value MethodRequestAsync(Lode::State& vm, Lode::StackArgs args);
     Lode::Table BuildResponseTable(Lode::State& vm, const std::shared_ptr<HttpResponseData>& res);
     Lode::Value MethodClose(Lode::State& vm);
 
