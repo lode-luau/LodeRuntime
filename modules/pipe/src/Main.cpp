@@ -16,7 +16,7 @@ Lode::Table BuildStreamMethods(Lode::State& vm, const std::shared_ptr<lodepipe::
 {
     Lode::Table m = vm.CreateTable();
 
-    m.Set("Connect", vm.CreateFunction([mgr](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    m.Set("Connect", vm.CreateFastFunction([mgr](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodepipe::PipeStream>::Unwrap(vm2, 1);
         if (!self)
         {
@@ -31,7 +31,7 @@ Lode::Table BuildStreamMethods(Lode::State& vm, const std::shared_ptr<lodepipe::
         return self->MethodConnect(vm2, args);
     }));
 
-    m.Set("OpenFD", vm.CreateFunction([mgr](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    m.Set("OpenFD", vm.CreateFastFunction([mgr](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodepipe::PipeStream>::Unwrap(vm2, 1);
         if (!self)
         {
@@ -46,7 +46,7 @@ Lode::Table BuildStreamMethods(Lode::State& vm, const std::shared_ptr<lodepipe::
         return self->MethodOpenFD(vm2, args);
     }));
 
-    m.Set("Write", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    m.Set("Write", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodepipe::PipeStream>::Unwrap(vm2, 1);
         if (!self)
         {
@@ -56,7 +56,7 @@ Lode::Table BuildStreamMethods(Lode::State& vm, const std::shared_ptr<lodepipe::
         return self->MethodWrite(vm2, args);
     }));
 
-    m.Set("WriteLine", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    m.Set("WriteLine", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodepipe::PipeStream>::Unwrap(vm2, 1);
         if (!self)
         {
@@ -66,7 +66,7 @@ Lode::Table BuildStreamMethods(Lode::State& vm, const std::shared_ptr<lodepipe::
         return self->MethodWriteLine(vm2, args);
     }));
 
-    m.Set("Read", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    m.Set("Read", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodepipe::PipeStream>::Unwrap(vm2, 1);
         if (!self)
         {
@@ -76,7 +76,7 @@ Lode::Table BuildStreamMethods(Lode::State& vm, const std::shared_ptr<lodepipe::
         return self->MethodRead(vm2, args);
     }));
 
-    m.Set("ReadBuffer", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    m.Set("ReadBuffer", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodepipe::PipeStream>::Unwrap(vm2, 1);
         if (!self)
         {
@@ -86,7 +86,7 @@ Lode::Table BuildStreamMethods(Lode::State& vm, const std::shared_ptr<lodepipe::
         return self->MethodReadBuffer(vm2, args);
     }));
 
-    m.Set("ReadLine", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    m.Set("ReadLine", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodepipe::PipeStream>::Unwrap(vm2, 1);
         if (!self)
         {
@@ -96,7 +96,7 @@ Lode::Table BuildStreamMethods(Lode::State& vm, const std::shared_ptr<lodepipe::
         return self->MethodReadLine(vm2, args);
     }));
 
-    m.Set("StartStreaming", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    m.Set("StartStreaming", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodepipe::PipeStream>::Unwrap(vm2, 1);
         if (!self)
         {
@@ -106,7 +106,7 @@ Lode::Table BuildStreamMethods(Lode::State& vm, const std::shared_ptr<lodepipe::
         return self->MethodStartStreaming(vm2);
     }));
 
-    m.Set("StopStreaming", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    m.Set("StopStreaming", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodepipe::PipeStream>::Unwrap(vm2, 1);
         if (!self)
         {
@@ -116,14 +116,14 @@ Lode::Table BuildStreamMethods(Lode::State& vm, const std::shared_ptr<lodepipe::
         return self->MethodStopStreaming(vm2);
     }));
 
-    m.Set("IsOpen", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    m.Set("IsOpen", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodepipe::PipeStream>::Unwrap(vm2, 1);
         if (!self)
             return Lode::Value(false);
         return Lode::Value(self->open && !self->closing && !self->closed);
     }));
 
-    m.Set("Close", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    m.Set("Close", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodepipe::PipeStream>::Unwrap(vm2, 1);
         if (!self)
         {
@@ -134,7 +134,7 @@ Lode::Table BuildStreamMethods(Lode::State& vm, const std::shared_ptr<lodepipe::
         return Lode::Value();
     }));
 
-    m.Set("Destroy", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    m.Set("Destroy", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodepipe::PipeStream>::Unwrap(vm2, 1);
         if (!self)
         {
@@ -152,7 +152,7 @@ Lode::Table BuildServerMethods(Lode::State& vm, const std::shared_ptr<lodepipe::
 {
     Lode::Table m = vm.CreateTable();
 
-    m.Set("Listen", vm.CreateFunction([mgr](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    m.Set("Listen", vm.CreateFastFunction([mgr](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodepipe::PipeServer>::Unwrap(vm2, 1);
         if (!self)
         {
@@ -167,7 +167,7 @@ Lode::Table BuildServerMethods(Lode::State& vm, const std::shared_ptr<lodepipe::
         return self->MethodListen(vm2, args);
     }));
 
-    m.Set("Accept", vm.CreateFunction([mgr](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    m.Set("Accept", vm.CreateFastFunction([mgr](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodepipe::PipeServer>::Unwrap(vm2, 1);
         if (!self)
         {
@@ -182,14 +182,14 @@ Lode::Table BuildServerMethods(Lode::State& vm, const std::shared_ptr<lodepipe::
         return self->MethodAccept(vm2);
     }));
 
-    m.Set("IsListening", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    m.Set("IsListening", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodepipe::PipeServer>::Unwrap(vm2, 1);
         if (!self)
             return Lode::Value(false);
         return Lode::Value(self->listening && !self->closing && !self->closed);
     }));
 
-    m.Set("Close", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    m.Set("Close", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodepipe::PipeServer>::Unwrap(vm2, 1);
         if (!self)
         {
@@ -200,7 +200,7 @@ Lode::Table BuildServerMethods(Lode::State& vm, const std::shared_ptr<lodepipe::
         return Lode::Value();
     }));
 
-    m.Set("Destroy", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    m.Set("Destroy", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodepipe::PipeServer>::Unwrap(vm2, 1);
         if (!self)
         {
@@ -227,7 +227,7 @@ LODE_MODULE(vm)
     mgr->serverMethods = BuildServerMethods(vm, mgr);
 
     Lode::Table streamClass = vm.CreateTable();
-    streamClass.Set("Create", vm.CreateFunction([mgr](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    streamClass.Set("Create", vm.CreateFastFunction([mgr](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         if (mgr->shuttingDown)
         {
             vm2.RaiseError("pipe: runtime is shutting down");
@@ -244,7 +244,7 @@ LODE_MODULE(vm)
     }));
 
     Lode::Table serverClass = vm.CreateTable();
-    serverClass.Set("Create", vm.CreateFunction([mgr](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    serverClass.Set("Create", vm.CreateFastFunction([mgr](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         if (mgr->shuttingDown)
         {
             vm2.RaiseError("pipe: runtime is shutting down");
@@ -265,8 +265,8 @@ LODE_MODULE(vm)
     exports.SetTable("PipeStream", streamClass);
     exports.SetTable("PipeServer", serverClass);
 
-    exports.Function("IsPipe", [](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
-        if (args.size() < 1 || !args[0].IsNumber())
+    exports.Function("IsPipe", [](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
+        if (args.Size() < 1 || !args[0].IsNumber())
         {
             vm2.RaiseError("pipe.IsPipe: fd must be a number");
             return Lode::Value();

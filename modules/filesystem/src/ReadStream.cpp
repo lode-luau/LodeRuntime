@@ -113,7 +113,7 @@ void ReadStream::ContinueRead()
     }
 }
 
-Lode::Value ReadStream::MethodStart(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value ReadStream::MethodStart(Lode::State& vm, Lode::StackArgs args)
 {
     if (reading) {
         vm.RaiseError("fs ReadStream: Start called when already reading");
@@ -142,8 +142,8 @@ Lode::Value WrapReadStream(Lode::State& vm, const std::shared_ptr<ReadStream>& s
     stream->endProxy = stream->endOfStream->CreatePublic();
     stream->errorProxy = stream->errorOccurred->CreatePublic();
 
-    meta.Set("__index", vm.CreateFunction([stream, methods](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
-        std::string key = (args.size() > 1 && args[1].IsString()) ? args[1].AsString() : "";
+    meta.Set("__index", vm.CreateFastFunction([stream, methods](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
+        std::string key = (args.Size() > 1 && args[1].IsString()) ? args[1].AsString() : "";
         if (key == "DataReceived")
             return stream->dataProxy;
         if (key == "EndOfStream")
@@ -155,12 +155,12 @@ Lode::Value WrapReadStream(Lode::State& vm, const std::shared_ptr<ReadStream>& s
             return value.GetValue();
         return Lode::Value();
     }));
-    meta.Set("__newindex", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    meta.Set("__newindex", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         vm2.RaiseError("fs: ReadStream objects are read-only");
         return Lode::Value();
     }));
     meta.Set("__metatable", Lode::Value(std::string("ReadStream")));
-    meta.Set("__tostring", vm.CreateFunction([](Lode::State&, const std::vector<Lode::Value>&) -> Lode::Value {
+    meta.Set("__tostring", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs) -> Lode::Value {
         return Lode::Value(std::string("ReadStream"));
     }));
 

@@ -1,5 +1,3 @@
---!strict
---!native
 
 -- Regression coverage for the native crypto module.
 local sanity = require("../init")

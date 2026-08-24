@@ -1,5 +1,3 @@
---!strict
---!native
 
 -- Regression tests for the native websocket module: deterministic error
 -- paths plus a full positive-path round trip (connect, send/receive,
@@ -215,5 +213,13 @@ describe("websocket", function()
         expect((errStr:find("not connected", 1, true) ~= nil) or (errStr:find("socket is closed", 1, true) ~= nil)).toBe(true)
         expect(clientDisconnectedFired).toBe(true)
         expect(serverClientDisconnectedFired).toBe(true)
+    end)
+end)
+
+describe("websocket ready state", function()
+    it("reports a string state for a fresh socket", function()
+        local ws = websocket.WebSocket:Create()
+        expect(ws.ReadyState()).toBeType("string")
+        ws:Destroy()
     end)
 end)

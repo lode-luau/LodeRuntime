@@ -1,5 +1,3 @@
---!strict
---!native
 
 -- Self-tests for async test support (yielding tests).
 

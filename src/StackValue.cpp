@@ -1,5 +1,8 @@
 #include "Lode/StackValue.hpp"
 #include "Lode/Numeric.hpp"
+#include "Lode/Table.hpp"
+#include "Lode/Buffer.hpp"
+#include "Lode/Coroutine.hpp"
 #include "lua.h"
 
 #include <cstdint>
@@ -30,9 +33,16 @@ ValueType StackValue::GetType() const
     }
 }
 
-bool StackValue::IsNil() const { return lua_isnil(L_, index_); }
-bool StackValue::IsBoolean() const { return lua_isboolean(L_, index_); }
-bool StackValue::IsNumber() const { return lua_isnumber(L_, index_); }
+bool StackValue::IsNil() const { return lua_type(L_, index_) == LUA_TNIL; }
+// Strict type checks mirroring Lode::Value: the lua_is* helpers coerce
+// (lua_isstring accepts numbers, lua_isnumber accepts numeric strings),
+// which silently broke per-module type validation after the migration.
+bool StackValue::IsBoolean() const { return lua_type(L_, index_) == LUA_TBOOLEAN; }
+bool StackValue::IsNumber() const
+{
+    const int t = lua_type(L_, index_);
+    return t == LUA_TNUMBER || t == LUA_TINTEGER;
+}
 bool StackValue::IsVector() const { return lua_isvector(L_, index_); }
 bool StackValue::IsInteger() const
 {
@@ -40,12 +50,12 @@ bool StackValue::IsInteger() const
     if (!lua_isnumber(L_, index_)) return false;
     return Numeric::ToInt64(lua_tonumber(L_, index_), "value").IsOk();
 }
-bool StackValue::IsString() const { return lua_isstring(L_, index_); }
+bool StackValue::IsString() const { return lua_type(L_, index_) == LUA_TSTRING; }
 bool StackValue::IsBuffer() const { return lua_type(L_, index_) == LUA_TBUFFER; }
 bool StackValue::IsTable() const { return lua_istable(L_, index_); }
 bool StackValue::IsFunction() const { return lua_isfunction(L_, index_); }
 bool StackValue::IsThread() const { return lua_isthread(L_, index_); }
-bool StackValue::IsUserdata() const { return lua_isuserdata(L_, index_); }
+bool StackValue::IsUserdata() const { return lua_type(L_, index_) == LUA_TUSERDATA; }
 
 bool StackValue::AsBoolean() const
 {
@@ -117,6 +127,43 @@ Result<double> StackValue::TryAsNumber() const
     return Error::Type("Value is not a number");
 }
 
+bool StackValue::IsLightUserdata() const { return lua_type(L_, index_) == LUA_TLIGHTUSERDATA; }
+
+void* StackValue::AsLightUserdata() const { return lua_touserdata(L_, index_); }
+
+Result<bool> StackValue::TryAsBoolean() const
+{
+    if (IsBoolean()) return AsBoolean();
+    return Error::Type("Value is not a boolean");
+}
+
+Result<int64_t> StackValue::TryAsInteger() const
+{
+    if (IsInteger()) return AsInteger();
+    return Error::Type("Value is not an integer");
+}
+
+Result<std::string> StackValue::TryAsString() const
+{
+    if (IsString()) return AsString();
+    return Error::Type("Value is not a string");
+}
+
+Buffer StackValue::AsBufferObj() const
+{
+    return ToValue().AsBufferObj();
+}
+
+Coroutine StackValue::AsCoroutine() const
+{
+    return ToValue().AsCoroutine();
+}
+
+Table StackValue::AsTable() const
+{
+    return ToValue().AsTable();
+}
+
 Value StackValue::ToValue() const
 {
     return Value::FromLuaState(L_, index_);
@@ -127,14 +174,14 @@ StackArgs::StackArgs(lua_State* L) : L_(L), numArgs_(lua_gettop(L)) {}
 
 size_t StackArgs::Size() const
 {
-    return numArgs_;
+    return numArgs_ < begin_ ? 0 : static_cast<size_t>(numArgs_ - begin_ + 1);
 }
 
 std::vector<Value> StackArgs::ToVector() const
 {
     std::vector<Value> vec;
-    vec.reserve(numArgs_);
-    for (int i = 1; i <= numArgs_; ++i)
+    vec.reserve(Size());
+    for (int i = begin_; i <= numArgs_; ++i)
     {
         vec.push_back(Value::FromLuaState(L_, i));
     }
@@ -143,8 +190,9 @@ std::vector<Value> StackArgs::ToVector() const
 
 StackValue StackArgs::operator[](size_t i) const
 {
-    // Lua stack starts at 1, but C++ APIs usually start at 0
-    return StackValue(L_, static_cast<int>(i) + 1);
+    // Lua stack starts at 1, but C++ APIs usually start at 0.
+    // begin_ supports sliced views (e.g. dropping the self argument).
+    return StackValue(L_, begin_ + static_cast<int>(i));
 }
 
 } // namespace Lode

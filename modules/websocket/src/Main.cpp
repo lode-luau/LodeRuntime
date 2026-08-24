@@ -17,7 +17,7 @@ Lode::Table BuildClientMethods(Lode::State& vm, const std::shared_ptr<WebSocketM
 {
     Lode::Table m = vm.CreateTable();
 
-    m.Set("Connect", vm.CreateFunction([mgr](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    m.Set("Connect", vm.CreateFastFunction([mgr](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<WsClient>::Unwrap(vm2, 1);
         if (!self)
         {
@@ -32,7 +32,7 @@ Lode::Table BuildClientMethods(Lode::State& vm, const std::shared_ptr<WebSocketM
         return self->MethodConnect(vm2, args);
     }));
 
-    m.Set("Send", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    m.Set("Send", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<WsClient>::Unwrap(vm2, 1);
         if (!self)
         {
@@ -42,7 +42,7 @@ Lode::Table BuildClientMethods(Lode::State& vm, const std::shared_ptr<WebSocketM
         return self->MethodSend(vm2, args);
     }));
 
-    m.Set("Close", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    m.Set("Close", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<WsClient>::Unwrap(vm2, 1);
         if (!self)
         {
@@ -52,7 +52,7 @@ Lode::Table BuildClientMethods(Lode::State& vm, const std::shared_ptr<WebSocketM
         return self->MethodClose(vm2, args);
     }));
 
-    m.Set("Ping", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    m.Set("Ping", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<WsClient>::Unwrap(vm2, 1);
         if (!self)
         {
@@ -62,7 +62,7 @@ Lode::Table BuildClientMethods(Lode::State& vm, const std::shared_ptr<WebSocketM
         return self->MethodPing(vm2, args);
     }));
 
-    m.Set("LocalAddress", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    m.Set("LocalAddress", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<WsClient>::Unwrap(vm2, 1);
         if (!self)
         {
@@ -72,7 +72,7 @@ Lode::Table BuildClientMethods(Lode::State& vm, const std::shared_ptr<WebSocketM
         return self->MethodLocalAddress(vm2);
     }));
 
-    m.Set("RemoteAddress", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    m.Set("RemoteAddress", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<WsClient>::Unwrap(vm2, 1);
         if (!self)
         {
@@ -82,7 +82,7 @@ Lode::Table BuildClientMethods(Lode::State& vm, const std::shared_ptr<WebSocketM
         return self->MethodRemoteAddress(vm2);
     }));
 
-    m.Set("Destroy", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    m.Set("Destroy", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<WsClient>::Unwrap(vm2, 1);
         if (!self)
         {
@@ -93,14 +93,14 @@ Lode::Table BuildClientMethods(Lode::State& vm, const std::shared_ptr<WebSocketM
         return Lode::Value();
     }));
 
-    m.Set("IsConnected", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    m.Set("IsConnected", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<WsClient>::Unwrap(vm2, 1);
         if (!self)
             return Lode::Value(false);
         return Lode::Value(self->state == WsState::Open && !self->closed);
     }));
 
-    m.Set("ReadyState", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    m.Set("ReadyState", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<WsClient>::Unwrap(vm2, 1);
         if (!self)
             return Lode::Value(std::string("closed"));
@@ -121,7 +121,7 @@ Lode::Table BuildServerMethods(Lode::State& vm, const std::shared_ptr<WebSocketM
 {
     Lode::Table m = vm.CreateTable();
 
-    m.Set("Listen", vm.CreateFunction([mgr](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    m.Set("Listen", vm.CreateFastFunction([mgr](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<WsServer>::Unwrap(vm2, 1);
         if (!self)
         {
@@ -136,7 +136,7 @@ Lode::Table BuildServerMethods(Lode::State& vm, const std::shared_ptr<WebSocketM
         return self->MethodListen(vm2, args);
     }));
 
-    m.Set("Close", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    m.Set("Close", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<WsServer>::Unwrap(vm2, 1);
         if (!self)
         {
@@ -147,7 +147,7 @@ Lode::Table BuildServerMethods(Lode::State& vm, const std::shared_ptr<WebSocketM
         return Lode::Value();
     }));
 
-    m.Set("Destroy", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    m.Set("Destroy", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<WsServer>::Unwrap(vm2, 1);
         if (!self)
         {
@@ -158,14 +158,14 @@ Lode::Table BuildServerMethods(Lode::State& vm, const std::shared_ptr<WebSocketM
         return Lode::Value();
     }));
 
-    m.Set("IsListening", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    m.Set("IsListening", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<WsServer>::Unwrap(vm2, 1);
         if (!self)
             return Lode::Value(false);
         return Lode::Value(self->listening && !self->closing && !self->closed);
     }));
 
-    m.Set("LocalAddress", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    m.Set("LocalAddress", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<WsServer>::Unwrap(vm2, 1);
         if (!self)
         {
@@ -193,7 +193,7 @@ LODE_MODULE(vm)
     mgr->serverMethods = BuildServerMethods(vm, mgr);
 
     Lode::Table wsClass = vm.CreateTable();
-    wsClass.Set("Create", vm.CreateFunction([mgr](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    wsClass.Set("Create", vm.CreateFastFunction([mgr](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         if (mgr->shuttingDown)
         {
             vm2.RaiseError("websocket: runtime is shutting down");
@@ -210,7 +210,7 @@ LODE_MODULE(vm)
     }));
 
     Lode::Table serverClass = vm.CreateTable();
-    serverClass.Set("Create", vm.CreateFunction([mgr](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    serverClass.Set("Create", vm.CreateFastFunction([mgr](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         if (mgr->shuttingDown)
         {
             vm2.RaiseError("websocket: runtime is shutting down");
@@ -225,7 +225,7 @@ LODE_MODULE(vm)
         // Oh wait, in original it did `if (!IsValidPort(value))`, but backlog isn't a port! It was just checking if it's an integer.
         // It's fine to leave it out or correctly check integer.
         int backlog = 511;
-        if (args.size() > 1 && !args[1].IsNil())
+        if (args.Size() > 1 && !args[1].IsNil())
         {
             if (!args[1].IsTable())
             {

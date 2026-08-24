@@ -1,5 +1,3 @@
---!strict
---!native
 
 local sanity = require("../init")
 local describe = sanity.describe
@@ -207,5 +205,31 @@ describe("tcp connect/send/receive", function()
 
         client:Close()
         server:Close()
+    end)
+end)
+
+describe("tcp remote address", function()
+    it("exposes the peer address of an accepted connection", function()
+        local server = tcp.Server:Create()
+        local seen = nil
+        server.ClientConnected:Connect(function(client)
+            seen = client
+            task.wait(0.05)
+            client:Close()
+        end)
+        server:Listen(0, "127.0.0.1")
+        local addr = server:LocalAddress()
+
+        local client = tcp.TcpSocket:Create()
+        client.Connected:Connect(function()
+            local remote = client:RemoteAddress()
+            expect(remote.host).toBe("127.0.0.1")
+            expect(remote.port).toBe(addr.port)
+            client:Close()
+        end)
+        client:Connect(addr.host, addr.port)
+        task.wait(0.2)
+        server:Close()
+        expect(seen).never.toBe(nil)
     end)
 end)

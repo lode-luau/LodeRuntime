@@ -1,5 +1,3 @@
---!strict
---!native
 
 -- Regression tests for the native http module (new API)
 local sanity = require("../init")

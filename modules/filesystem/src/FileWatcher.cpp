@@ -69,7 +69,7 @@ void FileWatcher::OnEvent(uv_fs_event_t* handle, const char* filename, int event
     }
 }
 
-Lode::Value FileWatcher::MethodStart(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value FileWatcher::MethodStart(Lode::State& vm, Lode::StackArgs args)
 {
     if (watching) {
         vm.RaiseError("fs Watcher: Start called when already watching");
@@ -82,7 +82,7 @@ Lode::Value FileWatcher::MethodStart(Lode::State& vm, const std::vector<Lode::Va
     }
     
     bool recursive = false;
-    if (args.size() > 1 && args[1].IsBoolean()) {
+    if (args.Size() > 1 && args[1].IsBoolean()) {
         recursive = args[1].AsBoolean();
     }
     
@@ -102,7 +102,7 @@ Lode::Value FileWatcher::MethodStart(Lode::State& vm, const std::vector<Lode::Va
     return Lode::Value();
 }
 
-Lode::Value FileWatcher::MethodStop(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value FileWatcher::MethodStop(Lode::State& vm, Lode::StackArgs args)
 {
     if (closed || closing) {
         vm.RaiseError("fs Watcher: watcher is closed");

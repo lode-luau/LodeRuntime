@@ -1,6 +1,7 @@
 #include "StateLifetime.hpp"
 #include "PinnedRef.hpp"
 #include "lua.h"
+#include "lualib.h"
 #include <mutex>
 #include <unordered_map>
 
@@ -10,6 +11,30 @@ namespace
 {
 std::mutex mutex;
 std::unordered_map<lua_State*, std::weak_ptr<StateLifetime>> lifetimes;
+
+// Process-unique address used as a lightuserdata registry key. Each VM has
+// its own registry, so the same key never collides across runtimes.
+char g_lifetimeKey = 0;
+}
+
+void PublishLifetimePtr(lua_State* L, StateLifetime* lifetime)
+{
+    if (!L) return;
+    L = lua_mainthread(L);
+    lua_pushlightuserdata(L, &g_lifetimeKey);
+    lua_pushlightuserdata(L, lifetime);
+    lua_settable(L, LUA_REGISTRYINDEX);
+}
+
+StateLifetime* PeekLifetimePtr(lua_State* L)
+{
+    if (!L) return nullptr;
+    L = lua_mainthread(L);
+    lua_pushlightuserdata(L, &g_lifetimeKey);
+    lua_rawget(L, LUA_REGISTRYINDEX);
+    auto* ptr = static_cast<StateLifetime*>(lua_touserdata(L, -1));
+    lua_pop(L, 1);
+    return ptr;
 }
 
 std::shared_ptr<StateLifetime> RegisterStateLifetime(lua_State* L)
@@ -17,8 +42,12 @@ std::shared_ptr<StateLifetime> RegisterStateLifetime(lua_State* L)
     if (!L) return {};
     L = lua_mainthread(L);
     auto lifetime = std::make_shared<StateLifetime>();
-    std::lock_guard lock(mutex);
-    lifetimes[L] = lifetime;
+    lifetime->self = lifetime;
+    {
+        std::lock_guard lock(mutex);
+        lifetimes[L] = lifetime;
+    }
+    PublishLifetimePtr(L, lifetime.get());
     return lifetime;
 }
 
@@ -26,6 +55,19 @@ std::shared_ptr<StateLifetime> GetStateLifetime(lua_State* L)
 {
     if (!L) return {};
     L = lua_mainthread(L);
+
+    // Fast path: registry-published pointer + atomic alive check. One
+    // weak_ptr::lock (atomic incref) instead of the global mutex and map.
+    // Semantics match the map exactly: after InvalidateStateLifetime the
+    // alive flag is false and we return null, same as an erased entry.
+    if (auto* cached = PeekLifetimePtr(L))
+    {
+        if (cached->alive.load(std::memory_order_relaxed))
+            return cached->self.lock();
+        return {};
+    }
+
+    // Fallback for states that were never published.
     std::lock_guard lock(mutex);
     auto it = lifetimes.find(L);
     return it == lifetimes.end() ? std::shared_ptr<StateLifetime>{} : it->second.lock();

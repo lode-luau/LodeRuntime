@@ -3,6 +3,7 @@
 #include "Sys/SysInfo.hpp"
 #include <uv.h>
 #include <string>
+#include <vector>
 
 namespace lodesys
 {
@@ -152,6 +153,62 @@ void BindSysInfo(Lode::State& vm, Lode::Table& exports)
         result.Set(1, Lode::Value(average[0]));
         result.Set(2, Lode::Value(average[1]));
         result.Set(3, Lode::Value(average[2]));
+        return Lode::Value(result);
+    }));
+    // --- Process identity / monotonic clock / env completion -----------------
+
+    exports.Set("GetPid", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs) -> Lode::Value {
+        return Lode::Value(static_cast<double>(uv_os_getpid()));
+    }));
+
+    exports.Set("GetPpid", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs) -> Lode::Value {
+        return Lode::Value(static_cast<double>(uv_os_getppid()));
+    }));
+
+    exports.Set("GetExecPath", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs) -> Lode::Value {
+        std::string path(1024, '\0');
+        size_t size = path.size();
+        int r = uv_exepath(path.data(), &size);
+        if (r < 0)
+        {
+            vm.RaiseError(std::string("sys.GetExecPath error: ") + uv_strerror(r));
+            return Lode::Value();
+        }
+        return Lode::Value(std::string(path.data(), size));
+    }));
+
+    // High-resolution monotonic wall time in milliseconds (never goes back).
+    exports.Set("GetMonotonicMs", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs) -> Lode::Value {
+        return Lode::Value(static_cast<double>(uv_hrtime()) / 1e6);
+    }));
+
+    exports.Set("UnsetEnv", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
+        if (args.Size() < 1 || !args[0].IsString()) {
+            vm.RaiseError("sys.UnsetEnv: expected string argument");
+            return Lode::Value();
+        }
+        std::string key = args[0].AsString();
+        int r = uv_os_unsetenv(key.c_str());
+        if (r < 0 && r != UV_ENOENT) {
+            vm.RaiseError(std::string("sys.UnsetEnv error: ") + uv_strerror(r));
+        }
+        return Lode::Value();
+    }));
+
+    // Returns every environment variable as a table {name = value}.
+    exports.Set("EnvEntries", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs) -> Lode::Value {
+        uv_env_item_t* items = nullptr;
+        int count = 0;
+        int r = uv_os_environ(&items, &count);
+        if (r < 0)
+        {
+            vm.RaiseError(std::string("sys.EnvEntries error: ") + uv_strerror(r));
+            return Lode::Value();
+        }
+        Lode::Table result = vm.CreateTable();
+        for (int i = 0; i < count; ++i)
+            result.Set(items[i].name, Lode::Value(std::string(items[i].value)));
+        uv_os_free_environ(items, count);
         return Lode::Value(result);
     }));
 }

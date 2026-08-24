@@ -1,5 +1,4 @@
 --!strict
---!native
 
 --[[
     Sanity CLI runner.

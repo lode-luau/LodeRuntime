@@ -12,6 +12,10 @@ struct lua_State;
 namespace Lode
 {
 
+class Table;
+class Buffer;
+class Coroutine;
+
 /**
  * @brief Represents a lightweight, non-owning reference to a value on the Lua stack.
  * 
@@ -27,6 +31,8 @@ public:
      * @param index The index on the Lua stack.
      */
     StackValue(lua_State* L, int index);
+    /** @brief Constructs an unbound StackValue (needed for iterator scratch). */
+    StackValue() : L_(nullptr), index_(0) {}
 
     /** @brief Gets the type of the value on the stack. */
     [[nodiscard]] ValueType GetType() const;
@@ -53,6 +59,18 @@ public:
     [[nodiscard]] bool IsThread() const;
     /** @brief Checks if the value is Userdata. */
     [[nodiscard]] bool IsUserdata() const;
+
+    // --- Mirrors of Lode::Value accessors used by native callbacks ---
+    // Rare/heavy conversions delegate through ToValue(); hot scalar reads
+    // remain direct stack reads.
+    [[nodiscard]] bool IsLightUserdata() const;
+    [[nodiscard]] void* AsLightUserdata() const;
+    [[nodiscard]] Table AsTable() const;
+    [[nodiscard]] Result<bool> TryAsBoolean() const;
+    [[nodiscard]] Result<int64_t> TryAsInteger() const;
+    [[nodiscard]] Result<std::string> TryAsString() const;
+    [[nodiscard]] Buffer AsBufferObj() const;
+    [[nodiscard]] Coroutine AsCoroutine() const;
 
     /** @brief Fast unsafe cast to boolean. */
     [[nodiscard]] bool AsBoolean() const;
@@ -108,9 +126,46 @@ public:
      */
     [[nodiscard]] StackValue operator[](size_t i) const;
 
+    /** @brief Raw lua_State the arguments live on (for direct stack pushes in N-variants). */
+    [[nodiscard]] lua_State* RawState() const { return L_; }
+
+    /**
+     * @brief A view over the arguments skipping the first skip of them
+     * (e.g. Slice(1) drops the self table in a method call).
+     */
+    [[nodiscard]] StackArgs Slice(size_t skip) const
+    {
+        const int begin = static_cast<int>(skip) + begin_;
+        if (begin > numArgs_) return StackArgs(L_, numArgs_, numArgs_ + 1);
+        return StackArgs(L_, numArgs_, begin);
+    }
+
+    // vector-compatibility surface for converted native callbacks.
+    [[nodiscard]] bool empty() const { return begin_ > numArgs_; }
+
+    struct const_iterator
+    {
+        mutable StackValue scratch;
+        lua_State* L;
+        int index;
+        const_iterator(lua_State* state, int idx) : L(state), index(idx) {}
+        StackValue operator*() const { return StackValue(L, index); }
+        StackValue* operator->() { scratch = StackValue(L, index); return &scratch; }
+        const StackValue* operator->() const { scratch = StackValue(L, index); return &scratch; }
+        const_iterator& operator++() { ++index; return *this; }
+        const_iterator operator+(int n) const { return const_iterator(L, index + n); }
+        bool operator!=(const const_iterator& other) const { return index != other.index; }
+    };
+
+    [[nodiscard]] const_iterator begin() const { return const_iterator(L_, begin_); }
+    [[nodiscard]] const_iterator end() const { return const_iterator(L_, numArgs_ + 1); }
+
 private:
+    StackArgs(lua_State* L, int numArgs, int begin) : L_(L), numArgs_(numArgs), begin_(begin) {}
+
     lua_State* L_ = nullptr;
     int numArgs_ = 0;
+    int begin_ = 1;
 };
 
 } // namespace Lode

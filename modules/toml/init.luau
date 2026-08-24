@@ -61,7 +61,12 @@ local function serializeValue(value: any): string
 		s = string.gsub(s, "\n", "\\n")
 		s = string.gsub(s, "\r", "\\r")
 		s = string.gsub(s, "\t", "\\t")
-		return '"' .. s .. '"'
+				-- Any other control character (and DEL) would produce TOML that
+		-- the decoder itself rejects; escape it as unicode.
+		s = string.gsub(s, "%c", function(ch)
+			return string.format("\\u%04X", string.byte(ch))
+		end)
+return '"' .. s .. '"'
 	elseif t == "boolean" then
 		return value and "true" or "false"
 	elseif t == "number" then
@@ -266,7 +271,16 @@ const function deserialize(input: string): { [string]: TomlValue }
 	end
 
 	const function tomlParseError(msg: string): never
-		error(`TOML parse error at position {pos}: {msg}`)
+		local line2, col2 = 1, 0
+		for k = 1, math.min(pos - 1, #src) do
+			if string.byte(src, k) == 10 then
+				line2 += 1
+				col2 = 0
+			else
+				col2 += 1
+			end
+		end
+		error(`TOML parse error at line {line2}, column {col2} (position {pos}): {msg}`)
 	end
 
 	-- character helpers (all operate on the shared pos/src/len upvalues)

@@ -1,5 +1,3 @@
---!strict
---!native
 
 -- Pipe module tests: API surface, error categorization (signals only for pipe
 -- errors; API misuse raises Lua VM errors), and named-pipe IPC with proper

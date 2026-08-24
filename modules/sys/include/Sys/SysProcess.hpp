@@ -61,11 +61,11 @@ struct SYS_API ProcessPipeStream : std::enable_shared_from_this<ProcessPipeStrea
     void ProcessQueue(bool isEof = false);
     bool TryResolve(Lode::State& vm, const PendingRead& req, Lode::Value& outVal);
 
-    Lode::Value MethodWrite(Lode::State& vm, const std::vector<Lode::Value>& args);
-    Lode::Value MethodWriteLine(Lode::State& vm, const std::vector<Lode::Value>& args);
-    Lode::Value MethodRead(Lode::State& vm, const std::vector<Lode::Value>& args);
-    Lode::Value MethodReadBuffer(Lode::State& vm, const std::vector<Lode::Value>& args);
-    Lode::Value MethodReadLine(Lode::State& vm, const std::vector<Lode::Value>& args);
+    Lode::Value MethodWrite(Lode::State& vm, Lode::StackArgs args);
+    Lode::Value MethodWriteLine(Lode::State& vm, Lode::StackArgs args);
+    Lode::Value MethodRead(Lode::State& vm, Lode::StackArgs args);
+    Lode::Value MethodReadBuffer(Lode::State& vm, Lode::StackArgs args);
+    Lode::Value MethodReadLine(Lode::State& vm, Lode::StackArgs args);
     Lode::Value MethodStartStreaming(Lode::State& vm);
     Lode::Value MethodStopStreaming(Lode::State& vm);
 
@@ -111,7 +111,7 @@ struct SYS_API Process : std::enable_shared_from_this<Process>
     void OnExit(int64_t exit_status, int term_signal);
     void RequestClose();
 
-    Lode::Value MethodKill(Lode::State& vm, const std::vector<Lode::Value>& args);
+    Lode::Value MethodKill(Lode::State& vm, Lode::StackArgs args);
     Lode::Value MethodWait(Lode::State& vm);
     Lode::Value MethodGetPid(Lode::State& vm);
     Lode::Value MethodGetExitCode(Lode::State& vm);

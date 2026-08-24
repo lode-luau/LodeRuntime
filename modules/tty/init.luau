@@ -46,7 +46,8 @@ export type TtyStream = {
     StopStreaming: (self: TtyStream) -> (),
 
     --- Signal fired when data is received in streaming mode.
-    DataReceived: Signal<buffer>,
+    --- The payload is a byte string (raw chunk read from the terminal).
+    DataReceived: Signal<string>,
 
     --- Signal fired when the stream ends (e.g., Ctrl+D or stream closed).
     EndOfStream: Signal<>,

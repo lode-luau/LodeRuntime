@@ -11,6 +11,8 @@
 #include <array>
 #include <cstring>
 #include <initializer_list>
+#include <map>
+#include <mutex>
 #include <vector>
 
 namespace lodecrypto
@@ -49,21 +51,39 @@ const wchar_t* HashName(std::string_view name)
     return nullptr;
 }
 
+// Cache of HMAC-capable algorithm providers, keyed by the compile-time
+// constant algorithm-name pointers. Handles are process-lifetime singletons:
+// opening/closing a provider on every call made PBKDF2 with 10^6 iterations
+// perform up to 10^6 BCryptOpenAlgorithmProvider/Close cycles.
+BCRYPT_ALG_HANDLE CachedHmacAlgorithm(const wchar_t* name)
+{
+    static std::mutex mu;
+    static std::map<const wchar_t*, BCRYPT_ALG_HANDLE>& cache = *new std::map<const wchar_t*, BCRYPT_ALG_HANDLE>();
+    std::lock_guard<std::mutex> lock(mu);
+    const auto it = cache.find(name);
+    if (it != cache.end())
+        return it->second;
+    BCRYPT_ALG_HANDLE handle = nullptr;
+    if (BCryptOpenAlgorithmProvider(&handle, name, nullptr, BCRYPT_ALG_HANDLE_HMAC_FLAG) != 0)
+        return nullptr;
+    cache[name] = handle;
+    return handle;
+}
+
 ProviderResult<std::vector<uint8_t>> HmacInternal(std::string_view algorithm, Bytes key, Bytes data)
 {
     const wchar_t* name = HashName(algorithm);
     if (!name) return Failure("unsupported hash algorithm");
-    AlgHandle alg;
-    if (BCryptOpenAlgorithmProvider(&alg.value, name, nullptr, BCRYPT_ALG_HANDLE_HMAC_FLAG) != 0)
-        return Failure("HMAC provider initialization failed");
+    const BCRYPT_ALG_HANDLE alg = CachedHmacAlgorithm(name);
+    if (!alg) return Failure("HMAC provider initialization failed");
     DWORD objectLength = 0;
     DWORD resultLength = 0;
-    if (BCryptGetProperty(alg.value, BCRYPT_OBJECT_LENGTH, reinterpret_cast<PUCHAR>(&objectLength), sizeof(objectLength), &resultLength, 0) != 0)
+    if (BCryptGetProperty(alg, BCRYPT_OBJECT_LENGTH, reinterpret_cast<PUCHAR>(&objectLength), sizeof(objectLength), &resultLength, 0) != 0)
         return Failure("HMAC provider initialization failed");
     std::vector<uint8_t> object(objectLength);
     std::vector<uint8_t> output(HashSize(algorithm));
     HashHandle hash;
-    if (BCryptCreateHash(alg.value, &hash.value, object.data(), objectLength, const_cast<PUCHAR>(key.data), static_cast<ULONG>(key.size), 0) != 0)
+    if (BCryptCreateHash(alg, &hash.value, object.data(), objectLength, const_cast<PUCHAR>(key.data), static_cast<ULONG>(key.size), 0) != 0)
         return Failure("HMAC initialization failed");
     if (data.size && BCryptHashData(hash.value, const_cast<PUCHAR>(data.data), static_cast<ULONG>(data.size), 0) != 0)
         return Failure("HMAC operation failed");

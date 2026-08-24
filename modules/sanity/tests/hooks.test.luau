@@ -1,5 +1,3 @@
---!strict
---!native
 
 -- Self-tests for hooks (beforeAll/afterAll/beforeEach/afterEach) and nesting.
 

@@ -41,7 +41,7 @@ public:
     void ContinueRead();
     static void OnRead(uv_fs_t* req);
     
-    Lode::Value MethodStart(Lode::State& vm, const std::vector<Lode::Value>& args);
+    Lode::Value MethodStart(Lode::State& vm, Lode::StackArgs args);
 };
 
 Lode::Value WrapReadStream(Lode::State& vm, const std::shared_ptr<ReadStream>& stream, const Lode::Table& methods);

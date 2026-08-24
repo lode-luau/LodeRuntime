@@ -72,6 +72,7 @@ local NativeMod = require("../../tests/native/native_module")
 
 local scenarios = {
     require("./scenarios/native_calls"),
+    require("./scenarios/marshal_calls"),
     require("./scenarios/class_methods"),
     require("./scenarios/coroutines"),
     require("./scenarios/runtime_modules"),

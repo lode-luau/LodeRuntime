@@ -4,6 +4,7 @@
 #include "Lode/ObjectWrap.hpp"
 #include "Lode/Numeric.hpp"
 #include "Lode/Task.hpp"
+#include "Lode/EventLoop.hpp"
 #include <uv.h>
 #include <string>
 #include <vector>
@@ -223,7 +224,7 @@ void ProcessPipeStream::ProcessQueue(bool isEof)
     }
 }
 
-Lode::Value ProcessPipeStream::MethodWrite(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value ProcessPipeStream::MethodWrite(Lode::State& vm, Lode::StackArgs args)
 {
     if (isReadable || !open || closed || closing)
     {
@@ -233,7 +234,7 @@ Lode::Value ProcessPipeStream::MethodWrite(Lode::State& vm, const std::vector<Lo
     if (args.empty())
         return Lode::Value();
 
-    size_t idx = (args.size() > 1 && !args[0].IsString() && !args[0].IsBuffer()) ? 1 : 0;
+    size_t idx = (args.Size() > 1 && !args[0].IsString() && !args[0].IsBuffer()) ? 1 : 0;
     const auto& arg = args[idx];
     if (arg.IsString())
     {
@@ -254,7 +255,7 @@ Lode::Value ProcessPipeStream::MethodWrite(Lode::State& vm, const std::vector<Lo
     return Lode::Value();
 }
 
-Lode::Value ProcessPipeStream::MethodWriteLine(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value ProcessPipeStream::MethodWriteLine(Lode::State& vm, Lode::StackArgs args)
 {
     if (isReadable || !open || closed || closing)
     {
@@ -264,7 +265,7 @@ Lode::Value ProcessPipeStream::MethodWriteLine(Lode::State& vm, const std::vecto
     if (args.empty())
         return Lode::Value();
 
-    size_t idx = (args.size() > 1 && !args[0].IsString() && !args[0].IsBuffer()) ? 1 : 0;
+    size_t idx = (args.Size() > 1 && !args[0].IsString() && !args[0].IsBuffer()) ? 1 : 0;
     const auto& arg = args[idx];
     if (arg.IsString())
     {
@@ -289,7 +290,7 @@ Lode::Value ProcessPipeStream::MethodWriteLine(Lode::State& vm, const std::vecto
     return Lode::Value();
 }
 
-Lode::Value ProcessPipeStream::MethodRead(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value ProcessPipeStream::MethodRead(Lode::State& vm, Lode::StackArgs args)
 {
     if (!isReadable || !open || closed)
     {
@@ -301,8 +302,8 @@ Lode::Value ProcessPipeStream::MethodRead(Lode::State& vm, const std::vector<Lod
     PendingRead req;
     req.coroutine = Lode::Coroutine(vm.GetLuaState());
 
-    size_t numIdx = (args.size() > 1 && !args[0].IsNumber()) ? 1 : 0;
-    if (args.size() > numIdx && args[numIdx].IsNumber())
+    size_t numIdx = (args.Size() > 1 && !args[0].IsNumber()) ? 1 : 0;
+    if (args.Size() > numIdx && args[numIdx].IsNumber())
     {
         auto res = Lode::Numeric::ToSize(args[numIdx].AsNumber(), "read length");
         if (res.IsError())
@@ -325,7 +326,7 @@ Lode::Value ProcessPipeStream::MethodRead(Lode::State& vm, const std::vector<Lod
     return Lode::Value();
 }
 
-Lode::Value ProcessPipeStream::MethodReadBuffer(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value ProcessPipeStream::MethodReadBuffer(Lode::State& vm, Lode::StackArgs args)
 {
     if (!isReadable || !open || closed)
     {
@@ -338,8 +339,8 @@ Lode::Value ProcessPipeStream::MethodReadBuffer(Lode::State& vm, const std::vect
     req.coroutine = Lode::Coroutine(vm.GetLuaState());
     req.isBuffer = true;
 
-    size_t numIdx = (args.size() > 1 && !args[0].IsNumber()) ? 1 : 0;
-    if (args.size() > numIdx && args[numIdx].IsNumber())
+    size_t numIdx = (args.Size() > 1 && !args[0].IsNumber()) ? 1 : 0;
+    if (args.Size() > numIdx && args[numIdx].IsNumber())
     {
         auto res = Lode::Numeric::ToSize(args[numIdx].AsNumber(), "read length");
         if (res.IsError())
@@ -362,7 +363,7 @@ Lode::Value ProcessPipeStream::MethodReadBuffer(Lode::State& vm, const std::vect
     return Lode::Value();
 }
 
-Lode::Value ProcessPipeStream::MethodReadLine(Lode::State& vm, const std::vector<Lode::Value>&)
+Lode::Value ProcessPipeStream::MethodReadLine(Lode::State& vm, Lode::StackArgs)
 {
     if (!isReadable || !open || closed)
     {
@@ -502,26 +503,26 @@ void ProcessPipeStream::OnWritten(uv_write_t* req, int status)
 Lode::Value WrapProcessStream(Lode::State& vm, const std::shared_ptr<ProcessPipeStream>& s, const Lode::Table& methods)
 {
     Lode::Table meta = vm.CreateTable();
-    meta.Set("__index", vm.CreateFunction([s, methods](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
-        std::string key = (args.size() > 1 && args[1].IsString()) ? args[1].AsString() : "";
+    meta.Set("__index", vm.CreateFastFunction([s, methods](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
+        const std::string_view key = (args.Size() > 1 && args[1].IsString()) ? args[1].AsStringView() : std::string_view();
         if (key == "DataReceived") return s->dataProxy;
         if (key == "EndOfStream") return s->endProxy;
         if (key == "ErrorOccurred") return s->errorProxy;
 
-        auto val = methods.Get(key);
+        auto val = methods.Get(std::string(key));
         if (val.IsOk() && !val.GetValue().IsNil())
             return val.GetValue();
 
         return Lode::Value();
     }));
 
-    meta.Set("__newindex", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    meta.Set("__newindex", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         vm2.RaiseError("ProcessStream: objects are read-only");
         return Lode::Value();
     }));
 
     meta.Set("__metatable", Lode::Value(std::string("ProcessStream")));
-    meta.Set("__tostring", vm.CreateFunction([](Lode::State&, const std::vector<Lode::Value>&) -> Lode::Value {
+    meta.Set("__tostring", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs) -> Lode::Value {
         return Lode::Value(std::string("ProcessStream"));
     }));
 
@@ -608,14 +609,14 @@ void Process::OnProcessClosed(uv_handle_t* handle)
     }
 }
 
-Lode::Value Process::MethodKill(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value Process::MethodKill(Lode::State& vm, Lode::StackArgs args)
 {
     if (!running)
         return Lode::Value();
 
     int signum = 15; // SIGTERM default
-    size_t idx = (args.size() > 1 && !args[0].IsNumber()) ? 1 : 0;
-    if (args.size() > idx && args[idx].IsNumber())
+    size_t idx = (args.Size() > 1 && !args[0].IsNumber()) ? 1 : 0;
+    if (args.Size() > idx && args[idx].IsNumber())
     {
         signum = static_cast<int>(args[idx].AsNumber());
     }
@@ -632,7 +633,17 @@ Lode::Value Process::MethodWait(Lode::State& vm)
 {
     if (exited)
     {
-        return Lode::Value(static_cast<double>(exitCode));
+        // Deliver through a deferred resume so the arity always matches the
+        // yielding path: (exitCode, termSignal).
+        mainL = vm.GetMainThread();
+        Lode::Coroutine coro(vm.GetLuaState());
+        waitCoroutines.push_back(coro);
+        std::vector<Lode::Value> resVals;
+        resVals.push_back(Lode::Value(static_cast<double>(exitCode)));
+        resVals.push_back(Lode::Value(static_cast<double>(termSignal)));
+        Lode::Task::Defer(vm, Lode::Value(coro), resVals);
+        vm.YieldThread();
+        return Lode::Value();
     }
 
     mainL = vm.GetMainThread();
@@ -673,8 +684,8 @@ Lode::Value Process::MethodClose(Lode::State&)
 Lode::Value WrapProcess(Lode::State& vm, const std::shared_ptr<Process>& p, const Lode::Table& methods)
 {
     Lode::Table meta = vm.CreateTable();
-    meta.Set("__index", vm.CreateFunction([p, methods](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
-        std::string key = (args.size() > 1 && args[1].IsString()) ? args[1].AsString() : "";
+    meta.Set("__index", vm.CreateFastFunction([p, methods](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
+        const std::string_view key = (args.Size() > 1 && args[1].IsString()) ? args[1].AsStringView() : std::string_view();
         if (key == "pid") return Lode::Value(static_cast<double>(p->pid));
         if (key == "Exited") return p->exitProxy;
         if (key == "ErrorOccurred") return p->errorProxy;
@@ -698,20 +709,20 @@ Lode::Value WrapProcess(Lode::State& vm, const std::shared_ptr<Process>& p, cons
             return Lode::Value();
         }
 
-        auto val = methods.Get(key);
+        auto val = methods.Get(std::string(key));
         if (val.IsOk() && !val.GetValue().IsNil())
             return val.GetValue();
 
         return Lode::Value();
     }));
 
-    meta.Set("__newindex", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    meta.Set("__newindex", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         vm2.RaiseError("Process: objects are read-only");
         return Lode::Value();
     }));
 
     meta.Set("__metatable", Lode::Value(std::string("Process")));
-    meta.Set("__tostring", vm.CreateFunction([p](Lode::State&, const std::vector<Lode::Value>&) -> Lode::Value {
+    meta.Set("__tostring", vm.CreateFastFunction([p](Lode::State&, Lode::StackArgs) -> Lode::Value {
         return Lode::Value("Process(pid=" + std::to_string(p->pid) + ")");
     }));
 
@@ -760,7 +771,7 @@ void ProcessManager::Shutdown()
             if (p->running)
             {
                 Lode::State vm(mainL);
-                p->MethodKill(vm, {});
+                p->MethodKill(vm, Lode::StackArgs(mainL));
             }
             p->RequestClose();
         }
@@ -780,49 +791,49 @@ static Lode::Table BuildProcessStreamMethods(Lode::State& vm, const std::shared_
 {
     Lode::Table m = vm.CreateTable();
 
-    m.Set("Write", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    m.Set("Write", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<ProcessPipeStream>::Unwrap(vm2, 1);
         if (!self) { vm2.RaiseError("ProcessStream Write: invalid stream"); return Lode::Value(); }
         return self->MethodWrite(vm2, args);
     }));
 
-    m.Set("WriteLine", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    m.Set("WriteLine", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<ProcessPipeStream>::Unwrap(vm2, 1);
         if (!self) { vm2.RaiseError("ProcessStream WriteLine: invalid stream"); return Lode::Value(); }
         return self->MethodWriteLine(vm2, args);
     }));
 
-    m.Set("Read", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    m.Set("Read", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<ProcessPipeStream>::Unwrap(vm2, 1);
         if (!self) { vm2.RaiseError("ProcessStream Read: invalid stream"); return Lode::Value(); }
         return self->MethodRead(vm2, args);
     }));
 
-    m.Set("ReadBuffer", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    m.Set("ReadBuffer", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<ProcessPipeStream>::Unwrap(vm2, 1);
         if (!self) { vm2.RaiseError("ProcessStream ReadBuffer: invalid stream"); return Lode::Value(); }
         return self->MethodReadBuffer(vm2, args);
     }));
 
-    m.Set("ReadLine", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    m.Set("ReadLine", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<ProcessPipeStream>::Unwrap(vm2, 1);
         if (!self) { vm2.RaiseError("ProcessStream ReadLine: invalid stream"); return Lode::Value(); }
         return self->MethodReadLine(vm2, args);
     }));
 
-    m.Set("StartStreaming", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    m.Set("StartStreaming", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<ProcessPipeStream>::Unwrap(vm2, 1);
         if (!self) { vm2.RaiseError("ProcessStream StartStreaming: invalid stream"); return Lode::Value(); }
         return self->MethodStartStreaming(vm2);
     }));
 
-    m.Set("StopStreaming", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    m.Set("StopStreaming", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<ProcessPipeStream>::Unwrap(vm2, 1);
         if (!self) { vm2.RaiseError("ProcessStream StopStreaming: invalid stream"); return Lode::Value(); }
         return self->MethodStopStreaming(vm2);
     }));
 
-    m.Set("Close", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    m.Set("Close", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<ProcessPipeStream>::Unwrap(vm2, 1);
         if (!self) { vm2.RaiseError("ProcessStream Close: invalid stream"); return Lode::Value(); }
         self->RequestClose();
@@ -836,43 +847,43 @@ static Lode::Table BuildProcessMethods(Lode::State& vm, const std::shared_ptr<Pr
 {
     Lode::Table m = vm.CreateTable();
 
-    m.Set("Kill", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    m.Set("Kill", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<Process>::Unwrap(vm2, 1);
         if (!self) { vm2.RaiseError("Process Kill: invalid process"); return Lode::Value(); }
         return self->MethodKill(vm2, args);
     }));
 
-    m.Set("Wait", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    m.Set("Wait", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<Process>::Unwrap(vm2, 1);
         if (!self) { vm2.RaiseError("Process Wait: invalid process"); return Lode::Value(); }
         return self->MethodWait(vm2);
     }));
 
-    m.Set("GetPid", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    m.Set("GetPid", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<Process>::Unwrap(vm2, 1);
         if (!self) return Lode::Value(0.0);
         return self->MethodGetPid(vm2);
     }));
 
-    m.Set("GetExitCode", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    m.Set("GetExitCode", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<Process>::Unwrap(vm2, 1);
         if (!self) return Lode::Value();
         return self->MethodGetExitCode(vm2);
     }));
 
-    m.Set("GetTermSignal", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    m.Set("GetTermSignal", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<Process>::Unwrap(vm2, 1);
         if (!self) return Lode::Value();
         return self->MethodGetTermSignal(vm2);
     }));
 
-    m.Set("IsRunning", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    m.Set("IsRunning", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<Process>::Unwrap(vm2, 1);
         if (!self) return Lode::Value(false);
         return self->MethodIsRunning(vm2);
     }));
 
-    m.Set("Close", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    m.Set("Close", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<Process>::Unwrap(vm2, 1);
         if (!self) { vm2.RaiseError("Process Close: invalid process"); return Lode::Value(); }
         return self->MethodClose(vm2);
@@ -887,7 +898,7 @@ static Lode::Table BuildProcessMethods(Lode::State& vm, const std::shared_ptr<Pr
 // Spawn Function
 // =======================================================
 
-static Lode::Value SpawnProcess(Lode::State& vm, const std::shared_ptr<ProcessManager>& mgr, const std::vector<Lode::Value>& args)
+static Lode::Value SpawnProcess(Lode::State& vm, const std::shared_ptr<ProcessManager>& mgr, Lode::StackArgs args)
 {
     if (mgr->shuttingDown)
     {
@@ -908,7 +919,7 @@ static Lode::Value SpawnProcess(Lode::State& vm, const std::shared_ptr<ProcessMa
     if (args[0].IsString())
     {
         command = args[0].AsString();
-        if (args.size() > 1 && args[1].IsTable())
+        if (args.Size() > 1 && args[1].IsTable())
         {
             optionsTbl = args[1].AsTable();
             hasOpts = true;
@@ -1200,16 +1211,32 @@ void BindSysProcess(Lode::State& vm, Lode::Table& exports, const std::shared_ptr
             return Lode::Value();
         }
         std::string key = args[0].AsString();
-        char buf[4096];
-        size_t size = sizeof(buf);
-        int r = uv_os_getenv(key.c_str(), buf, &size);
-        if (r == UV_ENOENT) {
-            return Lode::Value();
-        } else if (r < 0) {
-            vm.RaiseError(std::string("sys.GetEnv error: ") + uv_strerror(r));
-            return Lode::Value();
+        // Grow-and-retry so values larger than the initial buffer are returned
+        // instead of raising ENOBUFS (same pattern as GetTmpDir/GetHomeDir).
+        size_t cap = 4096;
+        std::string value;
+        for (;;) {
+            std::vector<char> buf(cap);
+            size_t size = buf.size();
+            int r = uv_os_getenv(key.c_str(), buf.data(), &size);
+            if (r == UV_ENOENT) {
+                return Lode::Value();
+            }
+            if (r == UV_ENOBUFS) {
+                if (size > (1u << 20)) { // sane upper bound (1 MiB)
+                    vm.RaiseError("sys.GetEnv error: value too large");
+                    return Lode::Value();
+                }
+                cap = size + 1;
+                continue;
+            }
+            if (r < 0) {
+                vm.RaiseError(std::string("sys.GetEnv error: ") + uv_strerror(r));
+                return Lode::Value();
+            }
+            value.assign(buf.data(), size);
+            return Lode::Value(value);
         }
-        return Lode::Value(std::string(buf, size));
     }));
 
     exports.Set("SetEnv", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
@@ -1250,13 +1277,23 @@ void BindSysProcess(Lode::State& vm, Lode::Table& exports, const std::shared_ptr
         return Lode::Value();
     }));
 
-    exports.Set("exit", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("exit", vm.CreateFastFunction([mgr](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
         int code = 0;
         if (args.Size() > 0 && args[0].IsNumber()) {
             code = static_cast<int>(args[0].AsNumber());
         }
-        std::exit(code);
-        return Lode::Value();
+        // Drain pending async writes (stdio etc.) before terminating so
+        // queued uv_write requests are flushed instead of being lost.
+        // Hard-capped at 500 ms so live timers cannot hang the process.
+        uv_loop_t* loop = vm.GetEventLoop().GetUVLoop();
+        const uint64_t deadlineNs = uv_hrtime() + static_cast<uint64_t>(500) * 1000 * 1000;
+        while (uv_loop_alive(loop) != 0) {
+            if (uv_run(loop, UV_RUN_ONCE) <= 0)
+                break;
+            if (uv_hrtime() > deadlineNs)
+                break;
+        }
+        std::_Exit(code);
     }));
 
     exports.Set("GuessHandleType", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
@@ -1268,7 +1305,7 @@ void BindSysProcess(Lode::State& vm, Lode::Table& exports, const std::shared_ptr
         return Lode::Value(GuessHandleType(fd));
     }));
 
-    exports.Set("spawn", vm.CreateFunction([mgr](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    exports.Set("spawn", vm.CreateFastFunction([mgr](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         return SpawnProcess(vm2, mgr, args);
     }));
 

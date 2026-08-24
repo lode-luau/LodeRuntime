@@ -1,5 +1,3 @@
---!strict
---!native
 
 -- Filesystem module tests. All file/dir operations are confined to a temp
 -- directory resolved relative to this package via path.resolve("@self"), so

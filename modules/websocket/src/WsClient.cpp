@@ -578,7 +578,7 @@ void WsClient::ParseFrames()
     }
 }
 
-Lode::Value WsClient::MethodConnect(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value WsClient::MethodConnect(Lode::State& vm, Lode::StackArgs args)
 {
     if (opened || state == WsState::Closing || state == WsState::Closed)
     {
@@ -595,7 +595,7 @@ Lode::Value WsClient::MethodConnect(Lode::State& vm, const std::vector<Lode::Val
         vm.RaiseError("websocket Connect: socket is closed");
         return Lode::Value();
     }
-    if (args.size() < 2 || !args[1].IsString())
+    if (args.Size() < 2 || !args[1].IsString())
     {
         vm.RaiseError("websocket Connect: url must be a string");
         return Lode::Value();
@@ -630,7 +630,7 @@ Lode::Value WsClient::MethodConnect(Lode::State& vm, const std::vector<Lode::Val
     }
 
     uint64_t timeoutMs = 0;
-    if (args.size() > 2 && !args[2].IsNil())
+    if (args.Size() > 2 && !args[2].IsNil())
     {
         if (!args[2].IsTable())
         {
@@ -740,7 +740,7 @@ void WsClient::SendFrame(uint8_t opcode, const std::vector<char>& payload)
     SendRaw(frame);
 }
 
-Lode::Value WsClient::MethodSend(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value WsClient::MethodSend(Lode::State& vm, Lode::StackArgs args)
 {
     if (closed || closing)
     {
@@ -752,7 +752,7 @@ Lode::Value WsClient::MethodSend(Lode::State& vm, const std::vector<Lode::Value>
         vm.RaiseError("websocket Send: not connected");
         return Lode::Value();
     }
-    if (args.size() < 2 || (!args[1].IsString() && !args[1].IsBuffer()))
+    if (args.Size() < 2 || (!args[1].IsString() && !args[1].IsBuffer()))
     {
         vm.RaiseError("websocket Send: data must be a string or buffer");
         return Lode::Value();
@@ -776,7 +776,7 @@ Lode::Value WsClient::MethodSend(Lode::State& vm, const std::vector<Lode::Value>
     return Lode::Value();
 }
 
-Lode::Value WsClient::MethodPing(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value WsClient::MethodPing(Lode::State& vm, Lode::StackArgs args)
 {
     if (closed || closing)
     {
@@ -788,13 +788,13 @@ Lode::Value WsClient::MethodPing(Lode::State& vm, const std::vector<Lode::Value>
         vm.RaiseError("websocket Ping: not connected");
         return Lode::Value();
     }
-    if (args.size() > 1 && !args[1].IsNil() && !args[1].IsString() && !args[1].IsBuffer())
+    if (args.Size() > 1 && !args[1].IsNil() && !args[1].IsString() && !args[1].IsBuffer())
     {
         vm.RaiseError("websocket Ping: data must be a string or buffer or nil");
         return Lode::Value();
     }
     std::vector<char> data;
-    if (args.size() > 1 && !args[1].IsNil())
+    if (args.Size() > 1 && !args[1].IsNil())
     {
         if (args[1].IsString())
         {
@@ -818,7 +818,7 @@ Lode::Value WsClient::MethodPing(Lode::State& vm, const std::vector<Lode::Value>
     return Lode::Value();
 }
 
-Lode::Value WsClient::MethodClose(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value WsClient::MethodClose(Lode::State& vm, Lode::StackArgs args)
 {
     if (closed || closing || state == WsState::Closed)
     {
@@ -827,7 +827,7 @@ Lode::Value WsClient::MethodClose(Lode::State& vm, const std::vector<Lode::Value
     }
     uint16_t code = kCloseNormal;
     std::string reason;
-    if (args.size() > 1 && !args[1].IsNil())
+    if (args.Size() > 1 && !args[1].IsNil())
     {
         if (!args[1].IsNumber())
         {
@@ -841,7 +841,7 @@ Lode::Value WsClient::MethodClose(Lode::State& vm, const std::vector<Lode::Value
         }
         code = static_cast<uint16_t>(args[1].AsNumber());
     }
-    if (args.size() > 2 && !args[2].IsNil())
+    if (args.Size() > 2 && !args[2].IsNil())
     {
         if (!args[2].IsString())
         {
@@ -967,8 +967,8 @@ void WsClient::OnHandleClosed(uv_handle_t* handle)
 Lode::Value WrapClient(Lode::State& vm, const std::shared_ptr<WsClient>& client, const Lode::Table& methods)
 {
     Lode::Table meta = vm.CreateTable();
-    meta.Set("__index", vm.CreateFunction([client, methods](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
-        std::string key = (args.size() > 1 && args[1].IsString()) ? args[1].AsString() : "";
+    meta.Set("__index", vm.CreateFastFunction([client, methods](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
+        std::string key = (args.Size() > 1 && args[1].IsString()) ? args[1].AsString() : "";
         if (key == "Connected")
             return client->connectedProxy;
         if (key == "MessageReceived")
@@ -982,12 +982,12 @@ Lode::Value WrapClient(Lode::State& vm, const std::shared_ptr<WsClient>& client,
             return value.GetValue();
         return Lode::Value();
     }));
-    meta.Set("__newindex", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    meta.Set("__newindex", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         vm2.RaiseError("websocket: objects are read-only");
         return Lode::Value();
     }));
     meta.Set("__metatable", Lode::Value(std::string("WebSocket")));
-    meta.Set("__tostring", vm.CreateFunction([](Lode::State&, const std::vector<Lode::Value>&) -> Lode::Value {
+    meta.Set("__tostring", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs) -> Lode::Value {
         return Lode::Value(std::string("WebSocket"));
     }));
     Lode::ObjectWrap<WsClient>::Wrap(vm, client, meta);

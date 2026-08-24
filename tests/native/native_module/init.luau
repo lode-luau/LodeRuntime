@@ -37,6 +37,11 @@ export type TickSignal = {
     Wait: (self: TickSignal, timeout: number?) -> string?,
 }
 
+export type CallResult = {
+    ok: boolean,
+    error: string,
+}
+
 export type NativeModule = {
     greet: (name: string?) -> string,
     square: (x: number) -> number,
@@ -50,11 +55,26 @@ export type NativeModule = {
     modernObject: any,
     bufferEndianProbe: () -> { written: string, readInt: number, readFloat: number },
     bufferBoundsProbe: (buf: buffer) -> number,
+    --- Copies bytes over themselves inside a scratch buffer and returns the
+    --- resulting contents (overlapping-copy regression probe).
+    bufferOverlapProbe: () -> string,
+    --- Calls `callable` with the remaining arguments through the Value call
+    --- API; raises if the call fails.
+    callCallable: (callable: any, ...any) -> any,
+    --- Attempts to call `value` without raising; reports the outcome.
+    callNonCallable: (value: any?) -> CallResult,
+    --- Always raises a raw C++ exception from inside an export callback
+    --- (used to prove the runtime survives it).
+    throwRaw: () -> (),
+    --- Table whose __index metamethod always throws.
+    throwingObject: any,
     throwCpp: () -> (),
     getSystemInfo: () -> { platform: string, arch: string },
     utils: NativeUtils,
     sibling: SiblingModule,
     onTick: TickSignal,
+    --- Fires the onTick signal immediately with an optional message.
+    fireOnTick: (message: string?) -> (),
     Vector3: Vector3Statics,
 }
 

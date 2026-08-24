@@ -114,7 +114,7 @@ struct HttpServer : std::enable_shared_from_this<HttpServer>
     void AddConnection(const std::shared_ptr<HttpServerConnection>& conn);
     void RemoveConnection(const std::shared_ptr<HttpServerConnection>& conn);
 
-    Lode::Value MethodListen(Lode::State& vm, const std::vector<Lode::Value>& args);
+    Lode::Value MethodListen(Lode::State& vm, Lode::StackArgs args);
     Lode::Value MethodLocalAddress(Lode::State& vm);
 
     void RequestClose();

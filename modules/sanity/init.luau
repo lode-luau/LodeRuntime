@@ -1,5 +1,4 @@
 --!strict
---!native
 
 local Registry = require("@self/src/Registry")
 local Expect = require("@self/src/Expect")

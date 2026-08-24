@@ -47,7 +47,7 @@ struct WEBSOCKET_API WsServer : std::enable_shared_from_this<WsServer>
     void OnTcpClient(std::shared_ptr<lodetcp::TcpClient> tcpClient);
     void OnTcpError(const std::string& err);
 
-    Lode::Value MethodListen(Lode::State& vm, const std::vector<Lode::Value>& args);
+    Lode::Value MethodListen(Lode::State& vm, Lode::StackArgs args);
     Lode::Value MethodLocalAddress(Lode::State& vm);
 
     void RequestClose();

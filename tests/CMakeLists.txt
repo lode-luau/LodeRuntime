@@ -32,6 +32,10 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/native/abi_mismatch_module/CMakeLists.txt
     add_subdirectory(native/abi_mismatch_module)
 endif()
 
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/native/marshal_module/CMakeLists.txt")
+    add_subdirectory(native/marshal_module)
+endif()
+
 function(lode_add_script_test test_name script_path)
     add_test(
         NAME ${test_name}
@@ -43,6 +47,7 @@ endfunction()
 lode_add_script_test(integration_core_api        native/core_api.luau)
 lode_add_script_test(integration_native_require  native/native_require.luau)
 lode_add_script_test(integration_simd_bench      native/simd_bench.luau)
+lode_add_script_test(integration_marshal_bench   native/marshal_bench.luau)
 lode_add_script_test(integration_config_mismatch native/config_mismatch.luau)
 lode_add_script_test(integration_abi_mismatch  native/abi_mismatch.luau)
 

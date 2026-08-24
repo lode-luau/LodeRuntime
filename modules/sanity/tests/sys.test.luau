@@ -1,5 +1,3 @@
---!strict
---!native
 
 local sanity = require("../init")
 local describe = sanity.describe
@@ -178,5 +176,37 @@ describe("sys", function()
             expect(exitCode).toBe(42)
             expect(child:GetExitCode()).toBe(42)
         end)
+    end)
+end)
+
+describe("sys process identity and env completion", function()
+    it("returns coherent pid/ppid/execPath", function()
+        local pid = sys.GetPid()
+        local ppid = sys.GetPpid()
+        expect(pid).toBeType("number")
+        expect(ppid).toBeType("number")
+        expect(sys.GetExecPath()).toBeType("string")
+        expect(#sys.GetExecPath() > 0).toBe(true)
+    end)
+
+    it("GetMonotonicMs never goes backwards", function()
+        local a = sys.GetMonotonicMs()
+        local b = sys.GetMonotonicMs()
+        expect(b >= a).toBe(true)
+    end)
+
+    it("UnsetEnv removes variables set by SetEnv", function()
+        sys.SetEnv("LODE_SYS_TEST", "x")
+        expect(sys.GetEnv("LODE_SYS_TEST")).toBe("x")
+        sys.UnsetEnv("LODE_SYS_TEST")
+        expect(sys.GetEnv("LODE_SYS_TEST")).toBe(nil)
+        -- unset of missing variable must not raise
+        sys.UnsetEnv("LODE_SYS_TEST_NEVER_SET")
+    end)
+
+    it("EnvEntries lists environment variables including ones we set", function()
+        sys.SetEnv("LODE_ENV_PROBE", "present")
+        local entries = sys.EnvEntries()
+        expect(entries.LODE_ENV_PROBE).toBe("present")
     end)
 end)

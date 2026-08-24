@@ -655,20 +655,20 @@ int HttpServer::MakeSockAddr(const std::string& host, int port, struct sockaddr_
     return UV_EINVAL;
 }
 
-Lode::Value HttpServer::MethodListen(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value HttpServer::MethodListen(Lode::State& vm, Lode::StackArgs args)
 {
     if (listening) { BindFail(vm, "already listening"); return Lode::Value(); }
     if (closing || closed) { BindFail(vm, "server is closed"); return Lode::Value(); }
-    if (args.size() < 2 || !args[1].IsNumber()) { BindFail(vm, "expected port as number"); return Lode::Value(); }
+    if (args.Size() < 2 || !args[1].IsNumber()) { BindFail(vm, "expected port as number"); return Lode::Value(); }
 
     int port = static_cast<int>(args[1].AsNumber());
-    if (args.size() > 2 && !args[2].IsNil() && !args[2].IsString()) {
+    if (args.Size() > 2 && !args[2].IsNil() && !args[2].IsString()) {
         BindFail(vm, "expected host as string");
         return Lode::Value();
     }
-    std::string host = (args.size() > 2 && args[2].IsString()) ? args[2].AsString() : "0.0.0.0";
+    std::string host = (args.Size() > 2 && args[2].IsString()) ? args[2].AsString() : "0.0.0.0";
 
-    if (args.size() > 3 && args[3].IsTable())
+    if (args.Size() > 3 && args[3].IsTable())
     {
         auto opts = args[3].AsTable();
         if (opts.Has("tls") && opts.Get("tls").GetValue().IsBoolean() && opts.Get("tls").GetValue().AsBoolean())
@@ -796,8 +796,8 @@ void HttpServer::OnConnection(uv_stream_t* server, int status)
 Lode::Value WrapServerResponse(Lode::State& vm, const std::shared_ptr<HttpServerResponse>& res, const Lode::Table& methods)
 {
     Lode::Table meta = vm.CreateTable();
-    meta.Set("__index", vm.CreateFunction([res, methods](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
-        std::string key = (args.size() > 1 && args[1].IsString()) ? args[1].AsString() : "";
+    meta.Set("__index", vm.CreateFastFunction([res, methods](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
+        std::string key = (args.Size() > 1 && args[1].IsString()) ? args[1].AsString() : "";
         if (key == "status") return Lode::Value(static_cast<double>(res->statusCode));
         if (key == "statusText") return Lode::Value(res->statusText);
         if (key == "headersSent") return Lode::Value(res->finished);
@@ -817,13 +817,13 @@ Lode::Value WrapServerResponse(Lode::State& vm, const std::shared_ptr<HttpServer
         return Lode::Value();
     }));
 
-    meta.Set("__newindex", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    meta.Set("__newindex", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         vm2.RaiseError("ServerResponse: objects are read-only");
         return Lode::Value();
     }));
 
     meta.Set("__metatable", Lode::Value(std::string("ServerResponse")));
-    meta.Set("__tostring", vm.CreateFunction([](Lode::State&, const std::vector<Lode::Value>&) -> Lode::Value {
+    meta.Set("__tostring", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs) -> Lode::Value {
         return Lode::Value(std::string("ServerResponse"));
     }));
 
@@ -836,20 +836,20 @@ Lode::Value WrapServerResponse(Lode::State& vm, const std::shared_ptr<HttpServer
 Lode::Value WrapServer(Lode::State& vm, const std::shared_ptr<HttpServer>& server, const Lode::Table& methods)
 {
     Lode::Table meta = vm.CreateTable();
-    meta.Set("__index", vm.CreateFunction([server, methods](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
-        std::string key = (args.size() > 1 && args[1].IsString()) ? args[1].AsString() : "";
+    meta.Set("__index", vm.CreateFastFunction([server, methods](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
+        std::string key = (args.Size() > 1 && args[1].IsString()) ? args[1].AsString() : "";
         if (key == "RequestReceived") return server->requestProxy;
         if (key == "ErrorOccurred") return server->errorProxy;
         auto value = methods.Get(key);
         if (value.IsOk() && !value.GetValue().IsNil()) return value.GetValue();
         return Lode::Value();
     }));
-    meta.Set("__newindex", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    meta.Set("__newindex", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         vm2.RaiseError("HttpServer: objects are read-only");
         return Lode::Value();
     }));
     meta.Set("__metatable", Lode::Value(std::string("HttpServer")));
-    meta.Set("__tostring", vm.CreateFunction([](Lode::State&, const std::vector<Lode::Value>&) -> Lode::Value {
+    meta.Set("__tostring", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs) -> Lode::Value {
         return Lode::Value(std::string("HttpServer"));
     }));
     Lode::ObjectWrap<HttpServer>::Wrap(vm, server, meta);
@@ -862,32 +862,32 @@ Lode::Table BuildResponseMethods(Lode::State& vm)
 {
     Lode::Table m = vm.CreateTable();
 
-    m.Set("SetStatus", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    m.Set("SetStatus", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<HttpServerResponse>::Unwrap(vm2, 1);
         if (!self) { vm2.RaiseError("ServerResponse SetStatus: invalid response"); return Lode::Value(); }
-        if (args.size() > 1 && args[1].IsNumber())
+        if (args.Size() > 1 && args[1].IsNumber())
         {
             int code = static_cast<int>(args[1].AsNumber());
-            std::string text = (args.size() > 2 && args[2].IsString()) ? args[2].AsString() : "";
+            std::string text = (args.Size() > 2 && args[2].IsString()) ? args[2].AsString() : "";
             self->SetStatus(code, text);
         }
         return Lode::Value();
     }));
 
-    m.Set("SetHeader", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    m.Set("SetHeader", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<HttpServerResponse>::Unwrap(vm2, 1);
         if (!self) { vm2.RaiseError("ServerResponse SetHeader: invalid response"); return Lode::Value(); }
-        if (args.size() > 2 && args[1].IsString() && args[2].IsString())
+        if (args.Size() > 2 && args[1].IsString() && args[2].IsString())
         {
             self->SetHeader(args[1].AsString(), args[2].AsString());
         }
         return Lode::Value();
     }));
 
-    m.Set("Write", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    m.Set("Write", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<HttpServerResponse>::Unwrap(vm2, 1);
         if (!self) { vm2.RaiseError("ServerResponse Write: invalid response"); return Lode::Value(); }
-        if (args.size() > 1)
+        if (args.Size() > 1)
         {
             if (args[1].IsString())
             {
@@ -904,10 +904,10 @@ Lode::Table BuildResponseMethods(Lode::State& vm)
         return Lode::Value();
     }));
 
-    m.Set("End", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    m.Set("End", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<HttpServerResponse>::Unwrap(vm2, 1);
         if (!self) { vm2.RaiseError("ServerResponse End: invalid response"); return Lode::Value(); }
-        if (args.size() > 1)
+        if (args.Size() > 1)
         {
             if (args[1].IsString())
             {
@@ -934,12 +934,12 @@ Lode::Table BuildResponseMethods(Lode::State& vm)
 
     m.Set("Send", m.Get("End").GetValue());
 
-    m.Set("Json", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    m.Set("Json", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<HttpServerResponse>::Unwrap(vm2, 1);
         if (!self) { vm2.RaiseError("ServerResponse Json: invalid response"); return Lode::Value(); }
         self->SetHeader("Content-Type", "application/json");
         std::string jsonStr = "{}";
-        if (args.size() > 1)
+        if (args.Size() > 1)
         {
             if (args[1].IsString()) jsonStr = args[1].AsString();
         }
@@ -961,34 +961,34 @@ Lode::Table BuildServerMethods(Lode::State& vm, const std::shared_ptr<HttpManage
 {
     Lode::Table m = vm.CreateTable();
 
-    m.Set("Listen", vm.CreateFunction([mgr](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    m.Set("Listen", vm.CreateFastFunction([mgr](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<HttpServer>::Unwrap(vm2, 1);
         if (!self) { vm2.RaiseError("Server Listen: invalid Server"); return Lode::Value(); }
         if (mgr->shuttingDown) { vm2.RaiseError("Server Listen: runtime is shutting down"); return Lode::Value(); }
         return self->MethodListen(vm2, args);
     }));
 
-    m.Set("Close", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    m.Set("Close", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<HttpServer>::Unwrap(vm2, 1);
         if (!self) { vm2.RaiseError("Server Close: invalid Server"); return Lode::Value(); }
         self->RequestClose();
         return Lode::Value();
     }));
 
-    m.Set("Destroy", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
+    m.Set("Destroy", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<HttpServer>::Unwrap(vm2, 1);
         if (!self) { vm2.RaiseError("Server Destroy: invalid Server"); return Lode::Value(); }
         self->RequestClose();
         return Lode::Value();
     }));
 
-    m.Set("IsListening", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    m.Set("IsListening", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<HttpServer>::Unwrap(vm2, 1);
         if (!self) return Lode::Value(false);
         return Lode::Value(self->listening && !self->closing && !self->closed);
     }));
 
-    m.Set("LocalAddress", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    m.Set("LocalAddress", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<HttpServer>::Unwrap(vm2, 1);
         if (!self) { vm2.RaiseError("Server LocalAddress: invalid Server"); return Lode::Value(); }
         return self->MethodLocalAddress(vm2);

@@ -30,11 +30,42 @@ struct State::Impl
     CodeGenMode codeGenMode = CodeGenMode::NativeModulesOnly;
 };
 
+namespace
+{
+// Process-unique addresses used as lightuserdata keys into each VM's
+// registry. They cache the shared Impl / event-loop raw pointers so
+// non-owning State views (one per native callback) can be built without
+// touching the lifetime mutex/map or hashing string keys. Each VM has its
+// own registry, so the same key is safe across runtimes.
+char g_implCacheKey = 0;
+char g_loopCacheKey = 0;
+
+void RegistrySetPointer(lua_State* L, void* key, void* value)
+{
+    lua_pushlightuserdata(L, key);
+    lua_pushlightuserdata(L, value);
+    lua_settable(L, LUA_REGISTRYINDEX);
+}
+
+void* RegistryGetPointer(lua_State* L, void* key)
+{
+    lua_pushlightuserdata(L, key);
+    lua_rawget(L, LUA_REGISTRYINDEX);
+    void* result = lua_touserdata(L, -1);
+    lua_pop(L, 1);
+    return result;
+}
+} // namespace
+
 State::State() : L_(luaL_newstate()), ownsState_(true), impl_(std::make_unique<Impl>())
 {
     if (L_)
     {
         impl_->lifetime = Detail::RegisterStateLifetime(L_);
+        // Publish this root Impl so every non-owning State view (native
+        // callbacks, coroutines) shares it instead of building its own.
+        if (impl_->lifetime)
+            impl_->lifetime->sharedImpl = impl_;
         try
         {
             impl_->ownedEventLoop = std::make_unique<EventLoop>();
@@ -52,6 +83,9 @@ State::State() : L_(luaL_newstate()), ownsState_(true), impl_(std::make_unique<I
         impl_->eventLoop = impl_->ownedEventLoop.get();
         lua_pushlightuserdata(L_, impl_->eventLoop);
         lua_setfield(L_, LUA_REGISTRYINDEX, "_LODE_EVENT_LOOP");
+        // Publish O(1)-lookup pointers for non-owning State views.
+        RegistrySetPointer(L_, &g_implCacheKey, impl_.get());
+        RegistrySetPointer(L_, &g_loopCacheKey, impl_->eventLoop);
         luaL_openlibs(L_);
         SetupModuleLoader(L_, &impl_->registry, impl_->modulePaths);
 
@@ -62,15 +96,44 @@ State::State() : L_(luaL_newstate()), ownsState_(true), impl_(std::make_unique<I
     }
 }
 
-State::State(lua_State* L) : L_(L), ownsState_(false), impl_(std::make_unique<Impl>())
+State::State(lua_State* L) : L_(L), ownsState_(false)
 {
-    if (L_)
+    if (!L_)
+        return;
+
+    // Fast path: the root VM published raw pointers in its registry, so
+    // building a view is just two table lookups — no mutex, no map lookup,
+    // no heap allocation. The Impl is owned by the root's StateLifetime
+    // slot; this view holds a non-owning shared_ptr, valid for as long as
+    // the VM is alive (a precondition of any callback running on it).
+    // NOTE: the Impl allocation must stay out of the init list, otherwise
+    // it runs unconditionally before this branch replaces it.
+    auto* cachedImpl = static_cast<Impl*>(RegistryGetPointer(L_, &g_implCacheKey));
+    if (cachedImpl)
     {
-        impl_->lifetime = Detail::GetStateLifetime(L_);
-        lua_getfield(L_, LUA_REGISTRYINDEX, "_LODE_EVENT_LOOP");
-        impl_->eventLoop = static_cast<EventLoop*>(lua_touserdata(L_, -1));
-        lua_pop(L_, 1);
+        impl_ = std::shared_ptr<Impl>(std::shared_ptr<void>(), cachedImpl);
+        if (auto* cachedLoop = static_cast<EventLoop*>(RegistryGetPointer(L_, &g_loopCacheKey)))
+            impl_->eventLoop = cachedLoop;
+        return;
     }
+
+    // Slow path (views created before/without a publishing root): share via
+    // the lifetime map, or build a throwaway Impl as a last resort.
+    auto lifetime = Detail::GetStateLifetime(L_);
+    if (lifetime && lifetime->sharedImpl)
+    {
+        impl_ = std::static_pointer_cast<Impl>(lifetime->sharedImpl);
+    }
+    else
+    {
+        impl_ = std::make_shared<Impl>();
+        if (lifetime)
+            lifetime->sharedImpl = impl_;
+    }
+    impl_->lifetime = lifetime;
+    lua_getfield(L_, LUA_REGISTRYINDEX, "_LODE_EVENT_LOOP");
+    impl_->eventLoop = static_cast<EventLoop*>(lua_touserdata(L_, -1));
+    lua_pop(L_, 1);
 }
 
 lua_State* State::GetMainThread() const
@@ -338,6 +401,14 @@ Value State::CreateFastFunction(const std::function<Value(State& vm, StackArgs a
 {
     if (!L_) return Value();
     return Detail::CreateClosure(L_, "CFunctionFast", [fn](State& vm, lua_State* L) -> Value {
+        return fn(vm, StackArgs(L));
+    });
+}
+
+Value State::CreateFastFunctionN(const std::function<int(State& vm, StackArgs args)>& fn)
+{
+    if (!L_) return Value();
+    return Detail::CreateClosureN(L_, "CFunctionFastN", [fn](State& vm, lua_State* L) -> int {
         return fn(vm, StackArgs(L));
     });
 }

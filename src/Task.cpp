@@ -85,6 +85,9 @@ struct TimerData
     Coroutine coroutine;
     bool recurring = false;
     std::vector<Value> args;
+    // task.wait(): resume the waiter with the real elapsed time in seconds.
+    bool resumeWithElapsed = false;
+    uint64_t startedAtNs = 0;
     uv_timer_t handle{};
 };
 
@@ -113,7 +116,13 @@ static void OnTimerFired(uv_timer_t* handle)
     {
         try
         {
-            auto res = data->coroutine.Resume(data->args);
+            std::vector<Value> resumeArgs = data->args;
+            if (data->resumeWithElapsed)
+            {
+                const double elapsedSeconds = static_cast<double>(uv_hrtime() - data->startedAtNs) / 1e9;
+                resumeArgs.push_back(Value(elapsedSeconds));
+            }
+            auto res = data->coroutine.Resume(resumeArgs);
             if (res.IsError())
             {
                 if (data->ctx && data->ctx->mainThread &&
@@ -274,6 +283,8 @@ int Task::Wait(State& vm, double seconds)
     timerData->ctx = ctx;
     timerData->coroutine = Coroutine(vm.GetLuaState());
     timerData->recurring = false;
+    timerData->resumeWithElapsed = true;
+    timerData->startedAtNs = uv_hrtime();
 
     if (!StartTimer(vm, ctx, "wait", timerData, seconds, 1000.0, "wait duration", false))
         return 0;

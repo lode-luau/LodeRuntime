@@ -31,6 +31,7 @@ void TcpClient::InitSignals(Lode::State& vm)
 
 void TcpClient::FireError(const std::string& message)
 {
+    closeReason = message;
     if (mgr->shuttingDown || closed || closing)
         return;
     if (cppOnError)
@@ -105,14 +106,16 @@ void TcpClient::StartReading()
 void TcpClient::StartTcpConnect(const struct sockaddr* addr)
 {
     std::memset(&tcp, 0, sizeof(tcp));
-    tcpInited = true;
     tcp.data = this;
     int r = uv_tcp_init(loop, &tcp);
     if (r != 0)
     {
+        // The handle was never initialized, so keep tcpInited false to make
+        // sure no later uv_close runs over a zeroed handle.
         FailConnect(std::string("tcp: ") + uv_strerror(r));
         return;
     }
+    tcpInited = true;
     std::memset(&connReq, 0, sizeof(connReq));
     connReq.data = this;
     r = uv_tcp_connect(&connReq, &tcp, addr, OnConnected);
@@ -130,11 +133,14 @@ int TcpClient::BeginConnect()
         std::memset(&timer, 0, sizeof(timer));
         timer.data = this;
         int tr = uv_timer_init(loop, &timer);
-        if (tr == 0)
+        if (tr != 0)
         {
-            timerInited = true;
-            uv_timer_start(&timer, OnConnectTimeout, connectTimeoutMs, 0);
+            // Without the timer there is no connect timeout; fail loudly
+            // instead of connecting with an unbounded deadline.
+            return tr;
         }
+        timerInited = true;
+        uv_timer_start(&timer, OnConnectTimeout, connectTimeoutMs, 0);
     }
 
     struct sockaddr_storage addr;
@@ -179,7 +185,7 @@ int TcpClient::ConnectNative(const std::string& host, int port, uint64_t timeout
     return r;
 }
 
-Lode::Value TcpClient::MethodConnect(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value TcpClient::MethodConnect(Lode::State& vm, Lode::StackArgs args)
 {
     if (connected)
     {
@@ -196,12 +202,12 @@ Lode::Value TcpClient::MethodConnect(Lode::State& vm, const std::vector<Lode::Va
         vm.RaiseError("socket Connect: socket is closed");
         return Lode::Value();
     }
-    if (args.size() < 2 || !args[1].IsString())
+    if (args.Size() < 2 || !args[1].IsString())
     {
         vm.RaiseError("socket Connect: host must be a string");
         return Lode::Value();
     }
-    if (args.size() < 3 || !args[2].IsNumber())
+    if (args.Size() < 3 || !args[2].IsNumber())
     {
         vm.RaiseError("socket Connect: port must be a number");
         return Lode::Value();
@@ -220,7 +226,7 @@ Lode::Value TcpClient::MethodConnect(Lode::State& vm, const std::vector<Lode::Va
     }
     uint64_t timeoutMs = 0;
     bool reqTls = false;
-    if (args.size() > 3 && !args[3].IsNil())
+    if (args.Size() > 3 && !args[3].IsNil())
     {
         if (args[3].IsNumber())
         {
@@ -355,7 +361,7 @@ void TcpClient::SendNative(const char* data, size_t size)
     }
 }
 
-Lode::Value TcpClient::MethodSend(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value TcpClient::MethodSend(Lode::State& vm, Lode::StackArgs args)
 {
     if (closed || closing)
     {
@@ -367,7 +373,7 @@ Lode::Value TcpClient::MethodSend(Lode::State& vm, const std::vector<Lode::Value
         vm.RaiseError("socket Send: not connected");
         return Lode::Value();
     }
-    if (args.size() < 2 || (!args[1].IsString() && !args[1].IsBuffer()))
+    if (args.Size() < 2 || (!args[1].IsString() && !args[1].IsBuffer()))
     {
         vm.RaiseError("socket Send: data must be a string or buffer");
         return Lode::Value();
@@ -415,14 +421,14 @@ Lode::Value TcpClient::MethodLocalAddress(Lode::State& vm)
     return Lode::Value(t);
 }
 
-Lode::Value TcpClient::MethodSetNoDelay(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value TcpClient::MethodSetNoDelay(Lode::State& vm, Lode::StackArgs args)
 {
     if (!connected || closed)
     {
         vm.RaiseError("socket SetNoDelay: not connected");
         return Lode::Value();
     }
-    if (args.size() < 2 || !args[1].IsBoolean())
+    if (args.Size() < 2 || !args[1].IsBoolean())
     {
         vm.RaiseError("socket SetNoDelay: enabled must be a boolean");
         return Lode::Value();
@@ -434,20 +440,20 @@ Lode::Value TcpClient::MethodSetNoDelay(Lode::State& vm, const std::vector<Lode:
     return Lode::Value();
 }
 
-Lode::Value TcpClient::MethodSetKeepAlive(Lode::State& vm, const std::vector<Lode::Value>& args)
+Lode::Value TcpClient::MethodSetKeepAlive(Lode::State& vm, Lode::StackArgs args)
 {
     if (!connected || closed)
     {
         vm.RaiseError("socket SetKeepAlive: not connected");
         return Lode::Value();
     }
-    if (args.size() < 2 || !args[1].IsBoolean())
+    if (args.Size() < 2 || !args[1].IsBoolean())
     {
         vm.RaiseError("socket SetKeepAlive: enabled must be a boolean");
         return Lode::Value();
     }
     unsigned int delay = 0;
-    if (args.size() > 2 && !args[2].IsNil())
+    if (args.Size() > 2 && !args[2].IsNil())
     {
         if (!args[2].IsNumber() || args[2].AsNumber() < 0)
         {
@@ -518,8 +524,40 @@ void TcpClient::RequestClose()
     CloseHandles();
 }
 
+Lode::Value TcpClient::MethodEnd(Lode::State& vm)
+{
+    if (!connected || closing || closed)
+    {
+        vm.RaiseError("socket End: not connected");
+        return Lode::Value();
+    }
+    if (shutdownQueued)
+        return Lode::Value(); // idempotent
+    std::memset(&shutdownReq, 0, sizeof(shutdownReq));
+    shutdownReq.data = this;
+    const int r = uv_shutdown(&shutdownReq, reinterpret_cast<uv_stream_t*>(&tcp), OnShutdown);
+    if (r != 0)
+    {
+        vm.RaiseError(std::string("socket End: ") + uv_strerror(r));
+        return Lode::Value();
+    }
+    shutdownQueued = true;
+    // Writes are rejected from now on, but the remote half stays readable
+    // until EOF arrives through OnRead.
+    connected = false;
+    return Lode::Value();
+}
+
+void TcpClient::OnShutdown(uv_shutdown_t* req, int status)
+{
+    auto* self = static_cast<TcpClient*>(req->data);
+    if (status != 0 && self && !self->closing && !self->closed)
+        self->FireError(std::string("shutdown: ") + uv_strerror(status));
+}
+
 void TcpClient::FailConnect(const std::string& message)
 {
+    closeReason = message;
     if (closing)
         return;
     closing = true;
@@ -551,6 +589,8 @@ void TcpClient::FinishClosed()
             disconnectedFired = true;
             if (cppOnDisconnected)
                 cppOnDisconnected();
+            else if (!closeReason.empty())
+                disconnectedSig->Fire(Lode::Value(closeReason));
             else
                 disconnectedSig->Fire();
         }
@@ -752,6 +792,7 @@ void TcpClient::OnRead(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf)
     }
     else if (nread == UV_EOF)
     {
+        self->closeReason = "eof"; // remote half-closed the connection
         self->RequestClose();
     }
     else if (nread < 0)
@@ -777,8 +818,8 @@ void TcpClient::OnWritten(uv_write_t* req, int status)
 Lode::Value WrapClient(Lode::State& vm, const std::shared_ptr<TcpClient>& client, const Lode::Table& methods)
 {
     Lode::Table meta = vm.CreateTable();
-    meta.Set("__index", vm.CreateFunction([client, methods](Lode::State& vm2, const std::vector<Lode::Value>& args) -> Lode::Value {
-        std::string key = (args.size() > 1 && args[1].IsString()) ? args[1].AsString() : "";
+    meta.Set("__index", vm.CreateFastFunction([client, methods](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
+        std::string key = (args.Size() > 1 && args[1].IsString()) ? args[1].AsString() : "";
         if (key == "Connected")
             return client->connectedProxy;
         if (key == "MessageReceived")
@@ -792,12 +833,12 @@ Lode::Value WrapClient(Lode::State& vm, const std::shared_ptr<TcpClient>& client
             return value.GetValue();
         return Lode::Value();
     }));
-    meta.Set("__newindex", vm.CreateFunction([](Lode::State& vm2, const std::vector<Lode::Value>&) -> Lode::Value {
+    meta.Set("__newindex", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         vm2.RaiseError("socket: objects are read-only");
         return Lode::Value();
     }));
     meta.Set("__metatable", Lode::Value(std::string("TcpSocket")));
-    meta.Set("__tostring", vm.CreateFunction([](Lode::State&, const std::vector<Lode::Value>&) -> Lode::Value {
+    meta.Set("__tostring", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs) -> Lode::Value {
         return Lode::Value(std::string("TcpSocket"));
     }));
     Lode::ObjectWrap<TcpClient>::Wrap(vm, client, meta);

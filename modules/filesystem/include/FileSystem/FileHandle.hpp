@@ -27,12 +27,12 @@ public:
     void FinishClosed();
     void CheckClosed();
     
-    Lode::Value MethodRead(Lode::State& vm, const std::vector<Lode::Value>& args);
-    Lode::Value MethodReadBuffer(Lode::State& vm, const std::vector<Lode::Value>& args);
-    Lode::Value MethodWrite(Lode::State& vm, const std::vector<Lode::Value>& args);
-    Lode::Value MethodSeek(Lode::State& vm, const std::vector<Lode::Value>& args);
-    Lode::Value MethodStat(Lode::State& vm, const std::vector<Lode::Value>& args);
-    Lode::Value MethodSync(Lode::State& vm, const std::vector<Lode::Value>& args);
+    Lode::Value MethodRead(Lode::State& vm, Lode::StackArgs args);
+    Lode::Value MethodReadBuffer(Lode::State& vm, Lode::StackArgs args);
+    Lode::Value MethodWrite(Lode::State& vm, Lode::StackArgs args);
+    Lode::Value MethodSeek(Lode::State& vm, Lode::StackArgs args);
+    Lode::Value MethodStat(Lode::State& vm, Lode::StackArgs args);
+    Lode::Value MethodSync(Lode::State& vm, Lode::StackArgs args);
 };
 
 Lode::Value WrapFileHandle(Lode::State& vm, const std::shared_ptr<FileHandle>& handle, const Lode::Table& methods);
