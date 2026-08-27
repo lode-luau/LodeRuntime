@@ -84,17 +84,17 @@ if(NOT result EQUAL 0)
     message(FATAL_ERROR "Generated native project did not validate:\n${output}\n${error}")
 endif()
 
-set(sdk_root "${test_root}/sdk")
+set(lode_root "${test_root}/lode-development")
 execute_process(
-    COMMAND "${CMAKE_COMMAND}" --install "${LODE_BUILD_DIR}" --config "${LODE_CONFIGURATION}" --component LodeSDK --prefix "${sdk_root}"
+    COMMAND "${CMAKE_COMMAND}" --install "${LODE_BUILD_DIR}" --config "${LODE_CONFIGURATION}" --component Lode --prefix "${lode_root}"
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
 if(NOT result EQUAL 0)
-    message(FATAL_ERROR "Could not install the current SDK for the generated native project:\n${output}\n${error}")
+    message(FATAL_ERROR "Could not install the current Lode distribution for the generated module project:\n${output}\n${error}")
 endif()
 set(native_configure_command
     "${CMAKE_COMMAND}" -S "${native_root}" -B "${native_root}/build"
     -G "${LODE_GENERATOR}"
-    "-DCMAKE_PREFIX_PATH=${sdk_root}")
+    "-DCMAKE_PREFIX_PATH=${lode_root}")
 if(LODE_MULTI_CONFIG)
     list(APPEND native_configure_command "-DCMAKE_CONFIGURATION_TYPES=${LODE_CONFIGURATION}")
 else()

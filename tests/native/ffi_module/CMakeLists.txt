@@ -4,7 +4,7 @@ project(ffi_module LANGUAGES CXX)
 # A small, self-contained shared library used to exercise the ffi module in
 # CTest.  Do not replace this with libc/libm: minimal Linux images such as
 # Alpine use musl and do not provide libc.so.6.
-lode_add_native_module(ffi_module
+lode_add_module(ffi_module
     SOURCES src/ffi_module.cpp
 )
 

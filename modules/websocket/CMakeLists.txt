@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(websocket LANGUAGES CXX)
 
-lode_add_native_module(websocket
+lode_add_module(websocket
     SOURCES
         src/Main.cpp
         src/WsHelpers.cpp

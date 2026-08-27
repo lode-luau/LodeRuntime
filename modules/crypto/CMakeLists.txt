@@ -6,7 +6,7 @@ if(NOT WIN32)
     return()
 endif()
 
-lode_add_native_module(crypto
+lode_add_module(crypto
     SOURCES
         src/Main.cpp
         src/CryptoCommon.cpp

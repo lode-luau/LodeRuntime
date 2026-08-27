@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(udp LANGUAGES CXX)
 
-lode_add_native_module(udp
+lode_add_module(udp
     SOURCES
         src/Main.cpp
         src/UdpSocket.cpp

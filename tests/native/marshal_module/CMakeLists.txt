@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(marshal_module LANGUAGES CXX)
 
-lode_add_native_module(marshal_module
+lode_add_module(marshal_module
     SOURCES
         src/marshal_module.cpp
 )

@@ -25,7 +25,7 @@ project(LodeRuntime VERSION 1.0.0 LANGUAGES C CXX)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
-set(LODE_ABI_ID "lode-abi-1" CACHE STRING "Native ABI identifier exported by the Lode SDK")
+set(LODE_ABI_ID "lode-abi-1" CACHE STRING "ABI identifier exported by Lode modules")
 
 if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Debug CACHE STRING "Build type" FORCE)
@@ -39,7 +39,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Synchronize MSVC C++ Runtime DLLs (/MDd for Debug, /MD for Release across all dependencies)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
 
-include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/LodeNativeModule.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/LodeModule.cmake")
 
 # Cross-platform binary output directory configuration (Separated by Build Configuration)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
@@ -87,7 +87,7 @@ include(FetchContent)
 
 # These dependencies are provided by vcpkg in manifest mode. Luau and libuv
 # remain FetchContent dependencies because Lode exports their build targets as
-# part of the installed SDK; libffi has its own module-specific FetchContent
+# part of the installed Lode distribution; libffi has its own module-specific FetchContent
 # integration and must remain there as well.
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(RapidJSON CONFIG REQUIRED)
@@ -136,7 +136,7 @@ FetchContent_Declare(
 )
 
 # FetchContent projects are build dependencies, not part of Lode's install
-# tree. Prevent their own install scripts from being pulled into the SDK
+# tree. Prevent their own install scripts from being pulled into the Lode distribution
 # package; Lode exports the targets and headers it intentionally supports
 # below.
 set(INSTALL_PROJECT OFF CACHE BOOL "" FORCE)
@@ -265,7 +265,7 @@ endif()
 target_compile_definitions(LodeCore PUBLIC LODE_BUILD_CONFIG_NAME=$<CONFIG> LODE_HAS_BUILD_CONFIG)
 target_compile_definitions(LodeCore PUBLIC LODE_ABI_ID=\"${LODE_ABI_ID}\")
 
-# Public SDK target names. LodeCore remains the implementation target used by
+# Public Lode target names. LodeCore remains the implementation target used by
 # this superbuild; the namespaced targets are the stable package-facing API.
 set_target_properties(LodeCore PROPERTIES EXPORT_NAME Core)
 add_library(LodeModule INTERFACE)
@@ -377,35 +377,35 @@ endforeach()
 
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/"
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
-    COMPONENT LodeSDK
+    COMPONENT Lode
 )
 
 foreach(LODE_LUAU_INCLUDE_DIR IN LISTS LODE_LUAU_INCLUDE_DIRS)
     install(DIRECTORY "${LODE_LUAU_INCLUDE_DIR}/"
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
-        COMPONENT LodeSDK
+        COMPONENT Lode
     )
 endforeach()
 
 install(TARGETS LodeCore LodeModule ${LODE_LUAU_TARGETS} uv
     EXPORT LodeTargets
-    RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}/$<CONFIG>" COMPONENT LodeSDK
-    LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}/$<CONFIG>" COMPONENT LodeSDK
-    ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}/$<CONFIG>" COMPONENT LodeSDK
+    RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}/$<CONFIG>" COMPONENT Lode
+    LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}/$<CONFIG>" COMPONENT Lode
+    ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}/$<CONFIG>" COMPONENT Lode
 )
 
 install(TARGETS lode
-    RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}/$<CONFIG>" COMPONENT LodeSDK
-    BUNDLE DESTINATION . COMPONENT LodeSDK
+    RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}/$<CONFIG>" COMPONENT Lode
+    BUNDLE DESTINATION . COMPONENT Lode
 )
 
 set(LODE_INSTALL_CMAKEDIR "${CMAKE_INSTALL_LIBDIR}/cmake/Lode")
 
-lode_get_platform_name(LODE_SDK_PLATFORM)
-lode_get_architecture_name(LODE_SDK_ARCHITECTURE)
+lode_get_platform_name(LODE_PLATFORM)
+lode_get_architecture_name(LODE_ARCHITECTURE)
 configure_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/lode-sdk.json.in"
-    "${CMAKE_CURRENT_BINARY_DIR}/lode-sdk.json"
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/lode-install.json.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/lode-install.json"
     @ONLY
 )
 
@@ -419,8 +419,8 @@ configure_package_config_file(
 # builds (1.0.0-nightly.YYYYMMDD.N). The nightly tag is prerelease per SemVer
 # and CMake's version comparison treats 1.0.0-nightly < 1.0.0, so exposing the
 # nightly string here would break find_package(Lode 1.0.0). The exact nightly
-# is authoritative in the SDK's VERSION file and lode-sdk.json (see
-# nightly.yml:138 / cmake/lode-sdk.json.in), while the CMake package version
+# is authoritative in the Lode VERSION file and lode-install.json (see
+# nightly.yml / cmake/lode-install.json.in), while the CMake package version
 # remains 1.0.0 with SameMajorVersion compatibility.
 write_basic_package_version_file(
     "${CMAKE_CURRENT_BINARY_DIR}/LodeConfigVersion.cmake"
@@ -432,18 +432,18 @@ install(EXPORT LodeTargets
     FILE LodeTargets.cmake
     NAMESPACE Lode::
     DESTINATION "${LODE_INSTALL_CMAKEDIR}"
-    COMPONENT LodeSDK
+    COMPONENT Lode
 )
 
-install(FILES "${CMAKE_CURRENT_BINARY_DIR}/lode-sdk.json"
-    DESTINATION .
-    COMPONENT LodeSDK
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/lode-install.json"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/lode"
+    COMPONENT Lode
 )
 
 install(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/LodeConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/LodeConfigVersion.cmake"
-    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/LodeNativeModule.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/LodeModule.cmake"
     DESTINATION "${LODE_INSTALL_CMAKEDIR}"
-    COMPONENT LodeSDK
+    COMPONENT Lode
 )

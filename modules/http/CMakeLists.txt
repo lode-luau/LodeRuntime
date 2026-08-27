@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(http LANGUAGES CXX)
 
-lode_add_native_module(http
+lode_add_module(http
     SOURCES
         src/Main.cpp
         src/HttpManager.cpp

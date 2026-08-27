@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(filesystem LANGUAGES CXX)
 
-lode_add_native_module(filesystem
+lode_add_module(filesystem
     SOURCES
         src/Main.cpp
         src/FileHandle.cpp

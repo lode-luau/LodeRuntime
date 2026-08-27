@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(stdio LANGUAGES CXX)
 
-lode_add_native_module(stdio
+lode_add_module(stdio
     SOURCES
         src/Main.cpp
         src/StdioManager.cpp

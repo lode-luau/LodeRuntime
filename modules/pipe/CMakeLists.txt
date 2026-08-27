@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(pipe LANGUAGES CXX)
 
-lode_add_native_module(pipe
+lode_add_module(pipe
     SOURCES
         src/Main.cpp
         src/PipeManager.cpp

@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(tcp LANGUAGES CXX)
 
-lode_add_native_module(tcp
+lode_add_module(tcp
     SOURCES
         src/Main.cpp
         src/Resolve.cpp

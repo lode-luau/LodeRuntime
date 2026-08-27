@@ -4,7 +4,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(task LANGUAGES CXX)
 
-lode_add_native_module(task
+lode_add_module(task
     SOURCES
         src/task.cpp
 )

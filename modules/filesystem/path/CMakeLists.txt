@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(path LANGUAGES CXX)
 
-lode_add_native_module(path
+lode_add_module(path
     SOURCES
         src/Main.cpp
         src/Path.cpp

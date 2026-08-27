@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(sys LANGUAGES CXX)
 
-lode_add_native_module(sys
+lode_add_module(sys
     SOURCES
         src/Main.cpp
         src/SysInfo.cpp

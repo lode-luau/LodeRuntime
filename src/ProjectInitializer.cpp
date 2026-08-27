@@ -208,7 +208,7 @@ ProjectInitResult InitializeProject(const fs::path& projectRoot, const ProjectIn
         const std::string cmake = "cmake_minimum_required(VERSION 3.20)\n"
             "project(" + options.name + " LANGUAGES CXX)\n\n"
             "find_package(Lode CONFIG REQUIRED)\n\n"
-            "lode_add_native_module(" + options.name + "\n"
+            "lode_add_module(" + options.name + "\n"
             "    SOURCES src/main.cpp\n"
             ")\n";
         WriteTextFile(root / "CMakeLists.txt", cmake, result);

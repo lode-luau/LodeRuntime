@@ -63,7 +63,7 @@ endforeach()
 
 set(LODE_FFI_LIB_TARGET ffi_static)
 
-lode_add_native_module(ffi
+lode_add_module(ffi
     SOURCES
         src/Main.cpp
         src/CdefParser.cpp

@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(json LANGUAGES CXX)
 
-lode_add_native_module(json
+lode_add_module(json
     SOURCES
         src/json.cpp
 )
