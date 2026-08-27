@@ -1,5 +1,14 @@
 include(CMakeParseArguments)
 
+# GNU ld and Apple's ld64 use different dead-stripping options. Keep this
+# available to the repository's native targets without forcing GNU flags onto
+# macOS builds.
+if(APPLE)
+    set(LODE_GC_SECTIONS_LINK_OPTION "-Wl,-dead_strip")
+else()
+    set(LODE_GC_SECTIONS_LINK_OPTION "-Wl,--gc-sections")
+endif()
+
 function(lode_get_platform_name output_variable)
     if(WIN32)
         set(${output_variable} windows PARENT_SCOPE)
@@ -57,6 +66,9 @@ function(lode_add_native_module target_name)
     # Native packages are loaded by an exact filename from lode.json. Avoid
     # CMake's default lib prefix on Unix and keep the output beside the
     # package's generated libs/<platform>/<architecture>/<config> tree.
+    # On Windows, ARCHIVE_OUTPUT_DIRECTORY also controls the DLL import
+    # library; keeping it beside the module avoids collisions with private
+    # static dependencies such as libffi.
     set_target_properties(${target_name} PROPERTIES PREFIX "")
 
     lode_get_platform_name(target_platform)
@@ -71,6 +83,8 @@ function(lode_add_native_module target_name)
                 "${CMAKE_CURRENT_SOURCE_DIR}/libs/${target_platform}/${target_architecture}/${configuration_name}"
             LIBRARY_OUTPUT_DIRECTORY_${configuration_name_upper}
                 "${CMAKE_CURRENT_SOURCE_DIR}/libs/${target_platform}/${target_architecture}/${configuration_name}"
+            ARCHIVE_OUTPUT_DIRECTORY_${configuration_name_upper}
+                "${CMAKE_CURRENT_SOURCE_DIR}/libs/${target_platform}/${target_architecture}/${configuration_name}"
         )
     endforeach()
 
@@ -78,6 +92,7 @@ function(lode_add_native_module target_name)
         set_target_properties(${target_name} PROPERTIES
             RUNTIME_OUTPUT_DIRECTORY "${native_output_directory}"
             LIBRARY_OUTPUT_DIRECTORY "${native_output_directory}"
+            ARCHIVE_OUTPUT_DIRECTORY "${native_output_directory}"
         )
     endif()
 endfunction()

@@ -20,11 +20,6 @@ if(POLICY CMP0091)
     cmake_policy(SET CMP0091 NEW)
 endif()
 
-# rapidjson v1.1.0 declares cmake_minimum_required(VERSION 2.8), which modern
-# CMake refuses to configure. Floor the minimum supported policy version so
-# its header-only target can be added via FetchContent_MakeAvailable below.
-set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
-
 project(LodeRuntime VERSION 1.0.0 LANGUAGES C CXX)
 
 include(GNUInstallDirs)
@@ -43,6 +38,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Synchronize MSVC C++ Runtime DLLs (/MDd for Debug, /MD for Release across all dependencies)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/LodeNativeModule.cmake")
 
 # Cross-platform binary output directory configuration (Separated by Build Configuration)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
@@ -79,10 +76,30 @@ if(MSVC)
     )
 else()
     add_compile_options($<$<CONFIG:Release>:-Os> $<$<CONFIG:Release>:-ffunction-sections> $<$<CONFIG:Release>:-fdata-sections>)
-    add_link_options($<$<CONFIG:Release>:-Wl,--gc-sections> $<$<CONFIG:Release>:-s>)
+    if(APPLE)
+        add_link_options($<$<CONFIG:Release>:-Wl,-dead_strip>)
+    else()
+        add_link_options($<$<CONFIG:Release>:-Wl,--gc-sections> $<$<CONFIG:Release>:-s>)
+    endif()
 endif()
 
 include(FetchContent)
+
+# These dependencies are provided by vcpkg in manifest mode. Luau and libuv
+# remain FetchContent dependencies because Lode exports their build targets as
+# part of the installed SDK; libffi has its own module-specific FetchContent
+# integration and must remain there as well.
+find_package(nlohmann_json CONFIG REQUIRED)
+find_package(RapidJSON CONFIG REQUIRED)
+find_package(miniz CONFIG REQUIRED)
+
+if(TARGET miniz::miniz)
+    set(LODE_MINIZ_TARGET miniz::miniz)
+elseif(TARGET miniz::miniz_static)
+    set(LODE_MINIZ_TARGET miniz::miniz_static)
+else()
+    message(FATAL_ERROR "The vcpkg miniz package did not provide miniz::miniz or miniz::miniz_static")
+endif()
 
 set(LUAU_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
 set(LUAU_BUILD_CLI      OFF CACHE BOOL "" FORCE)
@@ -100,32 +117,6 @@ FetchContent_Declare(
 )
 
 
-# Fetch nlohmann_json for lightweight lode.json parsing
-# URL_HASH pins the exact artifact content (supply-chain / reproducibility
-# guard): if upstream ever serves different bytes for this tag, configure
-# fails loudly instead of silently building against unknown code.
-FetchContent_Declare(
-    json
-    URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
-    URL_HASH SHA256=d6c65aca6b1ed68e7a182f4757257b107ae403032760ed6ef121c9d55e81757d
-    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-)
-
-# Fetch rapidjson for the native JSON parse/stringify core (SAX Reader +
-# Writer; header-only, no intermediate DOM). See src/Json.cpp.
-# rapidjson builds docs/examples/tests by default, so disable them and let
-# FetchContent_MakeAvailable add the header-only RapidJSON target.
-FetchContent_Declare(
-    rapidjson
-    URL https://github.com/Tencent/rapidjson/archive/v1.1.0.tar.gz
-    URL_HASH SHA256=bf7ced29704a1e696fbccf2a2b4ea068e7774fa37f6d7dd4039d0787f8bed98e
-    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-)
-set(RAPIDJSON_BUILD_DOC OFF CACHE BOOL "" FORCE)
-set(RAPIDJSON_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(RAPIDJSON_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(RAPIDJSON_BUILD_THIRDPARTY_GTEST OFF CACHE BOOL "" FORCE)
-
 # Fetch libuv for high-performance OS Event Loop
 FetchContent_Declare(
     libuv
@@ -136,30 +127,17 @@ FetchContent_Declare(
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
 
-# ZIP extraction is part of the package-manager runtime path. Keep the
-# implementation inside lode instead of depending on PowerShell, tar, cmake,
-# or the GitHub CLI being installed on the user's machine.
-FetchContent_Declare(
-    miniz
-    GIT_REPOSITORY https://github.com/richgel999/miniz.git
-    GIT_TAG        2.2.0
-    GIT_SHALLOW    TRUE
-    GIT_PROGRESS   TRUE
-)
-
 # FetchContent projects are build dependencies, not part of Lode's install
 # tree. Prevent their own install scripts from being pulled into the SDK
 # package; Lode exports the targets and headers it intentionally supports
 # below.
 set(INSTALL_PROJECT OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(luau json libuv rapidjson miniz)
+FetchContent_MakeAvailable(luau libuv)
 unset(INSTALL_PROJECT CACHE)
 
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${json_SOURCE_DIR}/include
-    ${rapidjson_SOURCE_DIR}/include
     ${luau_SOURCE_DIR}/VM/include
     ${luau_SOURCE_DIR}/Compiler/include
     ${luau_SOURCE_DIR}/Ast/include
@@ -258,15 +236,12 @@ set(LODE_CORE_HEADERS
 add_library(LodeCore SHARED
     ${LODE_CORE_SOURCES}
     ${LODE_CORE_HEADERS}
-    "${miniz_SOURCE_DIR}/miniz.c"
-    "${miniz_SOURCE_DIR}/miniz_zip.c"
-    "${miniz_SOURCE_DIR}/miniz_tinfl.c"
-    "${miniz_SOURCE_DIR}/miniz_tdef.c"
 )
 target_compile_definitions(LodeCore PRIVATE LODE_CORE_BUILD MINIZ_STATIC_DEFINE)
-target_include_directories(LodeCore PRIVATE
-    "${miniz_SOURCE_DIR}"
-    "${miniz_BINARY_DIR}"
+target_link_libraries(LodeCore PRIVATE
+    nlohmann_json::nlohmann_json
+    RapidJSON::RapidJSON
+    ${LODE_MINIZ_TARGET}
 )
 if(WIN32)
     target_link_libraries(LodeCore PRIVATE winhttp)
@@ -322,8 +297,6 @@ if(WIN32)
 endif()
 
 target_link_libraries(lode PRIVATE LodeCore Luau.Compiler Luau.Ast Luau.Analysis)
-
-include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/LodeNativeModule.cmake")
 
 # Benchmark harness (opt-in: -DLODE_BUILD_BENCH=ON keeps the nightly build unchanged)
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/bench/CMakeLists.txt")
