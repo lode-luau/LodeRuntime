@@ -7,6 +7,7 @@
 #include <cctype>
 #include <fstream>
 #include <nlohmann/json.hpp>
+#include <sstream>
 #include <string_view>
 #include <utility>
 
@@ -488,6 +489,92 @@ private:
 };
 
 } // namespace
+
+namespace
+{
+
+std::string EscapeLuauString(const std::string& value)
+{
+    std::string escaped;
+    escaped.reserve(value.size() + 2);
+    escaped.push_back('"');
+    for (const char character : value)
+    {
+        switch (character)
+        {
+            case '\\': escaped += "\\\\"; break;
+            case '"': escaped += "\\\""; break;
+            case '\n': escaped += "\\n"; break;
+            case '\r': escaped += "\\r"; break;
+            case '\t': escaped += "\\t"; break;
+            default: escaped.push_back(character); break;
+        }
+    }
+    escaped.push_back('"');
+    return escaped;
+}
+
+void SerializeValue(const nlohmann::json& value, std::ostringstream& output, size_t indent)
+{
+    const std::string padding(indent, ' ');
+    if (value.is_object())
+    {
+        output << "{\n";
+        bool first = true;
+        for (const auto& [key, child] : value.items())
+        {
+            if (!first)
+                output << ",\n";
+            first = false;
+            output << std::string(indent + 4, ' ') << "[" << EscapeLuauString(key) << "] = ";
+            SerializeValue(child, output, indent + 4);
+        }
+        output << "\n" << padding << "}";
+        return;
+    }
+    if (value.is_array())
+    {
+        output << "{\n";
+        for (size_t index = 0; index < value.size(); ++index)
+        {
+            if (index != 0)
+                output << ",\n";
+            output << std::string(indent + 4, ' ');
+            SerializeValue(value[index], output, indent + 4);
+        }
+        output << "\n" << padding << "}";
+        return;
+    }
+    if (value.is_string())
+    {
+        output << EscapeLuauString(value.get<std::string>());
+        return;
+    }
+    if (value.is_boolean())
+    {
+        output << (value.get<bool>() ? "true" : "false");
+        return;
+    }
+    if (value.is_null())
+    {
+        output << "nil";
+        return;
+    }
+    output << value.dump();
+}
+
+} // namespace
+
+std::string SerializePackageManifest(const nlohmann::json& document)
+{
+    if (!document.is_object())
+        return {};
+    std::ostringstream output;
+    output << "return ";
+    SerializeValue(document, output, 0);
+    output << "\n";
+    return output.str();
+}
 
 PackageManifestResult ReadPackageManifest(const std::filesystem::path& manifestPath)
 {

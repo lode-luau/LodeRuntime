@@ -10,6 +10,7 @@
 #include "CiGenerator.hpp"
 #include "GitResolver.hpp"
 #include "PackageValidator.hpp"
+#include "PackageManifest.hpp"
 #include "PackageLockfile.hpp"
 #include "PackageInstaller.hpp"
 #include "PackagePacker.hpp"
@@ -230,7 +231,9 @@ std::vector<std::string> AddDependencyToManifest(
     if (!tag.IsValid())
         return tag.errors;
 
-    const fs::path manifestPath = packageRoot / "lode.json";
+    const fs::path packageManifestPath = packageRoot / "package.luau";
+    const bool isLuauManifest = fs::is_regular_file(packageManifestPath);
+    const fs::path manifestPath = isLuauManifest ? packageManifestPath : packageRoot / "lode.json";
     nlohmann::json manifest;
     std::string originalManifest;
     try
@@ -243,7 +246,21 @@ std::vector<std::string> AddDependencyToManifest(
         }
         originalManifest.assign(std::istreambuf_iterator<char>(file),
                                 std::istreambuf_iterator<char>());
-        manifest = nlohmann::json::parse(originalManifest);
+        if (isLuauManifest)
+        {
+            const Lode::Package::PackageManifestResult parsed =
+                Lode::Package::ReadPackageManifest(manifestPath);
+            if (!parsed.IsValid())
+            {
+                errors.insert(errors.end(), parsed.errors.begin(), parsed.errors.end());
+                return errors;
+            }
+            manifest = parsed.document;
+        }
+        else
+        {
+            manifest = nlohmann::json::parse(originalManifest);
+        }
     }
     catch (const std::exception& exception)
     {
@@ -263,12 +280,12 @@ std::vector<std::string> AddDependencyToManifest(
         manifest[fieldName] = nlohmann::json::object();
     if (!manifest[fieldName].is_object())
     {
-        errors.push_back(std::string("lode.json.") + fieldName + " must be an object.");
+        errors.push_back(std::string("package manifest.") + fieldName + " must be an object.");
         return errors;
     }
     if (manifest.contains(otherFieldName) && !manifest[otherFieldName].is_object())
     {
-        errors.push_back(std::string("lode.json.") + otherFieldName + " must be an object.");
+        errors.push_back(std::string("package manifest.") + otherFieldName + " must be an object.");
         return errors;
     }
     if (manifest.contains(otherFieldName) && manifest[otherFieldName].contains(parsed.alias))
@@ -291,10 +308,17 @@ std::vector<std::string> AddDependencyToManifest(
     };
 
     std::string replacementError;
-    const std::string content = manifest.dump(2) + "\n";
+    const std::string content = isLuauManifest
+        ? Lode::Package::SerializePackageManifest(manifest)
+        : manifest.dump(2) + "\n";
+    if (content.empty())
+    {
+        errors.push_back("Cannot serialize package manifest.");
+        return errors;
+    }
     if (!ReplaceTextFileAtomically(manifestPath, content, replacementError))
     {
-        errors.push_back("Cannot update lode.json: " + replacementError);
+        errors.push_back("Cannot update package manifest: " + replacementError);
         return errors;
     }
 
@@ -305,7 +329,7 @@ std::vector<std::string> AddDependencyToManifest(
         errors.insert(errors.end(), installation.errors.begin(), installation.errors.end());
         std::string restoreError;
         if (!ReplaceTextFileAtomically(manifestPath, originalManifest, restoreError))
-            errors.push_back("Cannot restore lode.json after installation failure: " + restoreError);
+            errors.push_back("Cannot restore package manifest after installation failure: " + restoreError);
         return errors;
     }
     return errors;

@@ -45,4 +45,8 @@ struct PackageManifestResult
 LODE_API PackageManifestResult ReadPackageManifest(
     const std::filesystem::path& manifestPath);
 
+// Serializes a statically parsed manifest document back to executable-free
+// Luau table syntax. The result is empty when the input is not an object.
+LODE_API std::string SerializePackageManifest(const nlohmann::json& document);
+
 } // namespace Lode::Package
