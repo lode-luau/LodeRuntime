@@ -54,7 +54,7 @@ if(NOT result EQUAL 0)
 endif()
 
 foreach(required_entry IN ITEMS
-    "lode.json"
+    "package.luau"
     "init.luau"
     "LICENSE"
     "lode_modules/signal/init.luau"

@@ -1,8 +1,0 @@
-{
-  "name": "invalid_module",
-  "libraries": {
-    "windows": {
-      "x64": 123
-    }
-  }
-}

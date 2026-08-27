@@ -9,18 +9,18 @@ set(cache_home "${TEST_BINARY_DIR}/lode-git-native-cache")
 file(REMOVE_RECURSE "${git_source}" "${consumer_root}" "${cache_home}")
 file(MAKE_DIRECTORY "${git_source}" "${consumer_root}" "${cache_home}")
 
-file(WRITE "${git_source}/lode.json" [=[{
-  "name": "git_native_fixture",
-  "version": "1.0.0",
-  "license": "MIT",
-  "libraries": {
-    "windows": {
-      "x64": "libs/windows/x64/git_native_fixture.dll"
-    }
+file(WRITE "${git_source}/package.luau" [=[return {
+  name = "git_native_fixture",
+  version = "1.0.0",
+  license = "MIT",
+  implementation = {
+    artifact = "git_native_fixture",
+    required = true,
+    targets = {
+      build = { "windows/x64" },
+      release = { "windows/x64" },
+    },
   },
-  "releaseTargets": [
-    { "platform": "windows", "architecture": "x64" }
-  ]
 }
 ]=])
 file(WRITE "${git_source}/init.luau" "return {}\n")
@@ -39,7 +39,7 @@ if(NOT result EQUAL 0)
 endif()
 execute_process(COMMAND git -C "${git_source}" config user.email "lode-tests@example.invalid")
 execute_process(COMMAND git -C "${git_source}" config user.name "Lode Tests")
-execute_process(COMMAND git -C "${git_source}" add lode.json init.luau CMakeLists.txt LICENSE)
+execute_process(COMMAND git -C "${git_source}" add package.luau init.luau CMakeLists.txt LICENSE)
 execute_process(
     COMMAND git -c commit.gpgSign=false -C "${git_source}" commit --quiet -m "Add native Git fixture"
     RESULT_VARIABLE result
@@ -58,7 +58,7 @@ if(NOT result EQUAL 0)
 endif()
 
 file(TO_CMAKE_PATH "${git_source}" git_reference)
-file(WRITE "${consumer_root}/lode.json" "{\n  \"name\": \"git_native_consumer\",\n  \"version\": \"1.0.0\",\n  \"license\": \"MIT\",\n  \"dependencies\": {\n    \"git_native_fixture\": {\n      \"git\": \"${git_reference}\",\n      \"version\": \"1.0.0\"\n    }\n  }\n}\n")
+file(WRITE "${consumer_root}/package.luau" "return {\n  name = \"git_native_consumer\",\n  version = \"1.0.0\",\n  license = \"MIT\",\n  dependencies = {\n    git_native_fixture = {\n      git = \"${git_reference}\",\n      version = \"1.0.0\",\n    },\n  },\n}\n")
 file(WRITE "${consumer_root}/init.luau" "return {}\n")
 file(WRITE "${consumer_root}/LICENSE" "MIT\n")
 

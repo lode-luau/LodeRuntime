@@ -6,27 +6,24 @@ set(package_root "${TEST_BINARY_DIR}/ci-generator-package")
 file(REMOVE_RECURSE "${package_root}")
 file(MAKE_DIRECTORY "${package_root}")
 
-file(WRITE "${package_root}/lode.json" [=[{
-  "name": "ci_generator_package",
-  "version": "1.0.0",
-  "license": "MIT",
-  "libraries": {
-    "windows": {
-      "x64": "libs/windows/x64/ci_generator_package.dll"
+file(WRITE "${package_root}/package.luau" [=[return {
+  name = "ci_generator_package",
+  version = "1.0.0",
+  license = "MIT",
+  implementation = {
+    artifact = "ci_generator_package",
+    required = true,
+    targets = {
+      build = { "windows/x64" },
+      release = { "windows/x64" },
     },
-    "linux": {
-      "x64": "libs/linux/x64/ci_generator_package.so"
-    }
   },
-  "releaseTargets": [
-    { "platform": "windows", "architecture": "x64" }
-  ],
-  "dependencies": {
-    "example": {
-      "git": "https://github.com/example/example.git",
-      "version": "1.0.0"
-    }
-  }
+  dependencies = {
+    example = {
+      git = "https://github.com/example/example.git",
+      version = "1.0.0",
+    },
+  },
 }
 ]=])
 file(WRITE "${package_root}/init.luau" "return {}\n")
@@ -75,11 +72,6 @@ foreach(required_text IN ITEMS
         message(FATAL_ERROR "Generated workflow is missing '${required_text}':\n${workflow}")
     endif()
 endforeach()
-string(FIND "${workflow}" "Get-Content lode.json" legacy_manifest_reader_position)
-if(NOT legacy_manifest_reader_position LESS 0)
-    file(REMOVE_RECURSE "${package_root}")
-    message(FATAL_ERROR "Generated workflow still reads lode.json as JSON")
-endif()
 foreach(placeholder IN ITEMS "<nightly-version>" "<sdk-sha256>")
     string(FIND "${workflow}" "${placeholder}" position)
     if(NOT position LESS 0)
@@ -115,17 +107,18 @@ if(NOT linux_job_position LESS 0)
     message(FATAL_ERROR "Generated workflow inferred an undeclared linux release target")
 endif()
 
-file(WRITE "${package_root}/lode.json" [=[{
-  "name": "ci_generator_package",
-  "version": "1.0.0",
-  "license": "MIT",
-  "libraries": {
-    "windows": { "x64": "libs/windows/x64/ci_generator_package.dll" },
-    "linux": { "x64": "libs/linux/x64/ci_generator_package.so" }
+file(WRITE "${package_root}/package.luau" [=[return {
+  name = "ci_generator_package",
+  version = "1.0.0",
+  license = "MIT",
+  implementation = {
+    artifact = "ci_generator_package",
+    required = true,
+    targets = {
+      build = { "linux/x64" },
+      release = { "linux/x64" },
+    },
   },
-  "releaseTargets": [
-    { "platform": "linux", "architecture": "x64" }
-  ]
 }
 ]=])
 execute_process(
