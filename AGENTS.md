@@ -50,7 +50,7 @@
 ## Security triage
 - Judge potential security issues against the threat model in `SECURITY.md`.
 - Native modules and Luau scripts are trusted-by-design (like Node.js): do not report missing sandboxing, missing permission models, or unrestricted `require` path traversal as vulnerabilities.
-- The `lode.json` path constraint and the `LodeModuleInit` entrypoint contract are interface/packaging checks, not security boundaries.
+- The `package.luau` implementation path constraint and the `LodeModuleInit` entrypoint contract are interface/packaging checks, not security boundaries.
 
 ## Notes
 - Do not keep temporary probe executables/targets in the repo; validate through the real runtime path (`lode` + `.luau`), not standalone probes that link Luau twice.

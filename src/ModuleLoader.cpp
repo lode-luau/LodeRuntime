@@ -9,7 +9,6 @@
 #include "Luau/Compiler.h"
 #include "Luau/Config.h"
 #include "Luau/LuauConfig.h"
-#include "nlohmann/json.hpp"
 
 #include "lua.h"
 #include "lualib.h"
@@ -547,9 +546,9 @@ static ModuleLoadResult LoadModuleNoJump(lua_State* L, void* ctx, const char* pa
     fs::path packageManifestPath = dirPath / "package.luau";
     if (fs::is_regular_file(packageManifestPath))
     {
-        nlohmann::json jsonDoc;
         bool packageManifestNative = false;
         bool packageManifestRequired = false;
+        std::optional<fs::path> relativeArtifact;
 
         const auto packageResult = Lode::Package::ReadPackageManifest(packageManifestPath);
         if (!packageResult.IsValid())
@@ -564,50 +563,33 @@ static ModuleLoadResult LoadModuleNoJump(lua_State* L, void* ctx, const char* pa
             const std::string arch = std::string(Platform::GetArchitectureName());
             const char* buildConfig = LodeBuildConfigName();
             const std::string configuration = buildConfig ? buildConfig : "";
-            const auto relativeArtifact = ResolveCompiledArtifact(
+            relativeArtifact = ResolveCompiledArtifact(
                 dirPath, packageResult.manifest, platform, arch, configuration, artifactError);
             if (!relativeArtifact)
                 return { 0, "Invalid package implementation in " + PathToUtf8(dirPath) + ": " + artifactError };
 
-            jsonDoc["libraries"][platform][arch] = PathToUtf8(*relativeArtifact);
             if (!packageManifestRequired && !fs::is_regular_file(dirPath / *relativeArtifact))
                 packageManifestNative = false;
         }
-        if (packageManifestNative &&
-            jsonDoc.contains("libraries") && jsonDoc["libraries"].is_object() &&
-            !jsonDoc["libraries"].empty())
+        if (packageManifestNative)
         {
-            // RFC 01: any non-empty `libraries` map marks a native package.
-            // Its `init.luau` is type-only and must not be executed, even when
-            // the current platform/arch has no entry — that is a platform
-            // error, not a Luau fallback (prevents cross-platform silent fallback).
+            // A package with an implementation is native.
+            // Its `init.luau` is type-only and must not be executed while
+            // The selected artifact is resolved from the package implementation.
+            // loading the compiled implementation.
             std::string platform = std::string(Platform::GetOSName());
             std::string arch = std::string(Platform::GetArchitectureName());
 
-            if (!jsonDoc["libraries"].contains(platform) ||
-                !jsonDoc["libraries"][platform].is_object() ||
-                !jsonDoc["libraries"][platform].contains(arch))
+            if (!relativeArtifact)
+                return { 0, "Invalid package implementation in " + PathToUtf8(dirPath) +
+                    ": no artifact path was resolved" };
+
+            const fs::path fullLibPath = dirPath / *relativeArtifact;
+            if (!IsPathInside(fullLibPath, dirPath))
             {
-                return { 0, "Native package '" + PathToUtf8(dirPath) +
-                    "' has no library for the current platform/architecture (" +
-                    platform + "/" + arch + "); its init.luau is type-only and not executed." };
+                return { 0, "Native implementation path must remain inside module directory: " +
+                    PathToUtf8(*relativeArtifact) };
             }
-
-            {
-                const auto& libraryEntry = jsonDoc["libraries"][platform][arch];
-                if (!libraryEntry.is_string())
-                {
-                    return { 0, "Invalid package implementation path: expected a string" };
-                }
-
-                std::string relLibPath = libraryEntry.get<std::string>();
-                fs::path baseLibPath = dirPath / PathFromUtf8(relLibPath);
-                fs::path fullLibPath = baseLibPath;
-
-                if (relLibPath.empty() || !IsPathInside(baseLibPath, dirPath))
-                {
-                    return { 0, "Native library path must remain inside module directory: " + relLibPath };
-                }
 
                 if (packageManifestRequired && !fs::is_regular_file(fullLibPath))
                 {
@@ -699,10 +681,9 @@ static ModuleLoadResult LoadModuleNoJump(lua_State* L, void* ctx, const char* pa
                         return { 0, "Failed to find LodeModuleInit symbol in native library " + PathToUtf8(fullLibPath) };
                     }
                 }
-                else
-                {
-                    return { 0, libResult.GetError().ErrorMessage() };
-                }
+            else
+            {
+                return { 0, libResult.GetError().ErrorMessage() };
             }
         }
     }

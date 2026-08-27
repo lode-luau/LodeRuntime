@@ -378,9 +378,7 @@ bool ResolveGitDependencies(DependencyGraph& graph,
                         "' is missing package.luau.");
                     return false;
                 }
-                if ((manifest.contains("implementation") && manifest["implementation"].is_object()) ||
-                    (manifest.contains("libraries") && manifest["libraries"].is_object() &&
-                        !manifest["libraries"].empty()))
+                if (manifest.contains("implementation") && manifest["implementation"].is_object())
                 {
                     const PackageArtifactResult artifact = DownloadGitHubPackageArtifact(
                         repository, resolvedRoot.name, resolvedRoot.version,

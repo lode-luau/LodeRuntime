@@ -37,6 +37,27 @@ if(NOT result EQUAL 0)
     message(FATAL_ERROR "Generated pure project did not validate:\n${output}\n${error}")
 endif()
 
+set(legacy_root "${test_root}/legacy")
+file(MAKE_DIRECTORY "${legacy_root}")
+file(WRITE "${legacy_root}/package.luau"
+    "return {\n"
+    "    name = \"legacy_project\",\n"
+    "    version = \"1.0.0\",\n"
+    "    libraries = {},\n"
+    "    releaseTargets = {},\n"
+    "}\n")
+file(WRITE "${legacy_root}/init.luau" "return {}\n")
+file(WRITE "${legacy_root}/LICENSE" "MIT\n")
+execute_process(
+    COMMAND "${LODE_EXECUTABLE}" ci validate --source "${legacy_root}"
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+set(legacy_validation_output "${output}\n${error}")
+if(result EQUAL 0 OR
+   NOT legacy_validation_output MATCHES "field 'libraries' is no longer supported" OR
+   NOT legacy_validation_output MATCHES "field 'releaseTargets' is no longer supported")
+    message(FATAL_ERROR "Legacy manifest fields were accepted or reported incorrectly:\n${legacy_validation_output}")
+endif()
+
 set(native_root "${test_root}/native")
 execute_process(
     COMMAND "${LODE_EXECUTABLE}" init native_project --native --description "A generated native package" "${native_root}"
