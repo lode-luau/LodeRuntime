@@ -448,11 +448,12 @@ the `require` string.
 
 ## Current compatibility boundary
 
-The current runtime does not parse `dependencies` from `package.luau`. The
-runtime-owned stdlib fallback is independent of dependency resolution. Until
-the package manager generates project and package-local `.config.luau` files,
-existing relative requires and manually configured aliases remain the
-supported behavior.
+The package manager reads statically representable `dependencies` and
+`devDependencies` tables from `package.luau`; it never executes the manifest.
+The runtime-owned stdlib fallback is independent of dependency resolution.
+Until the package manager generates project and package-local `.config.luau`
+files for every resolved context, existing relative requires and manually
+configured aliases remain supported behavior.
 
 > **Limitation (2026-08-21):** `lode install` currently flattens the graph
 > into a single `lode_modules/` + root `.config.luau` (`src/PackageInstaller.cpp:973`).

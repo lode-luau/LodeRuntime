@@ -43,7 +43,7 @@ project(http LANGUAGES CXX)
 
 find_package(Lode CONFIG REQUIRED)
 
-lode_add_module(http
+lode_add_native_module(http
     SOURCES
         src/Main.cpp
         src/HttpManager.cpp
@@ -62,7 +62,7 @@ else()
 endif()
 ```
 
-`lode_add_module()` creates the compiled implementation with no Unix `lib`
+`lode_add_native_module()` creates the compiled implementation with no Unix `lib`
 prefix and writes it to:
 
 ```text

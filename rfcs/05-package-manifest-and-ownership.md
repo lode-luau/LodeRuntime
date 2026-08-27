@@ -2,8 +2,9 @@
 
 ## Status
 
-Accepted design direction for the `package.luau` migration. Implementation is
-not part of this RFC.
+Accepted design direction for the `package.luau` migration. The static reader,
+runtime integration, and package-tooling integration are implemented in stages;
+this RFC remains the contract for those components.
 
 ## Summary
 
@@ -17,8 +18,8 @@ package. There is no `type`, `entry`, or `modules` field.
 
 ## Package conventions
 
-The package root is identified by `package.luau` and/or `init.luau`. A package
-is a module package: its root module is the directory containing `init.luau`.
+The package root is identified by `package.luau`. A package is a module package:
+its root module is the directory containing `init.luau`.
 Submodules are ordinary child directories containing their own `init.luau`;
 they are not listed in the package manifest.
 

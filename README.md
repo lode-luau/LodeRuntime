@@ -47,7 +47,7 @@ by themselves, mean that a target is published. See [the manifest and ownership 
 
 ## Native module quick start
 
-A native package typically contains `lode.json`, a type/path metadata `init.luau`,
+A native package typically contains `package.luau`, a type-only `init.luau`,
 `CMakeLists.txt`, and a `src/` directory. Its CMake project uses:
 
     find_package(Lode CONFIG REQUIRED)

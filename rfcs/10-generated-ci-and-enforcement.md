@@ -97,7 +97,7 @@ The compiled implementation CMake must use:
 
 ```cmake
 find_package(Lode CONFIG REQUIRED)
-lode_add_module(...)
+lode_add_native_module(...)
 ```
 
 The default package test command runs `tests/run.luau` through the matching
