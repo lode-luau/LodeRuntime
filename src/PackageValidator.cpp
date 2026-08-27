@@ -78,7 +78,7 @@ void ValidateDependencyTable(const json& dependencies,
 {
     if (!dependencies.is_object())
     {
-        Error(report, "lode.json." + fieldName + " must be an object.");
+        Error(report, "package manifest." + fieldName + " must be an object.");
         return;
     }
 
@@ -86,7 +86,7 @@ void ValidateDependencyTable(const json& dependencies,
     {
         if (alias.empty())
         {
-            Error(report, "lode.json." + fieldName + " contains an empty dependency alias.");
+            Error(report, "package manifest." + fieldName + " contains an empty dependency alias.");
             continue;
         }
 
@@ -94,7 +94,7 @@ void ValidateDependencyTable(const json& dependencies,
         {
             if (!IsSemVer(declaration.get<std::string>()))
             {
-                Error(report, "lode.json." + fieldName + "." + alias +
+                Error(report, "package manifest." + fieldName + "." + alias +
                     " must use an exact SemVer string for an official standard module.");
             }
             continue;
@@ -102,14 +102,14 @@ void ValidateDependencyTable(const json& dependencies,
 
         if (!declaration.is_object())
         {
-            Error(report, "lode.json." + fieldName + "." + alias +
+            Error(report, "package manifest." + fieldName + "." + alias +
                 " must be an exact version string or a source object.");
             continue;
         }
 
         if (declaration.contains("alias"))
         {
-            Error(report, "lode.json." + fieldName + "." + alias +
+            Error(report, "package manifest." + fieldName + "." + alias +
                 " must not contain an alias field; the dependency key is the alias.");
         }
 
@@ -117,21 +117,21 @@ void ValidateDependencyTable(const json& dependencies,
         const bool hasPath = declaration.contains("path");
         if (hasGit == hasPath)
         {
-            Error(report, "lode.json." + fieldName + "." + alias +
+            Error(report, "package manifest." + fieldName + "." + alias +
                 " must contain exactly one of git or path.");
         }
 
         const char* sourceField = hasGit ? "git" : "path";
         if (declaration.contains(sourceField) && !declaration[sourceField].is_string())
         {
-            Error(report, "lode.json." + fieldName + "." + alias + "." + sourceField +
+            Error(report, "package manifest." + fieldName + "." + alias + "." + sourceField +
                 " must be a string.");
         }
 
         if (!declaration.contains("version") || !declaration["version"].is_string() ||
             !IsVersionRequirement(declaration["version"].get<std::string>()))
         {
-            Error(report, "lode.json." + fieldName + "." + alias +
+            Error(report, "package manifest." + fieldName + "." + alias +
                 ".version must be a SemVer or a ^/~ SemVer requirement.");
         }
     }
@@ -608,7 +608,7 @@ void ValidateLibraryEntry(const fs::path& root,
         return;
 
     // Published package archives are validated against the complete matrix
-    // declared in lode.json. An installed artifact is different: the current
+    // declared in the package manifest. An installed artifact is different: the current
     // Windows x64 release archive contains only the target and configuration
     // consumed by the released Lode runtime.
     if (mode == ValidationMode::InstallArtifact &&
@@ -903,7 +903,7 @@ ValidationReport Validate(const fs::path& packageRoot,
 
     if (!manifest.is_object())
     {
-        Error(report, "lode.json must contain a JSON object.");
+        Error(report, "Package manifest must contain an object.");
         return report;
     }
 
@@ -919,11 +919,11 @@ ValidationReport Validate(const fs::path& packageRoot,
     report.dependencyGraph = std::move(context.graph);
 
     if (!manifest.contains("name") || !manifest["name"].is_string() || manifest["name"].get<std::string>().empty())
-        Error(report, "lode.json.name must be a non-empty string.");
+        Error(report, "package manifest.name must be a non-empty string.");
 
     if (!manifest.contains("version") || !manifest["version"].is_string() ||
         !IsSemVer(manifest["version"].get<std::string>()))
-        Error(report, "lode.json.version must be a valid SemVer string.");
+        Error(report, "package manifest.version must be a valid SemVer string.");
 
     if (!fs::is_regular_file(root / "init.luau"))
         Error(report, "Packages must contain a root init.luau file.");

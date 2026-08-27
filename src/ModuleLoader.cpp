@@ -54,7 +54,7 @@ struct LodeNavigationContext
     fs::path currentPath;
     fs::path rootPath;
     fs::path standardLibraryRoot;
-    // Root directory of the current package (the folder that contains init.luau or lode.json).
+    // Root directory of the current package (the folder that contains init.luau or a manifest).
     // Used to resolve @self aliases to the package's own internal files.
     fs::path packagePath;
 };
@@ -207,7 +207,7 @@ static luarequire_NavigateResult jump_to_alias(lua_State* L, void* ctx, const ch
         if (aliasStr == "@self" || aliasStr == "self")
         {
             // @self always resolves to the package's own directory (the folder containing
-            // init.luau or lode.json), allowing native and Luau modules to require their
+            // init.luau or a manifest), allowing native and Luau modules to require their
             // own internal files regardless of where the caller is located.
             if (!nav->packagePath.empty())
             {
@@ -592,7 +592,7 @@ static ModuleLoadResult LoadModuleNoJump(lua_State* L, void* ctx, const char* pa
             }
             catch (const std::exception& e)
             {
-                return { 0, "Failed to parse lode.json in " + PathToUtf8(dirPath) + ": " + e.what() };
+                return { 0, "Failed to parse legacy package manifest in " + PathToUtf8(dirPath) + ": " + e.what() };
             }
         }
 
@@ -620,7 +620,7 @@ static ModuleLoadResult LoadModuleNoJump(lua_State* L, void* ctx, const char* pa
                 const auto& libraryEntry = jsonDoc["libraries"][platform][arch];
                 if (!libraryEntry.is_string())
                 {
-                    return { 0, "Invalid library path in lode.json: expected a string" };
+                    return { 0, "Invalid legacy library path in package manifest: expected a string" };
                 }
 
                 std::string relLibPath = libraryEntry.get<std::string>();

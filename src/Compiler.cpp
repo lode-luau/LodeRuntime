@@ -100,7 +100,7 @@ namespace
                     if (aliasName == "self")
                     {
                         // @self resolves to the module's own directory (the folder
-                        // containing init.luau or lode.json), mirroring the runtime.
+                        // containing init.luau or a package manifest), mirroring the runtime.
                         fs::path requirerPath = PathFromUtf8(context ? context->name : "");
                         fs::path pkgDir;
                         if (requirerPath.filename() == "init.luau")
