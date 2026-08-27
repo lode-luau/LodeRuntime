@@ -41,7 +41,11 @@ return {
     implementation = {
         artifact = "websocket",
         required = true,
-        layout = "libs/{platform}/{architecture}/{configuration}/{artifact}{extension}"
+        layout = "libs/{platform}/{architecture}/{configuration}/{artifact}{extension}",
+        targets = {
+            build = { "windows/x64" },
+            release = { "windows/x64" },
+        },
     }
 }
 ```
@@ -82,9 +86,12 @@ return {} :: WebSocket
 ```
 
 The runtime does not execute this file when `implementation` is present. It
-first resolves and validates the required artifact. If the artifact is
-unavailable for the current target, loading fails instead of falling back to
-`init.luau`. A module without `implementation` executes `init.luau` normally.
+first resolves and validates the artifact. When `required = true` (the
+publication default), an unavailable artifact for the current target is a
+loading error and the runtime does not fall back to `init.luau`. When
+`required = false`, the runtime may fall back to `init.luau` for a target that
+has no artifact. A module without `implementation` executes `init.luau`
+normally.
 
 The Luau resolver and `luau-lsp` continue to see the module directory and its
 fixed `init.luau`. The compiled artifact is a Lode runtime concern and is not

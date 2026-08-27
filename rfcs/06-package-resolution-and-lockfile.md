@@ -2,8 +2,9 @@
 
 ## Status
 
-Accepted design direction for the `package-manager` branch. Implementation is
-not part of this RFC.
+Accepted and implemented design for `package.luau`, dependency resolution, and
+`lode.lock`. Changes to the versioned lockfile shape require an explicit
+format-version update.
 
 ## Summary
 
@@ -22,10 +23,10 @@ file, but must not replace the Luau configuration format with a new one.
 
 The shorthand form is reserved for an official Lode standard-library module.
 
-```json
-{
-  "dependencies": {
-    "task": "1.0.0"
+```luau
+return {
+  dependencies = {
+    task = "1.0.0"
   }
 }
 ```
@@ -48,12 +49,12 @@ This is a GitHub Release convention, not a Lode-owned registry.
 
 An explicit source may be used for Git or local development:
 
-```json
-{
-  "dependencies": {
-    "example": {
-      "git": "<git-repository>",
-      "version": "^1.0.0"
+```luau
+return {
+  dependencies = {
+    example = {
+      git = "<git-repository>",
+      version = "^1.0.0"
     }
   }
 }
@@ -62,12 +63,12 @@ An explicit source may be used for Git or local development:
 For local development, the same alias is overridden by changing its source;
 it is not declared a second time:
 
-```json
-{
-  "dependencies": {
-    "example": {
-      "path": "../example-package",
-      "version": "1.0.0"
+```luau
+return {
+  dependencies = {
+    example = {
+      path = "../example-package",
+      version = "1.0.0"
     }
   }
 }
@@ -279,7 +280,6 @@ than the requested ranges. A lock entry must include at least:
 
 ```text
 package identity
-package manifest content hash when applicable
 resolved version
 source kind
 Git source or official stdlib source
@@ -288,6 +288,12 @@ package/artifact checksum when applicable
 resolved aliases
 transitive dependencies
 ```
+
+Version 1 does not store a separate package-manifest content hash. The
+resolved graph, including the manifest-derived fields and artifact metadata,
+is serialized deterministically and compared with the lockfile during locked
+operations. Package and artifact checksums remain recorded when they are
+available.
 
 Each dependency edge in the lockfile records the alias used by the dependent
 package and points to one resolved package identity. The edge must not point

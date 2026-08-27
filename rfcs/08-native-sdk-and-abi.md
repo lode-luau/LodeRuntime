@@ -63,16 +63,28 @@ endif()
 ```
 
 `lode_add_native_module()` creates the compiled implementation with no Unix `lib`
-prefix and writes it to:
+prefix and writes it to the path described by the package manifest. With no
+extra options, it writes:
 
 ```text
 libs/<platform>/<architecture>/<configuration>/<target>.<suffix>
 ```
 
-The helper does not install OpenSSL, choose system libraries, or execute
-package code. Those remain normal CMake and CI responsibilities. The helper
-must produce the artifact described by the package's `implementation` table;
-it must not create an alternative module entrypoint.
+The helper accepts optional `ARTIFACT` and `LAYOUT` arguments when a package
+uses a non-default implementation contract:
+
+```cmake
+lode_add_native_module(my_target
+    ARTIFACT "my-artifact"
+    LAYOUT "runtime/{platform}/{architecture}/{configuration}/{artifact}{extension}"
+    SOURCES src/Main.cpp
+)
+```
+
+These values must exactly match `package.luau.implementation`. The helper does
+not install OpenSSL, choose system libraries, or execute package code. Those
+remain normal CMake and CI responsibilities; it must not create an alternative
+module entrypoint.
 
 ## SDK contents
 
