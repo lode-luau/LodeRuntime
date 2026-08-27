@@ -792,8 +792,8 @@ bool ResolveStandardLibraryDependencies(DependencyGraph& graph,
                 packageName = locked.name;
                 packageVersion = locked.version;
                 packageRelease = locked.artifact.release;
-                if (locked.artifact.asset != "lode-stdlib-" + packageName + "-" +
-                    packageVersion + "-windows-x64.zip")
+                if (locked.artifact.asset != "lode-stdlib-windows-x64-" +
+                    packageRelease + ".zip")
                 {
                     AddError(result, "Locked stdlib artifact name does not match package '" +
                         packageName + "'.");
