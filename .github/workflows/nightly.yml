@@ -9,9 +9,6 @@ permissions:
   contents: write
 
 jobs:
-  # Cheap gate for scheduled runs: skip the expensive build matrix when a
-  # nightly already shipped today and nothing changed since the last one.
-  # Manual dispatches always run.
   nightly-guard:
     runs-on: ubuntu-latest
     outputs:
@@ -30,206 +27,48 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
-
-          # Manual dispatches always run, scheduled ones may be skipped.
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             echo "Manual dispatch: running."
             echo "needed=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-
-          # Already shipped a nightly today?
           DATE_UTC=$(date -u +%Y%m%d)
           TODAY_COUNT=$(git ls-remote --tags origin \
             "refs/tags/1.0.0-nightly.${DATE_UTC}-*" \
             "refs/tags/1.0.0-nightly.${DATE_UTC}.*" | wc -l | tr -d ' ')
           if [ "$TODAY_COUNT" -eq 0 ]; then
-            echo "No nightly published today yet: running."
             echo "needed=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-
-          # Anything committed since the most recent nightly tag?
-          # Sort by tag name (date-prefixed, version-aware): lightweight tags
-          # would otherwise fall back to commit dates under creatordate sorting.
           PREV_TAG=$(git tag --list '1.0.0-nightly.*' | sort -rV | head -n 1)
-          if [ -z "$PREV_TAG" ]; then
-            echo "No previous nightly tag found: running."
+          if [ -z "$PREV_TAG" ] || [ "$(git rev-list "${PREV_TAG}..HEAD" --count)" -gt 0 ]; then
             echo "needed=true" >> "$GITHUB_OUTPUT"
-            exit 0
+          else
+            echo "needed=false" >> "$GITHUB_OUTPUT"
           fi
-          NEW_COMMITS=$(git rev-list "${PREV_TAG}..HEAD" --count)
-          if [ "$NEW_COMMITS" -gt 0 ]; then
-            echo "$NEW_COMMITS new commit(s) since $PREV_TAG: running."
-            echo "needed=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          echo "A nightly already ran today and nothing changed since $PREV_TAG: skipping."
-          echo "needed=false" >> "$GITHUB_OUTPUT"
 
       - name: Compute nightly version
         id: version
         shell: bash
         run: |
-          # Nightly versioning is 1.0.0-nightly.YYYYMMDD.N (dot suffix).
-          # The counter also accounts for legacy 1.0.0-nightly.YYYYMMDD-N
-          # (dash suffix) tags so a same-day manual run continues from the
-          # last published number instead of restarting at .1.
           DATE_UTC=$(date -u +%Y%m%d)
           SUFFIXES=$(git ls-remote --tags origin \
             "refs/tags/1.0.0-nightly.${DATE_UTC}-*" \
             "refs/tags/1.0.0-nightly.${DATE_UTC}.*" \
             | awk '{ ref = $2; sub(/refs\/tags\/1\.0\.0-nightly\.[0-9]+[-.]/, "", ref); if (ref ~ /^[0-9]+$/) print ref }')
           MAX=0
-          for S in $SUFFIXES; do
-            [ "$S" -gt "$MAX" ] && MAX=$S
-          done
-          N=$((MAX + 1))
-          echo "version=1.0.0-nightly.${DATE_UTC}.${N}" >> "$GITHUB_OUTPUT"
+          for S in $SUFFIXES; do [ "$S" -gt "$MAX" ] && MAX=$S; done
+          echo "version=1.0.0-nightly.${DATE_UTC}.$((MAX + 1))" >> "$GITHUB_OUTPUT"
 
-  build-windows:
-    needs: nightly-guard
-    if: needs.nightly-guard.outputs.needed == 'true'
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          fetch-tags: true
-
-      - name: Setup vcpkg
-        uses: lukka/run-vcpkg@v11
-        with:
-          vcpkgGitCommitId: ddd0023b0eee70986e42ed49d9d4afb8098f212e
-
-      # 1. Set up the sccache tool. The Visual Studio (MSBuild) generator
-      #    ignores CMAKE_<LANG>_COMPILER_LAUNCHER, so CI uses the Ninja
-      #    generator (with separate Debug/Release trees), which honors it.
-      #    Installed via choco: the sccache GitHub Action appends its own
-      #    stats section to the job summary, which the release notes should
-      #    not carry.
-      - name: Install sccache
-        run: choco install sccache -y --no-progress
-
-      # 2. Restore-only cache of compiled C++ objects, falling back to the
-      #    cache written by the ci workflow so main and nightly share hits.
-      #    The nightly never SAVES a cache entry back: ci.yml is the single
-      #    writer, keeping cache ownership unambiguous.
-      - name: Restore sccache (no save)
-        uses: actions/cache/restore@v4
-        with:
-          path: ${{ runner.temp }}/sccache
-          key: ${{ runner.os }}-x64-windows-sccache-nightly-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-x64-windows-sccache-nightly-
-            ${{ runner.os }}-x64-windows-sccache-
-
-      - name: Restore vcpkg binary packages (no save)
-        uses: actions/cache/restore@v4
-        with:
-          path: ${{ runner.temp }}/vcpkg-binary-cache
-          key: ${{ runner.os }}-vcpkg-nightly-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
-          restore-keys: |
-            ${{ runner.os }}-vcpkg-
-
-      # 3. Restore-only dependencies downloaded via FetchContent (saved by
-      #    ci.yml). Both build trees share one base via FETCHCONTENT_BASE_DIR
-      #    so there is a single source/download to cache.
-      - name: Restore FetchContent (no save)
-        uses: actions/cache/restore@v4
-        with:
-          path: ${{ runner.temp }}/_deps
-          key: ${{ runner.os }}-fetchcontent-${{ hashFiles('CMakeLists.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-fetchcontent-
-
-      # 4. Ninja needs the MSVC toolchain on PATH; without this it would pick
-      #    the MinGW GCC that is also present on windows-latest runners.
-      - name: Enable MSVC toolchain
-        uses: ilammy/msvc-dev-cmd@v1
-
-      # 5. Configure Debug (Ninja single-config tree). ${{ runner.temp }} is
-      #    only available in step-level env, not workflow/job-level env.
-      - name: Configure Debug
-        env:
-          SCCACHE_DIR: ${{ runner.temp }}/sccache
-          VCPKG_BINARY_SOURCES: clear;files,${{ runner.temp }}/vcpkg-binary-cache,readwrite
-        run: >-
-          cmake -B build-debug -G Ninja -DCMAKE_BUILD_TYPE=Debug
-          -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl
-          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
-          -DVCPKG_TARGET_TRIPLET=x64-windows
-          -DFETCHCONTENT_BASE_DIR=${{ runner.temp }}/_deps
-          -DCMAKE_C_COMPILER_LAUNCHER=sccache
-          -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
-
-      - name: Build Debug
-        env:
-          SCCACHE_DIR: ${{ runner.temp }}/sccache
-        run: cmake --build build-debug
-
-      - name: Validate Debug (sanity suite)
-        run: ./build-debug/bin/Debug/lode.exe modules/sanity/run.luau
-
-      - name: "Validate Debug (ctest: native fixtures + diagnostics)"
-        run: ctest --test-dir build-debug -C Debug --output-on-failure
-
-      # 6. Configure Release (Ninja single-config tree, reuses shared deps)
-      - name: Configure Release
-        env:
-          SCCACHE_DIR: ${{ runner.temp }}/sccache
-          VCPKG_BINARY_SOURCES: clear;files,${{ runner.temp }}/vcpkg-binary-cache,readwrite
-        run: >-
-          cmake -B build-release -G Ninja -DCMAKE_BUILD_TYPE=Release
-          -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl
-          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
-          -DVCPKG_TARGET_TRIPLET=x64-windows
-          -DFETCHCONTENT_BASE_DIR=${{ runner.temp }}/_deps
-          -DCMAKE_C_COMPILER_LAUNCHER=sccache
-          -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
-
-      - name: Build Release
-        env:
-          SCCACHE_DIR: ${{ runner.temp }}/sccache
-        run: cmake --build build-release
-
-      - name: Validate Release (sanity suite)
-        run: ./build-release/bin/Release/lode.exe modules/sanity/run.luau
-
-      - name: "Validate Release (ctest: native fixtures + diagnostics)"
-        run: ctest --test-dir build-release -C Release --output-on-failure
-
-      - name: Show sccache stats
-        env:
-          SCCACHE_DIR: ${{ runner.temp }}/sccache
-        run: sccache --show-stats
-
-      - name: Package
-        shell: pwsh
-        run: |
-          ./.github/scripts/package-stdlib.ps1 -Version '${{ needs.nightly-guard.outputs.version }}'
-
-      - name: Upload Windows archives
-        uses: actions/upload-artifact@v4
-        with:
-          name: nightly-windows-x64
-          path: |
-            lode-windows-x64-${{ needs.nightly-guard.outputs.version }}.zip
-            lode-development-windows-x64-${{ needs.nightly-guard.outputs.version }}.zip
-            lode-stdlib-windows-x64-${{ needs.nightly-guard.outputs.version }}.zip
-          if-no-files-found: error
-          retention-days: 1
-
-  # Windows and POSIX build independently. The final job publishes one
-  # immutable release only after every platform archive is available.
-  build-posix:
+  build:
     needs: nightly-guard
     if: needs.nightly-guard.outputs.needed == 'true'
     strategy:
       fail-fast: false
       matrix:
         include:
+          - os: windows-latest
+            platform: windows
           - os: ubuntu-latest
             platform: linux
           - os: macos-latest
@@ -248,10 +87,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ "${{ matrix.platform }}" = "linux" ]; then
+          if [ "${{ matrix.platform }}" = windows ]; then
+            echo "architecture=x64" >> "$GITHUB_OUTPUT"
+            echo "triplet=x64-windows" >> "$GITHUB_OUTPUT"
+          elif [ "${{ matrix.platform }}" = linux ]; then
             echo "architecture=x64" >> "$GITHUB_OUTPUT"
             echo "triplet=x64-linux" >> "$GITHUB_OUTPUT"
-          elif [ "$(uname -m)" = "arm64" ]; then
+          elif [ "$(uname -m)" = arm64 ]; then
             echo "architecture=arm64" >> "$GITHUB_OUTPUT"
             echo "triplet=arm64-osx" >> "$GITHUB_OUTPUT"
           else
@@ -259,11 +101,16 @@ jobs:
             echo "triplet=x64-osx" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Setup sccache
+      - name: Install sccache on Windows
+        if: matrix.platform == 'windows'
+        run: choco install sccache -y --no-progress
+
+      - name: Setup sccache on POSIX
+        if: matrix.platform != 'windows'
         uses: mozilla-actions/sccache-action@v0.0.8
 
-      - name: Cache sccache
-        uses: actions/cache@v4
+      - name: Restore sccache
+        uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/sccache
           key: ${{ runner.os }}-${{ steps.target.outputs.triplet }}-sccache-nightly-${{ github.sha }}
@@ -271,8 +118,8 @@ jobs:
             ${{ runner.os }}-${{ steps.target.outputs.triplet }}-sccache-nightly-
             ${{ runner.os }}-${{ steps.target.outputs.triplet }}-sccache-
 
-      - name: Cache vcpkg binary packages
-        uses: actions/cache@v4
+      - name: Restore vcpkg binary packages
+        uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/vcpkg-binary-cache
           key: ${{ runner.os }}-${{ steps.target.outputs.triplet }}-vcpkg-nightly-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
@@ -280,15 +127,34 @@ jobs:
             ${{ runner.os }}-${{ steps.target.outputs.triplet }}-vcpkg-
             ${{ runner.os }}-vcpkg-
 
-      - name: Cache FetchContent
-        uses: actions/cache@v4
+      - name: Restore FetchContent
+        uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/_deps
           key: ${{ runner.os }}-fetchcontent-nightly-${{ hashFiles('CMakeLists.txt') }}
           restore-keys: |
             ${{ runner.os }}-fetchcontent-
 
-      - name: Configure Debug
+      - name: Enable MSVC toolchain
+        if: matrix.platform == 'windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Configure Debug on Windows
+        if: matrix.platform == 'windows'
+        env:
+          SCCACHE_DIR: ${{ runner.temp }}/sccache
+          VCPKG_BINARY_SOURCES: clear;files,${{ runner.temp }}/vcpkg-binary-cache,readwrite
+        run: >-
+          cmake -B build-debug -G Ninja -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl
+          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+          -DVCPKG_TARGET_TRIPLET=${{ steps.target.outputs.triplet }}
+          -DFETCHCONTENT_BASE_DIR=${{ runner.temp }}/_deps
+          -DCMAKE_C_COMPILER_LAUNCHER=sccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+
+      - name: Configure Debug on POSIX
+        if: matrix.platform != 'windows'
         env:
           SCCACHE_DIR: ${{ runner.temp }}/sccache
           VCPKG_BINARY_SOURCES: clear;files,${{ runner.temp }}/vcpkg-binary-cache,readwrite
@@ -306,13 +172,33 @@ jobs:
           SCCACHE_DIR: ${{ runner.temp }}/sccache
         run: cmake --build build-debug
 
-      - name: Validate Debug
+      - name: Validate Debug sanity suite on Windows
+        if: matrix.platform == 'windows'
+        run: ./build-debug/bin/Debug/lode.exe modules/sanity/run.luau
+
+      - name: Validate Debug sanity suite on POSIX
+        if: matrix.platform != 'windows'
         run: ./build-debug/bin/Debug/lode modules/sanity/run.luau
 
-      - name: Validate Debug (ctest)
+      - name: Validate Debug with CTest
         run: ctest --test-dir build-debug -C Debug --output-on-failure
 
-      - name: Configure Release
+      - name: Configure Release on Windows
+        if: matrix.platform == 'windows'
+        env:
+          SCCACHE_DIR: ${{ runner.temp }}/sccache
+          VCPKG_BINARY_SOURCES: clear;files,${{ runner.temp }}/vcpkg-binary-cache,readwrite
+        run: >-
+          cmake -B build-release -G Ninja -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl
+          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+          -DVCPKG_TARGET_TRIPLET=${{ steps.target.outputs.triplet }}
+          -DFETCHCONTENT_BASE_DIR=${{ runner.temp }}/_deps
+          -DCMAKE_C_COMPILER_LAUNCHER=sccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+
+      - name: Configure Release on POSIX
+        if: matrix.platform != 'windows'
         env:
           SCCACHE_DIR: ${{ runner.temp }}/sccache
           VCPKG_BINARY_SOURCES: clear;files,${{ runner.temp }}/vcpkg-binary-cache,readwrite
@@ -330,13 +216,29 @@ jobs:
           SCCACHE_DIR: ${{ runner.temp }}/sccache
         run: cmake --build build-release
 
-      - name: Validate Release
+      - name: Validate Release sanity suite on Windows
+        if: matrix.platform == 'windows'
+        run: ./build-release/bin/Release/lode.exe modules/sanity/run.luau
+
+      - name: Validate Release sanity suite on POSIX
+        if: matrix.platform != 'windows'
         run: ./build-release/bin/Release/lode modules/sanity/run.luau
 
-      - name: Validate Release (ctest)
+      - name: Validate Release with CTest
         run: ctest --test-dir build-release -C Release --output-on-failure
 
-      - name: Package
+      - name: Show sccache stats
+        env:
+          SCCACHE_DIR: ${{ runner.temp }}/sccache
+        run: sccache --show-stats
+
+      - name: Package Windows archives
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: ./.github/scripts/package-stdlib.ps1 -Version '${{ needs.nightly-guard.outputs.version }}'
+
+      - name: Package POSIX archives
+        if: matrix.platform != 'windows'
         shell: pwsh
         run: >-
           ./.github/scripts/package-stdlib.ps1
@@ -344,20 +246,17 @@ jobs:
           -Platform '${{ matrix.platform }}'
           -Architecture '${{ steps.target.outputs.architecture }}'
 
-      - name: Upload POSIX archives
+      - name: Upload platform archives
         uses: actions/upload-artifact@v4
         with:
           name: nightly-${{ matrix.platform }}-${{ steps.target.outputs.architecture }}
-          path: |
-            lode-${{ matrix.platform }}-${{ steps.target.outputs.architecture }}-${{ needs.nightly-guard.outputs.version }}.zip
-            lode-development-${{ matrix.platform }}-${{ steps.target.outputs.architecture }}-${{ needs.nightly-guard.outputs.version }}.zip
-            lode-stdlib-${{ matrix.platform }}-${{ steps.target.outputs.architecture }}-${{ needs.nightly-guard.outputs.version }}.zip
+          path: lode-*.zip
           if-no-files-found: error
           retention-days: 1
 
   finalize-release:
-    needs: [nightly-guard, build-windows, build-posix]
-    if: needs.nightly-guard.outputs.needed == 'true' && needs.build-windows.result == 'success' && needs.build-posix.result == 'success'
+    needs: [nightly-guard, build]
+    if: needs.nightly-guard.outputs.needed == 'true' && needs.build.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

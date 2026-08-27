@@ -3,10 +3,6 @@ name: ci
 on:
   pull_request:
     branches: [main]
-    # Keep this list in sync with the documentation-only filter in
-    # .github/scripts/generate-release-notes.sh: builds are pointless when
-    # every touched file is pure documentation. Manual dispatches are not
-    # affected because paths filters do not apply to them.
     paths-ignore:
       - '**.md'
       - '**.txt'
@@ -32,10 +28,6 @@ permissions:
   contents: read
 
 jobs:
-  # Semantic gate on top of paths-ignore: paths-ignore skips builds whose
-  # touched paths are all documentation, while this gate also skips ranges
-  # where every remaining source hunk is comments or whitespace noise,
-  # using the shared .github/scripts/is-real-change.sh classifier.
   change-gate:
     runs-on: ubuntu-latest
     outputs:
@@ -45,9 +37,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Precision layer for the classifier: string-aware comment stripper.
-      # Version-pinned; the classifier falls back to git-only filters if
-      # this download ever fails.
       - name: Install shush
         run: |
           mkdir -p "$HOME/.local/bin"
@@ -62,167 +51,41 @@ jobs:
         run: |
           set -uo pipefail
           SHA="${{ github.sha }}"
-
           case "${{ github.event_name }}" in
             workflow_dispatch)
-              echo "Manual dispatch: building."
               echo "real=true" >> "$GITHUB_OUTPUT"
               exit 0 ;;
             pull_request)
               BASE="$(git merge-base "${{ github.event.pull_request.base.sha }}" HEAD)" ;;
             push)
               BASE="${{ github.event.before }}"
-              # Zero SHA on the first push of a branch or an unreachable base
-              # (force-push): compare against the tip of main instead.
               if ! git rev-parse -q --verify "$BASE^{commit}" >/dev/null 2>&1; then
                 git fetch --quiet origin main
                 BASE="$(git merge-base FETCH_HEAD HEAD)"
               fi ;;
-            *)
-              BASE="" ;;
+            *) BASE="" ;;
           esac
-
           if [ -z "$BASE" ]; then
-            echo "No comparable base revision: building."
             echo "real=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          if bash .github/scripts/is-real-change.sh "$BASE" "$SHA"; then
+          elif bash .github/scripts/is-real-change.sh "$BASE" "$SHA"; then
             echo "real=true" >> "$GITHUB_OUTPUT"
           else
-            echo "Documentation/comment/whitespace-only range: skipping build."
             echo "real=false" >> "$GITHUB_OUTPUT"
           fi
 
-  build-and-validate:
-    needs: change-gate
-    if: needs.change-gate.outputs.real == 'true'
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup vcpkg
-        uses: lukka/run-vcpkg@v11
-        with:
-          vcpkgGitCommitId: ddd0023b0eee70986e42ed49d9d4afb8098f212e
-
-      - name: Cache vcpkg binary packages
-        uses: actions/cache@v4
-        with:
-          path: ${{ runner.temp }}/vcpkg-binary-cache
-          key: ${{ runner.os }}-vcpkg-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
-          restore-keys: |
-            ${{ runner.os }}-vcpkg-
-
-      # 1. Set up the sccache tool. The Visual Studio (MSBuild) generator
-      #    ignores CMAKE_<LANG>_COMPILER_LAUNCHER, so CI uses the Ninja
-      #    generator (with separate Debug/Release trees), which honors it.
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@v0.0.8
-
-      # 2. Restore/save cache of compiled C++ objects.
-      #    Note: caches are branch-scoped, so a merge run on main can never
-      #    reuse a cache written by a pull_request branch (that is why PR
-      #    runs "compile everything again" after the merge). To make
-      #    retries/re-pushes of the SAME PR commit hit, key on the head
-      #    commit SHA instead of github.sha, which on push/pull_request is
-      #    the ephemeral merge-ref SHA and changes on every push. The
-      #    restore-keys prefix then falls back to the newest cache from this
-      #    branch or from the default branch (main), so a PR seeded after a
-      #    recent main/nightly run hits against objects built with identical
-      #    flags.
-      - name: Cache sccache
-        uses: actions/cache@v4
-        with:
-          path: ${{ runner.temp }}/sccache
-          key: ${{ runner.os }}-x64-windows-sccache-${{ github.event.pull_request.head.sha || github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-x64-windows-sccache-
-
-      # 3. Restore/save dependencies downloaded via FetchContent. Both build
-      #    trees share one base via FETCHCONTENT_BASE_DIR so there is a single
-      #    source/download to cache.
-      - name: Cache FetchContent
-        uses: actions/cache@v4
-        with:
-          path: ${{ runner.temp }}/_deps
-          key: ${{ runner.os }}-fetchcontent-${{ hashFiles('CMakeLists.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-fetchcontent-
-
-      # 4. Ninja needs the MSVC toolchain on PATH; without this it would pick
-      #    the MinGW GCC that is also present on windows-latest runners.
-      - name: Enable MSVC toolchain
-        uses: ilammy/msvc-dev-cmd@v1
-
-      # 5. Configure Debug (Ninja single-config tree). ${{ runner.temp }} is
-      #    only available in step-level env, not workflow/job-level env.
-      - name: Configure Debug
-        env:
-          SCCACHE_DIR: ${{ runner.temp }}/sccache
-          VCPKG_BINARY_SOURCES: clear;files,${{ runner.temp }}/vcpkg-binary-cache,readwrite
-        run: >-
-          cmake -B build-debug -G Ninja -DCMAKE_BUILD_TYPE=Debug
-          -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl
-          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
-          -DVCPKG_TARGET_TRIPLET=x64-windows
-          -DFETCHCONTENT_BASE_DIR=${{ runner.temp }}/_deps
-          -DCMAKE_C_COMPILER_LAUNCHER=sccache
-          -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
-
-      - name: Build Debug
-        env:
-          SCCACHE_DIR: ${{ runner.temp }}/sccache
-        run: cmake --build build-debug
-
-      - name: Validate Debug (sanity suite)
-        run: ./build-debug/bin/Debug/lode.exe modules/sanity/run.luau
-
-      - name: "Validate Debug (ctest: native fixtures + diagnostics)"
-        run: ctest --test-dir build-debug -C Debug --output-on-failure
-
-      # 6. Configure Release (Ninja single-config tree, reuses shared deps)
-      - name: Configure Release
-        env:
-          SCCACHE_DIR: ${{ runner.temp }}/sccache
-          VCPKG_BINARY_SOURCES: clear;files,${{ runner.temp }}/vcpkg-binary-cache,readwrite
-        run: >-
-          cmake -B build-release -G Ninja -DCMAKE_BUILD_TYPE=Release
-          -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl
-          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
-          -DVCPKG_TARGET_TRIPLET=x64-windows
-          -DFETCHCONTENT_BASE_DIR=${{ runner.temp }}/_deps
-          -DCMAKE_C_COMPILER_LAUNCHER=sccache
-          -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
-
-      - name: Build Release
-        env:
-          SCCACHE_DIR: ${{ runner.temp }}/sccache
-        run: cmake --build build-release
-
-      - name: Validate Release (sanity suite)
-        run: ./build-release/bin/Release/lode.exe modules/sanity/run.luau
-
-      - name: "Validate Release (ctest: native fixtures + diagnostics)"
-        run: ctest --test-dir build-release -C Release --output-on-failure
-
-      # 7. Report cache hit rate in the log
-      - name: Show sccache stats
-        env:
-          SCCACHE_DIR: ${{ runner.temp }}/sccache
-        run: sccache --show-stats
-
-  # Keep the POSIX build in the required CI path as well. This catches
-  # platform-specific linker flags, OpenSSL discovery, native module output
-  # paths, and the generated Lode consumer test on both Linux and macOS.
-  build-posix:
+  build:
     needs: change-gate
     if: needs.change-gate.outputs.real == 'true'
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        include:
+          - os: windows-latest
+            platform: windows
+          - os: ubuntu-latest
+            platform: linux
+          - os: macos-latest
+            platform: macos
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -232,37 +95,49 @@ jobs:
         with:
           vcpkgGitCommitId: ddd0023b0eee70986e42ed49d9d4afb8098f212e
 
-      - name: Select vcpkg triplet
-        id: triplet
+      - name: Select target
+        id: target
         shell: bash
         run: |
-          if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
-            echo "value=x64-linux" >> "$GITHUB_OUTPUT"
-          elif [ "$(uname -m)" = "arm64" ]; then
-            echo "value=arm64-osx" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          if [ "${{ matrix.platform }}" = windows ]; then
+            echo "architecture=x64" >> "$GITHUB_OUTPUT"
+            echo "triplet=x64-windows" >> "$GITHUB_OUTPUT"
+          elif [ "${{ matrix.platform }}" = linux ]; then
+            echo "architecture=x64" >> "$GITHUB_OUTPUT"
+            echo "triplet=x64-linux" >> "$GITHUB_OUTPUT"
+          elif [ "$(uname -m)" = arm64 ]; then
+            echo "architecture=arm64" >> "$GITHUB_OUTPUT"
+            echo "triplet=arm64-osx" >> "$GITHUB_OUTPUT"
           else
-            echo "value=x64-osx" >> "$GITHUB_OUTPUT"
+            echo "architecture=x64" >> "$GITHUB_OUTPUT"
+            echo "triplet=x64-osx" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Cache vcpkg binary packages
-        uses: actions/cache@v4
-        with:
-          path: ${{ runner.temp }}/vcpkg-binary-cache
-          key: ${{ runner.os }}-${{ steps.triplet.outputs.value }}-vcpkg-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ steps.triplet.outputs.value }}-vcpkg-
-            ${{ runner.os }}-vcpkg-
+      - name: Install sccache on Windows
+        if: matrix.platform == 'windows'
+        run: choco install sccache -y --no-progress
 
-      - name: Setup sccache
+      - name: Setup sccache on POSIX
+        if: matrix.platform != 'windows'
         uses: mozilla-actions/sccache-action@v0.0.8
 
       - name: Cache sccache
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/sccache
-          key: ${{ runner.os }}-${{ steps.triplet.outputs.value }}-sccache-${{ github.event.pull_request.head.sha || github.sha }}
+          key: ${{ runner.os }}-${{ steps.target.outputs.triplet }}-sccache-${{ github.event.pull_request.head.sha || github.sha }}
           restore-keys: |
-            ${{ runner.os }}-${{ steps.triplet.outputs.value }}-sccache-
+            ${{ runner.os }}-${{ steps.target.outputs.triplet }}-sccache-
+
+      - name: Cache vcpkg binary packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/vcpkg-binary-cache
+          key: ${{ runner.os }}-${{ steps.target.outputs.triplet }}-vcpkg-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ steps.target.outputs.triplet }}-vcpkg-
+            ${{ runner.os }}-vcpkg-
 
       - name: Cache FetchContent
         uses: actions/cache@v4
@@ -272,14 +147,34 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-fetchcontent-
 
-      - name: Configure Debug
+      - name: Enable MSVC toolchain
+        if: matrix.platform == 'windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Configure Debug on Windows
+        if: matrix.platform == 'windows'
         env:
           SCCACHE_DIR: ${{ runner.temp }}/sccache
           VCPKG_BINARY_SOURCES: clear;files,${{ runner.temp }}/vcpkg-binary-cache,readwrite
         run: >-
           cmake -B build-debug -G Ninja -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl
+          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+          -DVCPKG_TARGET_TRIPLET=${{ steps.target.outputs.triplet }}
+          -DFETCHCONTENT_BASE_DIR=${{ runner.temp }}/_deps
+          -DCMAKE_C_COMPILER_LAUNCHER=sccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+
+      - name: Configure Debug on POSIX
+        if: matrix.platform != 'windows'
+        env:
+          SCCACHE_DIR: ${{ runner.temp }}/sccache
+          VCPKG_BINARY_SOURCES: clear;files,${{ runner.temp }}/vcpkg-binary-cache,readwrite
+        shell: bash
+        run: >-
+          cmake -B build-debug -G Ninja -DCMAKE_BUILD_TYPE=Debug
           -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
-          -DVCPKG_TARGET_TRIPLET=${{ steps.triplet.outputs.value }}
+          -DVCPKG_TARGET_TRIPLET=${{ steps.target.outputs.triplet }}
           -DFETCHCONTENT_BASE_DIR=${{ runner.temp }}/_deps
           -DCMAKE_C_COMPILER_LAUNCHER=sccache
           -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
@@ -289,20 +184,41 @@ jobs:
           SCCACHE_DIR: ${{ runner.temp }}/sccache
         run: cmake --build build-debug
 
-      - name: Validate Debug (sanity suite)
+      - name: Validate Debug sanity suite on Windows
+        if: matrix.platform == 'windows'
+        run: ./build-debug/bin/Debug/lode.exe modules/sanity/run.luau
+
+      - name: Validate Debug sanity suite on POSIX
+        if: matrix.platform != 'windows'
         run: ./build-debug/bin/Debug/lode modules/sanity/run.luau
 
-      - name: Validate Debug (ctest)
+      - name: Validate Debug with CTest
         run: ctest --test-dir build-debug -C Debug --output-on-failure
 
-      - name: Configure Release
+      - name: Configure Release on Windows
+        if: matrix.platform == 'windows'
         env:
           SCCACHE_DIR: ${{ runner.temp }}/sccache
           VCPKG_BINARY_SOURCES: clear;files,${{ runner.temp }}/vcpkg-binary-cache,readwrite
         run: >-
           cmake -B build-release -G Ninja -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl
+          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+          -DVCPKG_TARGET_TRIPLET=${{ steps.target.outputs.triplet }}
+          -DFETCHCONTENT_BASE_DIR=${{ runner.temp }}/_deps
+          -DCMAKE_C_COMPILER_LAUNCHER=sccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+
+      - name: Configure Release on POSIX
+        if: matrix.platform != 'windows'
+        env:
+          SCCACHE_DIR: ${{ runner.temp }}/sccache
+          VCPKG_BINARY_SOURCES: clear;files,${{ runner.temp }}/vcpkg-binary-cache,readwrite
+        shell: bash
+        run: >-
+          cmake -B build-release -G Ninja -DCMAKE_BUILD_TYPE=Release
           -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
-          -DVCPKG_TARGET_TRIPLET=${{ steps.triplet.outputs.value }}
+          -DVCPKG_TARGET_TRIPLET=${{ steps.target.outputs.triplet }}
           -DFETCHCONTENT_BASE_DIR=${{ runner.temp }}/_deps
           -DCMAKE_C_COMPILER_LAUNCHER=sccache
           -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
@@ -312,10 +228,15 @@ jobs:
           SCCACHE_DIR: ${{ runner.temp }}/sccache
         run: cmake --build build-release
 
-      - name: Validate Release (sanity suite)
+      - name: Validate Release sanity suite on Windows
+        if: matrix.platform == 'windows'
+        run: ./build-release/bin/Release/lode.exe modules/sanity/run.luau
+
+      - name: Validate Release sanity suite on POSIX
+        if: matrix.platform != 'windows'
         run: ./build-release/bin/Release/lode modules/sanity/run.luau
 
-      - name: Validate Release (ctest)
+      - name: Validate Release with CTest
         run: ctest --test-dir build-release -C Release --output-on-failure
 
       - name: Show sccache stats
