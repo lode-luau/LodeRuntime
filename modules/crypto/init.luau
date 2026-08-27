@@ -6,7 +6,7 @@
 --- Binary data accepted by crypto operations.
 export type ByteInput = string | buffer
 
---- Hash algorithms exposed by the Windows BCrypt provider.
+--- Hash algorithms exposed by the platform crypto provider.
 export type HashAlgorithm = "sha256" | "sha384" | "sha512"
 
 --- Authenticated-encryption algorithms.
@@ -15,7 +15,7 @@ export type AeadAlgorithm = "aes-256-gcm"
 --- Supported generated key families.
 export type KeyPairAlgorithm = "rsa-3072" | "p256"
 
---- Supported signature schemes. Signatures are provider-native binary values.
+--- Supported signature schemes. Signatures use ASN.1 DER encoding.
 export type SignatureAlgorithm = "rsa-pss-sha256" | "rsa-pss-sha384" | "rsa-pss-sha512" | "ecdsa-p256-sha256"
 
 --- Supported public-key encryption schemes.
@@ -38,13 +38,13 @@ export type KeyPair = {
     Native cryptography module.
 
     Binary inputs accept strings or buffers. Binary outputs are buffers so NUL
-    bytes are preserved. The native implementation currently uses Windows
-    BCrypt/CNG and exposes synchronous, stateless operations.
+    bytes are preserved. Operations are synchronous and stateless. The native
+    provider is BCrypt/CNG on Windows and OpenSSL on Linux/macOS.
 
     Asymmetric private keys must be unencrypted PKCS#8 DER. Public keys must be
-    SubjectPublicKeyInfo DER. RSA signatures use RSA-PSS with a 32-byte SHA-256
-    salt; ECDSA signatures use the raw CNG signature representation. ECDH
-    returns the provider's raw shared secret.
+    SubjectPublicKeyInfo DER. RSA signatures use RSA-PSS with a salt matching
+    the selected digest; ECDSA signatures use ASN.1 DER. ECDH returns the
+    standard big-endian raw shared secret.
 ]]
 export type CryptoModule = {
     --- Generates cryptographically secure random bytes.
@@ -168,14 +168,14 @@ export type CryptoModule = {
     --- @param algorithm Signature scheme.
     --- @param privateKey Unencrypted PKCS#8 DER private key.
     --- @param data Data to sign.
-    --- @return Provider-native signature bytes.
+    --- @return ASN.1 DER signature bytes.
     sign: (algorithm: string, privateKey: ByteInput, data: ByteInput) -> buffer,
 
     --- Verifies a signature.
     --- @param algorithm Signature scheme.
     --- @param publicKey SPKI DER public key.
     --- @param data Signed data.
-    --- @param signature Provider-native signature bytes.
+    --- @param signature ASN.1 DER signature bytes.
     --- @return True for a valid signature; false for an invalid signature.
     verify: (algorithm: string, publicKey: ByteInput, data: ByteInput, signature: ByteInput) -> boolean,
 

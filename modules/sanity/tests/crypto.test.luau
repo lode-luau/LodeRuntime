@@ -4,17 +4,6 @@ local sanity = require("../init")
 local describe = sanity.describe
 local it = sanity.it
 local expect = sanity.expect
-local sys = require("../../sys")
-
-if not sys.GetPlatform():lower():find("windows", 1, true) then
-    describe("crypto", function()
-        it("is unavailable outside the Windows CNG provider", function()
-            sanity.skip("crypto currently provides the Windows BCrypt/CNG provider only")
-        end)
-    end)
-    return
-end
-
 local crypto = require("../../crypto")
 
 local function text(data: buffer): string return buffer.tostring(data) end
