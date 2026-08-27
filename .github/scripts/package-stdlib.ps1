@@ -7,7 +7,11 @@ param(
 
     [string]$DebugBuildDirectory = "build-debug",
     [string]$ReleaseBuildDirectory = "build-release",
-    [string]$OutputDirectory = "."
+    [string]$OutputDirectory = ".",
+    [ValidateSet("windows", "linux", "macos")]
+    [string]$Platform = "windows",
+    [ValidateSet("x64", "arm64")]
+    [string]$Architecture = "x64"
 )
 
 # No Set-StrictMode here on purpose: manifests may omit optional keys such
@@ -22,6 +26,15 @@ $outputRoot = [System.IO.Path]::GetFullPath($OutputDirectory)
 $debugBuildRoot = [System.IO.Path]::GetFullPath($DebugBuildDirectory)
 $releaseBuildRoot = [System.IO.Path]::GetFullPath($ReleaseBuildDirectory)
 New-Item -ItemType Directory -Force -Path $outputRoot | Out-Null
+
+$configuration = "Release"
+$moduleExtension = switch ($Platform) {
+    "windows" { ".dll" }
+    "macos" { ".dylib" }
+    default { ".so" }
+}
+$assetTarget = "$Platform-$Architecture"
+$releaseBinRoot = Join-Path $releaseBuildRoot "bin/$configuration"
 
 function Copy-LodeDirectoryContents {
     param(
@@ -47,7 +60,9 @@ function Compress-LodeDirectory {
     $archive = [System.IO.Compression.ZipFile]::Open(
         $Destination, [System.IO.Compression.ZipArchiveMode]::Create)
     try {
-        $sourceRoot = (Resolve-Path -LiteralPath $Source).Path.TrimEnd('\') + '\'
+        $directorySeparator = [System.IO.Path]::DirectorySeparatorChar
+        $alternateSeparator = [System.IO.Path]::AltDirectorySeparatorChar
+        $sourceRoot = (Resolve-Path -LiteralPath $Source).Path.TrimEnd($directorySeparator, $alternateSeparator) + $directorySeparator
         Get-ChildItem -LiteralPath $Source -Force -Recurse -File | ForEach-Object {
             $entryName = $_.FullName.Substring($sourceRoot.Length).Replace('\', '/')
             [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
@@ -87,12 +102,23 @@ $lodeMetadata = [regex]::new($lodeMetadataPattern).Replace(
     $lodeMetadata, ('"version": "' + $ver + '"'), 1)
 Set-Content -Path $lodeMetadataPath -Value $lodeMetadata -NoNewline
 
-# ---- Runtime distribution: executable and runtime DLLs ----
+# ---- Runtime distribution: executable and runtime libraries ----
 # The end-user archive contains the runtime and the bundled stdlib.
 # Development headers and CMake targets remain in the optional development archive.
-Copy-Item (Join-Path $releaseBuildRoot "bin/Release/lode.exe") $runtimeBinDist
-Copy-Item (Join-Path $releaseBuildRoot "bin/Release/LodeCore.dll") $runtimeBinDist
-Copy-Item (Join-Path $releaseBuildRoot "bin/Release/uv.dll") $runtimeBinDist
+$runtimeExecutable = if ($Platform -eq "windows") { "lode.exe" } else { "lode" }
+Copy-Item (Join-Path $releaseBinRoot $runtimeExecutable) $runtimeBinDist
+$runtimeLibraryPattern = if ($Platform -eq "windows") {
+    @("LodeCore.dll", "uv.dll")
+} elseif ($Platform -eq "macos") {
+    @("libLodeCore.dylib", "libuv.dylib")
+} else {
+    @("libLodeCore.so*", "libuv.so*")
+}
+foreach ($pattern in $runtimeLibraryPattern) {
+    $runtimeLibrary = Get-ChildItem -LiteralPath $releaseBinRoot -File -Filter $pattern | Select-Object -First 1
+    if (-not $runtimeLibrary) { throw "Runtime library matching '$pattern' was not found in $releaseBinRoot" }
+    Copy-Item -LiteralPath $runtimeLibrary.FullName -Destination $runtimeBinDist
+}
 Copy-Item LICENSE, README.md $distributionDist
 Set-Content -Path "$distributionDist/VERSION" -Value $ver
 
@@ -173,11 +199,11 @@ function Expand-ModuleArtifactPath {
     }
     $expanded = $layout.Replace("{platform}", $Platform).Replace("{architecture}", $Architecture).
         Replace("{configuration}", $Configuration).Replace("{artifact}", $artifact).
-        Replace("{extension}", ".dll")
+        Replace("{extension}", $moduleExtension)
     if ([System.IO.Path]::IsPathRooted($expanded) -or $expanded -match '(^|[\\/])\.\.([\\/]|$)') {
         throw "Module implementation layout escapes the package: $expanded"
     }
-    return $expanded.Replace('/', '\')
+    return $expanded.Replace('/', [System.IO.Path]::DirectorySeparatorChar)
 }
 
 $moduleDirs = Get-ChildItem modules -Directory -Recurse | Where-Object { Test-Path (Join-Path $_.FullName "package.luau") }
@@ -221,7 +247,7 @@ foreach ($mdir in $moduleDirs) {
         $stdlibIndex.packages[$name].artifact = if ($manifest.implementation.artifact) {
             [string]$manifest.implementation.artifact
         } else { $name }
-        $stdlibIndex.packages[$name].targets = @("windows/x64")
+        $stdlibIndex.packages[$name].targets = @($assetTarget)
     }
 }
 
@@ -267,7 +293,7 @@ foreach ($record in ($moduleRecords.Values | Sort-Object RelativePath)) {
         $childRel = "$rel/$($_.Name)"
         $isNestedModule = $_.PSIsContainer -and $moduleRelSet.ContainsKey($childRel)
         # Exclude build-time files and the libs/ tree (rebuilt below
-        # with only the shipped platform, windows/x64). src/ is
+        # with only the shipped platform/architecture). src/ is
         # excluded only for compiled modules (those with a
         # CMakeLists.txt); pure-Luau modules keep their src/.
         $isExcluded = $_.Name -eq "CMakeLists.txt" -or $_.Name -eq "libs" -or ($_.Name -eq "src" -and $isCompiledModule)
@@ -276,15 +302,15 @@ foreach ($record in ($moduleRecords.Values | Sort-Object RelativePath)) {
         }
     }
 
-    # Compiled modules keep their config-matched DLL in the module's
+    # Compiled modules keep their config-matched shared library in the module's
     # own libs/<platform>/<arch>/<config> entry from package.luau; the
     # loader resolves the config-aware subdir per runtime build.
     if ($isCompiledModule) {
-        $relativeArtifact = Expand-ModuleArtifactPath -Manifest $record.Manifest -Platform "windows" -Architecture "x64" -Configuration "Release"
+        $relativeArtifact = Expand-ModuleArtifactPath -Manifest $record.Manifest -Platform $Platform -Architecture $Architecture -Configuration $configuration
         $libRelease = Join-Path $src $relativeArtifact
         $artifactName = Split-Path $relativeArtifact -Leaf
-        $libFlat = Join-Path $src (Join-Path "libs/windows/x64" $artifactName)
-        $libBin = Join-Path $releaseBuildRoot "bin/Release/$artifactName"
+        $libFlat = Join-Path $src (Join-Path "libs/$Platform/$Architecture" $artifactName)
+        $libBin = Join-Path $releaseBinRoot $artifactName
 
         $sourceDll = $null
         if (Test-Path $libRelease) {
@@ -299,6 +325,29 @@ foreach ($record in ($moduleRecords.Values | Sort-Object RelativePath)) {
             $libDirRelease = Split-Path (Join-Path $dst $relativeArtifact) -Parent
             New-Item -ItemType Directory -Force -Path $libDirRelease | Out-Null
             Copy-Item $sourceDll (Join-Path $libDirRelease $artifactName) -Force
+
+            # OpenSSL is a runtime dependency of the POSIX TLS/crypto modules.
+            # Keep it beside each module so the packaged artifact remains
+            # relocatable and can be loaded without a system OpenSSL install.
+            if ($Platform -ne "windows" -and $name -in @("crypto", "http", "tcp", "websocket")) {
+                $triplet = if ($Platform -eq "linux") { "x64-linux" } elseif ($Architecture -eq "arm64") { "arm64-osx" } else { "x64-osx" }
+                $vcpkgRoot = Join-Path $releaseBuildRoot "vcpkg_installed/$triplet"
+                $opensslRoots = @((Join-Path $vcpkgRoot "lib"), (Join-Path $vcpkgRoot "bin"))
+                $opensslFiles = foreach ($opensslRoot in $opensslRoots) {
+                    if (Test-Path -LiteralPath $opensslRoot) {
+                        Get-ChildItem -LiteralPath $opensslRoot -File | Where-Object {
+                            if ($Platform -eq "linux") {
+                                $_.Name -match '^lib(crypto|ssl)\.so(\.|$)'
+                            } else {
+                                $_.Name -match '^lib(crypto|ssl)(\.\d+)?\.dylib$'
+                            }
+                        }
+                    }
+                }
+                foreach ($opensslFile in ($opensslFiles | Sort-Object FullName -Unique)) {
+                    Copy-Item -LiteralPath $opensslFile.FullName -Destination $libDirRelease -Force
+                }
+            }
         } else {
             Write-Error "Module library for $name was not found at $libRelease, $libFlat, or $libBin"
         }
@@ -333,15 +382,15 @@ $developmentStdlibDist = Join-Path $developmentDist "stdlib"
 New-Item -ItemType Directory -Force -Path $developmentStdlibDist | Out-Null
 Copy-LodeDirectoryContents -Source $stdlibDist -Destination $developmentStdlibDist
 
-Compress-LodeDirectory -Source $distributionDist -Destination (Join-Path $outputRoot "lode-windows-x64-$ver.zip")
-Compress-LodeDirectory -Source $developmentDist -Destination (Join-Path $outputRoot "lode-development-windows-x64-$ver.zip")
-Compress-LodeDirectory -Source $stdlibDist -Destination (Join-Path $outputRoot "lode-stdlib-windows-x64-$ver.zip")
+Compress-LodeDirectory -Source $distributionDist -Destination (Join-Path $outputRoot "lode-$assetTarget-$ver.zip")
+Compress-LodeDirectory -Source $developmentDist -Destination (Join-Path $outputRoot "lode-development-$assetTarget-$ver.zip")
+Compress-LodeDirectory -Source $stdlibDist -Destination (Join-Path $outputRoot "lode-stdlib-$assetTarget-$ver.zip")
 
 $checksums = @()
 foreach ($archive in @(
-    (Join-Path $outputRoot "lode-windows-x64-$ver.zip"),
-    (Join-Path $outputRoot "lode-development-windows-x64-$ver.zip"),
-    (Join-Path $outputRoot "lode-stdlib-windows-x64-$ver.zip")
+    (Join-Path $outputRoot "lode-$assetTarget-$ver.zip"),
+    (Join-Path $outputRoot "lode-development-$assetTarget-$ver.zip"),
+    (Join-Path $outputRoot "lode-stdlib-$assetTarget-$ver.zip")
 )) {
     $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($null -eq $checksums) { $checksums = @() }

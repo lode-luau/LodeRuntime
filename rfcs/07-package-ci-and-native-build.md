@@ -141,7 +141,7 @@ The package manager may provide:
 lode ci init
 lode ci validate --source
 lode ci validate --artifact
-lode pack --output out/lode-<name>-<version>-windows-x64.zip .
+lode pack --output out/lode-<name>-<version>-<platform>-<architecture>.zip .
 lode ci update
 ```
 

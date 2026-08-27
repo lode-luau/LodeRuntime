@@ -67,7 +67,7 @@ lode pack [--output <archive>] [package-root]
 ```
 
 It validates the package artifact, replays `lode.lock` when one is present,
-creates the Windows x64 archive and its sibling `.sha256` file, extracts the
+creates the host-target archive and its sibling `.sha256` file, extracts the
 archive into a temporary staging directory, and validates the extracted
 package before succeeding. The archive contains `package.luau`, `init.luau`,
 `LICENSE`, optional `README.md`/`NOTICE`, Luau sources outside `tests/`, and
@@ -75,7 +75,7 @@ runtime libraries under `libs/`. Luau sources may be spread across nested
 module directories; `init.luau` is only the package root convention, not the
 only source file included. It excludes `.config.luau`, CMake files, build
 output, and test files. The default output is
-`out/lode-<name>-<version>-windows-x64.zip` under the package root.
+`out/lode-<name>-<version>-<platform>-<architecture>.zip` under the package root.
 
 ## Compiled implementation artifacts
 
@@ -84,8 +84,8 @@ path. `package.luau.implementation.targets.release` is the explicit list of
 targets authorized for CI validation and publication. The default layout is:
 
 ```text
-libs/windows/x64/Debug/http.dll
-libs/windows/x64/Release/http.dll
+    libs/{platform}/{architecture}/Debug/http{extension}
+    libs/{platform}/{architecture}/Release/http{extension}
 ```
 
 The package manager validates that every resolved path remains inside the
@@ -116,10 +116,19 @@ checksum.
 Package asset names currently produced by the generated package workflow are:
 
 ```text
-lode-<package-name>-1.0.0-windows-x64.zip
+lode-<package-name>-1.0.0-<platform>-<architecture>.zip
 lode-windows-x64-1.0.0-nightly.YYYYMMDD.N.zip
+lode-linux-x64-1.0.0-nightly.YYYYMMDD.N.zip
+lode-macos-x64-1.0.0-nightly.YYYYMMDD.N.zip
+lode-macos-arm64-1.0.0-nightly.YYYYMMDD.N.zip
 lode-development-windows-x64-1.0.0-nightly.YYYYMMDD.N.zip
+lode-development-linux-x64-1.0.0-nightly.YYYYMMDD.N.zip
+lode-development-macos-x64-1.0.0-nightly.YYYYMMDD.N.zip
+lode-development-macos-arm64-1.0.0-nightly.YYYYMMDD.N.zip
 lode-stdlib-windows-x64-1.0.0-nightly.YYYYMMDD.N.zip
+lode-stdlib-linux-x64-1.0.0-nightly.YYYYMMDD.N.zip
+lode-stdlib-macos-x64-1.0.0-nightly.YYYYMMDD.N.zip
+lode-stdlib-macos-arm64-1.0.0-nightly.YYYYMMDD.N.zip
 SHA256SUMS
 ```
 
@@ -161,10 +170,9 @@ runtime contains the SHA-256 verifier and ZIP extractor for this path; it does
 not call PowerShell, `tar`, `cmake`, or `gh` to install packages. It must
 extract into a staging directory, reject archive paths that escape that
 directory, validate the package root, and move the completed installation into
-the global cache atomically. The current installer implements this flow for
-the Windows x64 GitHub Release contract; other targets remain unsupported
-until their downloader and release matrix are implemented. Static compiled
-artifacts and iOS publishing are outside this scope.
+the global cache atomically. The installer selects the current
+platform/architecture GitHub Release asset. Static compiled artifacts and
+iOS publishing are outside this scope.
 
 An incomplete download or extraction must never become an installable package.
 
@@ -184,9 +192,9 @@ The standard library is runtime-owned, not a normal `package.luau` dependency.
 The full end-user archive contains:
 
 ```text
-bin/lode.exe
-bin/LodeCore.dll
-bin/uv.dll
+bin/lode[.exe]
+bin/LodeCore[.dll/.so/.dylib]
+bin/uv[.dll/.so/.dylib]
 stdlib/.config.luau
 stdlib/modules/<module>/
 VERSION
@@ -195,18 +203,17 @@ VERSION
 The root stdlib configuration exposes the bundled module aliases. The
 `stdlib/VERSION` marker contains the exact nightly release tag used by the
 package manager when it selects a fallback artifact. The nightly publishes one
-aggregate archive and one global checksum catalog for the current Windows x64
-target:
+aggregate archive per runtime target and one global checksum catalog:
 
 ```text
-lode-stdlib-windows-x64-<nightly-release>.zip
+lode-stdlib-<platform>-<architecture>-<nightly-release>.zip
 SHA256SUMS
 ```
 
 A package requesting an exact standard-module version downloads the aggregate
 bundle and selects the matching package from its `index.json`; if the bundled
 version is compatible, no additional download is required. The downloaded
-archive is validated as a Windows x64/Release installation artifact. The public `ci validate --artifact` mode
+archive is validated as a current-platform/Release installation artifact. The public `ci validate --artifact` mode
 continues to validate the complete platform/configuration matrix declared by
 an external package. When the package has a lockfile, CI must use
 `ci validate --artifact --locked`; this keeps the complete matrix validation

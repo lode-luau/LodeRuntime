@@ -4,8 +4,8 @@
 
 Accepted design. The first CMake and runtime pieces are implemented in this
 repository. The nightly Lode development distribution and external-package
-validation are wired for Windows x64; additional targets and stable release
-publication remain follow-up work.
+validation are wired for Windows x64; the runtime and standard-library CI
+matrix also covers Linux x64 and the host architecture on macOS.
 
 ## Scope
 

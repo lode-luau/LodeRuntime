@@ -40,10 +40,10 @@ The current package workflow is:
 Use `lode ci init --lode-version <nightly> --lode-sha256 <sha256>` to generate
 an initial workflow. A locked install requires an up-to-date `lode.lock` and
 uses the exact locked artifacts; the current installer does not build dependency
-sources. The CI runtime/module test matrix is configured for Windows x64,
-Linux x64, and the host architecture on macOS. The currently published compiled
-package path is still Windows x64; platform keys present in a manifest do not,
-by themselves, mean that a target is published. See [the manifest and ownership RFC](rfcs/05-package-manifest-and-ownership.md), [package resolution and lockfiles](rfcs/06-package-resolution-and-lockfile.md), and [package artifacts](rfcs/09-package-artifacts-and-releases.md).
+sources. The CI runtime/module test matrix covers Windows x64, Linux x64, and
+the host architecture on macOS. Nightly runtime, development, and stdlib
+archives are published per target; a platform key in a manifest is still only
+a claim until its matching CI artifact exists. See [the manifest and ownership RFC](rfcs/05-package-manifest-and-ownership.md), [package resolution and lockfiles](rfcs/06-package-resolution-and-lockfile.md), and [package artifacts](rfcs/09-package-artifacts-and-releases.md).
 
 ## Compiled module quick start
 

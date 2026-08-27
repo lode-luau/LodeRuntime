@@ -71,6 +71,8 @@ jobs:
     needs: nightly-guard
     if: needs.nightly-guard.outputs.needed == 'true'
     runs-on: windows-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       # Full history and tags: the release-notes step walks commits and
       # nightly tags to describe everything changed since the last build.
@@ -240,3 +242,169 @@ jobs:
             --title "Nightly $version" `
             --notes-file "${{ runner.temp }}/release-notes.md" `
             --prerelease
+
+  # Windows creates the release and POSIX jobs add their platform archives.
+  # The final job refreshes one checksum catalog covering every archive.
+  build-posix:
+    needs: build-and-publish
+    if: needs.build-and-publish.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+          - os: macos-latest
+            platform: macos
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: ddd0023b0eee70986e42ed49d9d4afb8098f212e
+
+      - name: Select target
+        id: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.platform }}" = "linux" ]; then
+            echo "architecture=x64" >> "$GITHUB_OUTPUT"
+            echo "triplet=x64-linux" >> "$GITHUB_OUTPUT"
+          elif [ "$(uname -m)" = "arm64" ]; then
+            echo "architecture=arm64" >> "$GITHUB_OUTPUT"
+            echo "triplet=arm64-osx" >> "$GITHUB_OUTPUT"
+          else
+            echo "architecture=x64" >> "$GITHUB_OUTPUT"
+            echo "triplet=x64-osx" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.8
+
+      - name: Cache sccache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/sccache
+          key: ${{ runner.os }}-sccache-nightly-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-sccache-nightly-
+            ${{ runner.os }}-sccache-
+
+      - name: Cache vcpkg binary packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/vcpkg-binary-cache
+          key: ${{ runner.os }}-${{ steps.target.outputs.triplet }}-vcpkg-nightly-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ steps.target.outputs.triplet }}-vcpkg-
+            ${{ runner.os }}-vcpkg-
+
+      - name: Cache FetchContent
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/_deps
+          key: ${{ runner.os }}-fetchcontent-nightly-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-fetchcontent-
+
+      - name: Compute target version
+        id: version
+        shell: bash
+        run: echo "value=${{ needs.build-and-publish.outputs.version }}" >> "$GITHUB_OUTPUT"
+
+      - name: Configure Debug
+        env:
+          SCCACHE_DIR: ${{ runner.temp }}/sccache
+          VCPKG_BINARY_SOURCES: clear;files,${{ runner.temp }}/vcpkg-binary-cache,readwrite
+        shell: bash
+        run: >-
+          cmake -B build-debug -G Ninja -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+          -DVCPKG_TARGET_TRIPLET=${{ steps.target.outputs.triplet }}
+          -DFETCHCONTENT_BASE_DIR=${{ runner.temp }}/_deps
+          -DCMAKE_C_COMPILER_LAUNCHER=sccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+
+      - name: Build Debug
+        env:
+          SCCACHE_DIR: ${{ runner.temp }}/sccache
+        run: cmake --build build-debug
+
+      - name: Validate Debug
+        run: ./build-debug/bin/Debug/lode modules/sanity/run.luau
+
+      - name: Validate Debug (ctest)
+        run: ctest --test-dir build-debug -C Debug --output-on-failure
+
+      - name: Configure Release
+        env:
+          SCCACHE_DIR: ${{ runner.temp }}/sccache
+          VCPKG_BINARY_SOURCES: clear;files,${{ runner.temp }}/vcpkg-binary-cache,readwrite
+        shell: bash
+        run: >-
+          cmake -B build-release -G Ninja -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+          -DVCPKG_TARGET_TRIPLET=${{ steps.target.outputs.triplet }}
+          -DFETCHCONTENT_BASE_DIR=${{ runner.temp }}/_deps
+          -DCMAKE_C_COMPILER_LAUNCHER=sccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+
+      - name: Build Release
+        env:
+          SCCACHE_DIR: ${{ runner.temp }}/sccache
+        run: cmake --build build-release
+
+      - name: Validate Release
+        run: ./build-release/bin/Release/lode modules/sanity/run.luau
+
+      - name: Validate Release (ctest)
+        run: ctest --test-dir build-release -C Release --output-on-failure
+
+      - name: Package
+        shell: pwsh
+        run: >-
+          ./.github/scripts/package-stdlib.ps1
+          -Version '${{ steps.version.outputs.value }}'
+          -Platform '${{ matrix.platform }}'
+          -Architecture '${{ steps.target.outputs.architecture }}'
+
+      - name: Upload platform archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NIGHTLY_VERSION: ${{ steps.version.outputs.value }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="${{ matrix.platform }}-${{ steps.target.outputs.architecture }}"
+          gh release upload "$NIGHTLY_VERSION" \
+            "lode-${target}-${NIGHTLY_VERSION}.zip" \
+            "lode-development-${target}-${NIGHTLY_VERSION}.zip" \
+            "lode-stdlib-${target}-${NIGHTLY_VERSION}.zip" \
+            --clobber
+
+  finalize-release:
+    needs: [build-and-publish, build-posix]
+    if: needs.build-and-publish.result == 'success' && needs.build-posix.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download release archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NIGHTLY_VERSION: ${{ needs.build-and-publish.outputs.version }}
+        run: |
+          mkdir release
+          gh release download "$NIGHTLY_VERSION" --dir release --repo "$GITHUB_REPOSITORY"
+
+      - name: Rebuild checksum catalog
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NIGHTLY_VERSION: ${{ needs.build-and-publish.outputs.version }}
+        run: |
+          set -euo pipefail
+          cd release
+          sha256sum lode-*.zip > SHA256SUMS
+          gh release upload "$NIGHTLY_VERSION" SHA256SUMS \
+            --clobber --repo "$GITHUB_REPOSITORY"

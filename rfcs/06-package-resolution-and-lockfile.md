@@ -36,10 +36,10 @@ bundle associated with the installed Lode runtime. If the bundled version does
 not satisfy the requirement, unlocked installation downloads the aggregate
 GitHub Release bundle from the official LodeRuntime repository. The
 release tag is read from the installed catalog's `stdlib/VERSION` marker, and
-the current Windows x64 contract selects:
+the current runtime target selects:
 
 ```text
-lode-stdlib-windows-x64-<nightly-release>.zip
+lode-stdlib-<platform>-<architecture>-<nightly-release>.zip
 ```
 
 This fallback currently requires an exact SemVer requirement. A `^` or `~`
@@ -399,7 +399,7 @@ implementation must use the GitHub Release artifact contract described by RFC 09
 `v<version>` release is downloaded, checked, and copied into the global cache.
 For stdlib dependencies, a compatible module is reused from the installed
 catalog. An incompatible exact requirement downloads the one matching
-`lode-stdlib-windows-x64-<release>.zip` asset from the release named by
+`lode-stdlib-<platform>-<architecture>-<release>.zip` asset from the release named by
 `stdlib/VERSION`; its transitive stdlib edges are resolved by the same rule.
 Resolved packages are materialized under the project's `lode_modules`
 directory and reflected in `.config.luau` and the deterministic `lode.lock`.
@@ -425,9 +425,10 @@ populate the global cache, but it does not materialize dependencies or modify
 the project configuration.
 
 The runtime contains the SHA-256 verifier, safe-ZIP staging, and GitHub Release
-download path for the current published target: Windows x64. A Git package with
-an `implementation` declaration must use the generated release contract (`v<version>`,
-`lode-<name>-<version>-windows-x64.zip`, and its `.sha256` asset). The downloaded
+download path for the current published target. A Git package with an
+`implementation` declaration must use the generated release contract
+(`v<version>`, `lode-<name>-<version>-<platform>-<architecture>.zip`, and its
+`.sha256` asset). The downloaded
 package is validated as an artifact before entering the global cache. GitHub is
 the source; there is no Lode registry or `gh` runtime dependency.
 
