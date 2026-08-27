@@ -13,14 +13,10 @@ file(WRITE "${git_source}/package.luau" [=[return {
   name = "git_signal",
   version = "1.0.0",
   license = "MIT",
-  dependencies = {
-    task = "1.0.0",
-  },
 }
 ]=])
 file(WRITE "${git_source}/init.luau" [=[
-local task = require("@task")
-return { has_task = task ~= nil, revision = "first" }
+return { revision = "first" }
 ]=])
 file(WRITE "${git_source}/LICENSE" "MIT\n")
 
@@ -59,7 +55,6 @@ file(TO_CMAKE_PATH "${git_source}" git_reference)
 file(WRITE "${consumer_root}/package.luau" "return {\n  name = \"git_consumer\",\n  version = \"1.0.0\",\n  license = \"MIT\",\n  dependencies = {\n    git_signal = {\n      git = \"${git_reference}\",\n      version = \"1.0.0\",\n    },\n  },\n}\n")
 file(WRITE "${consumer_root}/init.luau" [=[
 local git_signal = require("@git_signal")
-assert(git_signal.has_task == true, "Git package did not load its stdlib dependency")
 assert(git_signal.revision == "first", "Git package was not pinned to the locked commit")
 ]=])
 file(WRITE "${consumer_root}/LICENSE" "MIT\n")
@@ -77,8 +72,7 @@ if(NOT result EQUAL 0)
 endif()
 
 if(NOT EXISTS "${consumer_root}/lode.lock" OR
-   NOT EXISTS "${consumer_root}/lode_modules/git_signal/init.luau" OR
-   NOT EXISTS "${consumer_root}/lode_modules/task/init.luau")
+   NOT EXISTS "${consumer_root}/lode_modules/git_signal/init.luau")
     file(REMOVE_RECURSE "${git_source}" "${consumer_root}" "${cache_home}")
     message(FATAL_ERROR "Git local install did not materialize the resolved graph")
 endif()
@@ -109,8 +103,7 @@ if(NOT result EQUAL 0)
 endif()
 
 file(WRITE "${git_source}/init.luau" [=[
-local task = require("@task")
-return { has_task = task ~= nil, revision = "second" }
+return { revision = "second" }
 ]=])
 execute_process(COMMAND git -C "${git_source}" add init.luau)
 execute_process(

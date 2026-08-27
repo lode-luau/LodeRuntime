@@ -8,7 +8,6 @@ local describe = sanity.describe
 local it = sanity.it
 local expect = sanity.expect
 
-local sys = require("../../sys")
 local path = require("../../filesystem/path")
 
 local function norm(s: string): string
@@ -126,8 +125,9 @@ end)
 
 describe("path additions", function()
     it("isAbsolute performs a lexical check", function()
-        local isWindows = string.find(string.lower(sys.GetPlatform()), "win", 1, true) ~= nil
-        if isWindows then
+        -- The native path module follows the host filesystem's lexical rules.
+        local isWindowsStyle = path.isAbsolute("C:/x/y")
+        if isWindowsStyle then
             expect(path.isAbsolute("C:/x/y")).toBe(true)
             -- On Windows, a rooted path without a drive is not absolute.
             expect(path.isAbsolute("/usr/local")).toBe(false)

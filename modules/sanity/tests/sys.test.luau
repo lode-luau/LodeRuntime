@@ -139,8 +139,9 @@ describe("sys", function()
 
         it("spawns a child process and reads stdout via pipe", function()
             local isWin = string.find(string.lower(sys.GetPlatform()), "win", 1, true) ~= nil
-            local cmd = isWin and "cmd.exe" or "/bin/echo"
-            local args = isWin and { "/c", "echo", "LodeChildProcessWorks" } or { "LodeChildProcessWorks" }
+            local cmd = isWin and "cmd.exe" or "/usr/bin/env"
+            local args = isWin and { "/c", "echo", "LodeChildProcessWorks" } or
+                { "printf", "LodeChildProcessWorks\\n" }
 
             local child = sys.spawn(cmd, {
                 args = args,
@@ -163,8 +164,8 @@ describe("sys", function()
 
         it("delivers child exit code on non-zero exit", function()
             local isWin = string.find(string.lower(sys.GetPlatform()), "win", 1, true) ~= nil
-            local cmd = isWin and "cmd.exe" or "/bin/sh"
-            local args = isWin and { "/c", "exit", "42" } or { "-c", "exit 42" }
+            local cmd = isWin and "cmd.exe" or "/usr/bin/env"
+            local args = isWin and { "/c", "exit", "42" } or { "sh", "-c", "exit 42" }
 
             local child = sys.spawn(cmd, {
                 args = args,
