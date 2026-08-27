@@ -79,6 +79,11 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: ddd0023b0eee70986e42ed49d9d4afb8098f212e
+
       - name: Compute nightly version
         id: version
         shell: bash
@@ -121,6 +126,14 @@ jobs:
             ${{ runner.os }}-sccache-nightly-
             ${{ runner.os }}-sccache-
 
+      - name: Restore vcpkg binary packages (no save)
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/vcpkg-binary-cache
+          key: ${{ runner.os }}-vcpkg-nightly-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+          restore-keys: |
+            ${{ runner.os }}-vcpkg-
+
       # 3. Restore-only dependencies downloaded via FetchContent (saved by
       #    ci.yml). Both build trees share one base via FETCHCONTENT_BASE_DIR
       #    so there is a single source/download to cache.
@@ -142,9 +155,12 @@ jobs:
       - name: Configure Debug
         env:
           SCCACHE_DIR: ${{ runner.temp }}/sccache
+          VCPKG_BINARY_SOURCES: clear;files,${{ runner.temp }}/vcpkg-binary-cache,readwrite
         run: >-
           cmake -B build-debug -G Ninja -DCMAKE_BUILD_TYPE=Debug
           -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl
+          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+          -DVCPKG_TARGET_TRIPLET=x64-windows
           -DFETCHCONTENT_BASE_DIR=${{ runner.temp }}/_deps
           -DCMAKE_C_COMPILER_LAUNCHER=sccache
           -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
@@ -164,9 +180,12 @@ jobs:
       - name: Configure Release
         env:
           SCCACHE_DIR: ${{ runner.temp }}/sccache
+          VCPKG_BINARY_SOURCES: clear;files,${{ runner.temp }}/vcpkg-binary-cache,readwrite
         run: >-
           cmake -B build-release -G Ninja -DCMAKE_BUILD_TYPE=Release
           -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl
+          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+          -DVCPKG_TARGET_TRIPLET=x64-windows
           -DFETCHCONTENT_BASE_DIR=${{ runner.temp }}/_deps
           -DCMAKE_C_COMPILER_LAUNCHER=sccache
           -DCMAKE_CXX_COMPILER_LAUNCHER=sccache

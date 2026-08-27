@@ -20,6 +20,19 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: ddd0023b0eee70986e42ed49d9d4afb8098f212e
+
+      - name: Restore vcpkg binary packages
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/vcpkg-binary-cache
+          key: ${{ runner.os }}-vcpkg-benchmark-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+          restore-keys: |
+            ${{ runner.os }}-vcpkg-
+
       # Restore-only caching, mirroring the nightly workflow: this workflow
       # consumes the entries written by ci.yml (via the common restore-key
       # prefixes) but never saves any back — ci.yml is the single cache
@@ -50,9 +63,12 @@ jobs:
       - name: Configure
         env:
           SCCACHE_DIR: ${{ runner.temp }}/sccache
+          VCPKG_BINARY_SOURCES: clear;files,${{ runner.temp }}/vcpkg-binary-cache,readwrite
         run: >-
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
           -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl
+          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+          -DVCPKG_TARGET_TRIPLET=x64-windows
           -DLODE_BUILD_BENCH=ON
           -DFETCHCONTENT_BASE_DIR=${{ runner.temp }}/_deps
           -DCMAKE_C_COMPILER_LAUNCHER=sccache
