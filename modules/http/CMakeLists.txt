@@ -22,6 +22,15 @@ elseif(NOT EMSCRIPTEN)
     find_package(OpenSSL REQUIRED)
     target_compile_definitions(http PRIVATE LODE_HAS_OPENSSL_TLS)
     target_link_libraries(http PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+    if(APPLE)
+        set(HTTP_MODULE_RPATH "@loader_path")
+    else()
+        set(HTTP_MODULE_RPATH "$ORIGIN")
+    endif()
+    set_target_properties(http PROPERTIES
+        BUILD_RPATH "${HTTP_MODULE_RPATH};$<TARGET_FILE_DIR:OpenSSL::SSL>"
+        INSTALL_RPATH "${HTTP_MODULE_RPATH}"
+    )
 endif()
 
 if(MSVC)

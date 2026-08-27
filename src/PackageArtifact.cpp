@@ -6,6 +6,7 @@
 #include "PackageArchive.hpp"
 #include "PackageManifest.hpp"
 #include "PathUtil.hpp"
+#include "Platform/Platform.hpp"
 #include "Sha256.hpp"
 
 #include <algorithm>
@@ -273,6 +274,14 @@ PackageArtifactResult DownloadGitHubReleaseArtifact(
         return result;
     }
 
+    const std::string platform(Platform::GetOSName());
+    const std::string architecture(Platform::GetArchitectureName());
+    if (platform == "unknown" || architecture == "unknown")
+    {
+        AddError(result, "The current runtime target cannot select a native package artifact.");
+        return result;
+    }
+
     const std::string baseUrl = "https://github.com/" + *slug +
         "/releases/download/" + release + "/";
     const std::string operationKey = Lode::Detail::Sha256Hex(
@@ -379,8 +388,8 @@ PackageArtifactResult DownloadGitHubReleaseArtifact(
         result.packageRoot = *packageRoot;
     }
     result.artifact = {
-        "windows",
-        "x64",
+        platform,
+        architecture,
         "",
         LodeAbiId(),
         release,
@@ -402,7 +411,9 @@ PackageArtifactResult DownloadGitHubPackageArtifact(
         packageName,
         packageVersion,
         "v" + packageVersion,
-        "lode-" + packageName + "-" + packageVersion + "-windows-x64.zip",
+        "lode-" + packageName + "-" + packageVersion + "-" +
+            std::string(Platform::GetOSName()) + "-" +
+            std::string(Platform::GetArchitectureName()) + ".zip",
         cacheLayout,
         stagingDirectory,
         "native Git");
@@ -421,7 +432,8 @@ PackageArtifactResult DownloadGitHubStdlibArtifact(
         packageName,
         packageVersion,
         release,
-        "lode-stdlib-windows-x64-" + release + ".zip",
+        "lode-stdlib-" + std::string(Platform::GetOSName()) + "-" +
+            std::string(Platform::GetArchitectureName()) + "-" + release + ".zip",
         cacheLayout,
         stagingDirectory,
         "stdlib");

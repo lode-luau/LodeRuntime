@@ -20,6 +20,15 @@ if(NOT WIN32 AND NOT EMSCRIPTEN)
     find_package(OpenSSL REQUIRED)
     target_compile_definitions(tcp PRIVATE LODE_HAS_OPENSSL_TLS)
     target_link_libraries(tcp PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+    if(APPLE)
+        set(TCP_MODULE_RPATH "@loader_path")
+    else()
+        set(TCP_MODULE_RPATH "$ORIGIN")
+    endif()
+    set_target_properties(tcp PROPERTIES
+        BUILD_RPATH "${TCP_MODULE_RPATH};$<TARGET_FILE_DIR:OpenSSL::SSL>"
+        INSTALL_RPATH "${TCP_MODULE_RPATH}"
+    )
 endif()
 
 if(MSVC)

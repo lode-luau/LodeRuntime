@@ -10,6 +10,7 @@
 #include "GitResolver.hpp"
 #include "PackageArtifact.hpp"
 #include "PathUtil.hpp"
+#include "Platform/Platform.hpp"
 #include "nlohmann/json.hpp"
 
 #include <chrono>
@@ -577,6 +578,8 @@ bool FindLockedStdlibRecord(const json& document,
                             LockedStdlibRecord& result,
                             InstallResult& installResult)
 {
+    const std::string currentPlatform(Platform::GetOSName());
+    const std::string currentArchitecture(Platform::GetArchitectureName());
     if (!document.is_object() || !document.contains("packages") ||
         !document["packages"].is_array())
     {
@@ -632,8 +635,8 @@ bool FindLockedStdlibRecord(const json& document,
                     artifact.release = artifactDocument.value("release", "");
                     artifact.asset = artifactDocument.value("asset", "");
                     artifact.sha256 = artifactDocument.value("sha256", "");
-                    if (artifact.platform == "windows" &&
-                        artifact.architecture == "x64" &&
+                    if (artifact.platform == currentPlatform &&
+                        artifact.architecture == currentArchitecture &&
                         artifact.abi == LodeAbiId())
                     {
                         result.artifact = std::move(artifact);
@@ -642,7 +645,8 @@ bool FindLockedStdlibRecord(const json& document,
                 }
 
                 AddError(installResult, "Locked stdlib package '" + dependency.alias +
-                    "' has no Windows x64 artifact for ABI " + LodeAbiId() + ".");
+                    "' has no " + currentPlatform + " " + currentArchitecture +
+                    " artifact for ABI " + LodeAbiId() + ".");
                 return false;
             }
         }
@@ -792,8 +796,11 @@ bool ResolveStandardLibraryDependencies(DependencyGraph& graph,
                 packageName = locked.name;
                 packageVersion = locked.version;
                 packageRelease = locked.artifact.release;
-                if (locked.artifact.asset != "lode-stdlib-windows-x64-" +
-                    packageRelease + ".zip")
+                const std::string expectedAsset = "lode-stdlib-" +
+                    std::string(Platform::GetOSName()) + "-" +
+                    std::string(Platform::GetArchitectureName()) + "-" +
+                    packageRelease + ".zip";
+                if (locked.artifact.asset != expectedAsset)
                 {
                     AddError(result, "Locked stdlib artifact name does not match package '" +
                         packageName + "'.");

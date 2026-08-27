@@ -8,8 +8,8 @@ return {
         artifact = "stdio",
         required = true,
         targets = {
-            build = { "windows/x64" },
-            release = { "windows/x64" },
+            build = { "windows/x64", "linux/x64", "macos/x64", "macos/arm64" },
+            release = { "windows/x64", "linux/x64", "macos/x64", "macos/arm64" },
         },
     },
 }

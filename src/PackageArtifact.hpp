@@ -28,8 +28,9 @@ struct PackageArtifactResult
 };
 
 // Resolves the package's v<version> GitHub Release, downloads the exact
-// lode-<package>-<version>-windows-x64.zip asset and its checksum, caches the
-// verified archive, and extracts it into operation-scoped staging.
+// lode-<package>-<version>-<platform>-<architecture>.zip asset for the
+// current runtime target and its checksum, caches the verified archive, and
+// extracts it into operation-scoped staging.
 LODE_API PackageArtifactResult DownloadGitHubPackageArtifact(
     const std::string& repository,
     const std::string& packageName,
@@ -37,9 +38,10 @@ LODE_API PackageArtifactResult DownloadGitHubPackageArtifact(
     const PackageCacheLayout& cacheLayout,
     const std::filesystem::path& stagingDirectory);
 
-// Resolves an official Lode standard-module from the aggregate stdlib bundle
-// in an exact nightly release, verifies it through SHA256SUMS, caches the
-// bundle, and selects the requested package in operation-scoped staging.
+// Resolves an official Lode standard-module from the current platform's
+// aggregate stdlib bundle in an exact nightly release, verifies it through
+// SHA256SUMS, caches the bundle, and selects the requested package in
+// operation-scoped staging.
 LODE_API PackageArtifactResult DownloadGitHubStdlibArtifact(
     const std::string& repository,
     const std::string& packageName,

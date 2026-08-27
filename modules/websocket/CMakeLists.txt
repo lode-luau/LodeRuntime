@@ -26,6 +26,15 @@ if(NOT WIN32 AND NOT EMSCRIPTEN)
     find_package(OpenSSL REQUIRED)
     target_compile_definitions(websocket PRIVATE LODE_HAS_OPENSSL_TLS)
     target_link_libraries(websocket PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+    if(APPLE)
+        set(WEBSOCKET_MODULE_RPATH "@loader_path")
+    else()
+        set(WEBSOCKET_MODULE_RPATH "$ORIGIN")
+    endif()
+    set_target_properties(websocket PROPERTIES
+        BUILD_RPATH "${WEBSOCKET_MODULE_RPATH};$<TARGET_FILE_DIR:OpenSSL::SSL>"
+        INSTALL_RPATH "${WEBSOCKET_MODULE_RPATH}"
+    )
 endif()
 
 if(MSVC)

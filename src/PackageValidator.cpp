@@ -662,7 +662,8 @@ void ValidateImplementation(const fs::path& root,
     for (const auto& [platform, architecture] : publishTargets)
     {
         if (mode == ValidationMode::InstallArtifact &&
-            (platform != "windows" || architecture != "x64"))
+            (platform != Platform::GetOSName() ||
+             architecture != Platform::GetArchitectureName()))
             continue;
 
         const std::vector<std::string> configurations = mode == ValidationMode::InstallArtifact

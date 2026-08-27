@@ -8,6 +8,7 @@
 #include "PackageManifest.hpp"
 #include "PackageValidator.hpp"
 #include "PathUtil.hpp"
+#include "Platform/Platform.hpp"
 #include "Sha256.hpp"
 
 #include <algorithm>
@@ -312,8 +313,10 @@ fs::path ResolveOutputPath(const fs::path& packageRoot,
         return {};
     }
 
+    const std::string target = std::string(Platform::GetOSName()) + "-" +
+        std::string(Platform::GetArchitectureName());
     const fs::path output = requested.empty()
-        ? packageRoot / "out" / ("lode-" + name + "-" + version + "-windows-x64.zip")
+        ? packageRoot / "out" / ("lode-" + name + "-" + version + "-" + target + ".zip")
         : requested;
     return fs::absolute(output);
 }
