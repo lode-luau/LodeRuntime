@@ -377,7 +377,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           NIGHTLY_VERSION: ${{ needs.nightly-guard.outputs.version }}
         shell: bash
-        run: ./.github/scripts/generate-release-notes.sh
+        run: bash ./.github/scripts/generate-release-notes.sh
 
       - name: Create and publish nightly release
         env:
