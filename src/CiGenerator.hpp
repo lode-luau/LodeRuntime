@@ -10,7 +10,7 @@
 namespace Lode::Package
 {
 
-struct CiSdkPin
+struct CiLodePin
 {
     std::string version;
     std::string sha256;
@@ -20,7 +20,7 @@ struct CiSdkPin
 
 LODE_API ValidationReport GenerateWorkflow(const std::filesystem::path& packageRoot,
                                            bool force,
-                                           const CiSdkPin& sdkPin,
+                                           const CiLodePin& lodePin,
                                            const std::filesystem::path& standardLibraryRoot = {});
 LODE_API ValidationReport UpdateWorkflow(const std::filesystem::path& packageRoot,
                                          const std::filesystem::path& standardLibraryRoot = {});
