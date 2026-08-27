@@ -27,7 +27,16 @@ namespace
 using BytesVector = std::vector<uint8_t>;
 
 template <typename T, void (*Deleter)(T*)>
-using OpenSslPtr = std::unique_ptr<T, decltype(Deleter)>;
+struct OpenSslDeleter
+{
+    void operator()(T* value) const
+    {
+        if (value) Deleter(value);
+    }
+};
+
+template <typename T, void (*Deleter)(T*)>
+using OpenSslPtr = std::unique_ptr<T, OpenSslDeleter<T, Deleter>>;
 
 using EvpMdContextPtr = OpenSslPtr<EVP_MD_CTX, EVP_MD_CTX_free>;
 using EvpCipherCtxPtr = OpenSslPtr<EVP_CIPHER_CTX, EVP_CIPHER_CTX_free>;

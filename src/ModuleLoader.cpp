@@ -285,18 +285,18 @@ static bool check_path_exists(const fs::path& p)
 static bool IsPathInside(const fs::path& candidate, const fs::path& root)
 {
     std::error_code ec;
-    fs::path canonicalRoot = fs::weakly_canonical(root, ec);
-    if (ec) return false;
-
-    fs::path canonicalCandidate = fs::weakly_canonical(candidate, ec);
-    if (ec) return false;
-
-    fs::path relative = canonicalCandidate.lexically_relative(canonicalRoot);
-    if (relative.empty() || relative.is_absolute())
+    fs::path relative = fs::relative(
+        fs::weakly_canonical(candidate, ec),
+        fs::weakly_canonical(root, ec),
+        ec);
+    if (ec)
         return false;
 
+    if (relative.empty() || relative == ".")
+        return true;
+
     auto first = relative.begin();
-    return first != relative.end() && *first != "..";
+    return first == relative.end() || *first != "..";
 }
 
 static void ReplaceAll(std::string& value, std::string_view token, std::string_view replacement)

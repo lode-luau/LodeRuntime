@@ -136,9 +136,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/sccache
-          key: ${{ runner.os }}-sccache-${{ github.event.pull_request.head.sha || github.sha }}
+          key: ${{ runner.os }}-x64-windows-sccache-${{ github.event.pull_request.head.sha || github.sha }}
           restore-keys: |
-            ${{ runner.os }}-sccache-
+            ${{ runner.os }}-x64-windows-sccache-
 
       # 3. Restore/save dependencies downloaded via FetchContent. Both build
       #    trees share one base via FETCHCONTENT_BASE_DIR so there is a single
@@ -260,9 +260,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/sccache
-          key: ${{ runner.os }}-sccache-${{ github.event.pull_request.head.sha || github.sha }}
+          key: ${{ runner.os }}-${{ steps.triplet.outputs.value }}-sccache-${{ github.event.pull_request.head.sha || github.sha }}
           restore-keys: |
-            ${{ runner.os }}-sccache-
+            ${{ runner.os }}-${{ steps.triplet.outputs.value }}-sccache-
 
       - name: Cache FetchContent
         uses: actions/cache@v4

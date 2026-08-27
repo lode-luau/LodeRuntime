@@ -45,9 +45,9 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/sccache
-          key: ${{ runner.os }}-sccache-benchmark-${{ github.sha }}
+          key: ${{ runner.os }}-x64-windows-sccache-benchmark-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-sccache-
+            ${{ runner.os }}-x64-windows-sccache-
 
       - name: Restore FetchContent (no save)
         uses: actions/cache/restore@v4

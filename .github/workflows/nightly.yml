@@ -123,10 +123,10 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/sccache
-          key: ${{ runner.os }}-sccache-nightly-${{ github.sha }}
+          key: ${{ runner.os }}-x64-windows-sccache-nightly-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-sccache-nightly-
-            ${{ runner.os }}-sccache-
+            ${{ runner.os }}-x64-windows-sccache-nightly-
+            ${{ runner.os }}-x64-windows-sccache-
 
       - name: Restore vcpkg binary packages (no save)
         uses: actions/cache/restore@v4
@@ -288,10 +288,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/sccache
-          key: ${{ runner.os }}-sccache-nightly-${{ github.sha }}
+          key: ${{ runner.os }}-${{ steps.target.outputs.triplet }}-sccache-nightly-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-sccache-nightly-
-            ${{ runner.os }}-sccache-
+            ${{ runner.os }}-${{ steps.target.outputs.triplet }}-sccache-nightly-
+            ${{ runner.os }}-${{ steps.target.outputs.triplet }}-sccache-
 
       - name: Cache vcpkg binary packages
         uses: actions/cache@v4
