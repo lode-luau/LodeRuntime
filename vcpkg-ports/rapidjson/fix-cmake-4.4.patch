@@ -1,0 +1,7 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -164,3 +164,3 @@
+ add_custom_target(travis_doc)
+-add_custom_command(TARGET travis_doc
++add_custom_command(TARGET travis_doc POST_BUILD
+     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/travis-doxygen.sh)

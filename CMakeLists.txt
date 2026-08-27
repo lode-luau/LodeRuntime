@@ -93,6 +93,14 @@ find_package(nlohmann_json CONFIG REQUIRED)
 find_package(RapidJSON CONFIG REQUIRED)
 find_package(miniz CONFIG REQUIRED)
 
+if(TARGET RapidJSON::RapidJSON)
+    set(LODE_RAPIDJSON_TARGET RapidJSON::RapidJSON)
+elseif(TARGET rapidjson)
+    set(LODE_RAPIDJSON_TARGET rapidjson)
+else()
+    message(FATAL_ERROR "The vcpkg RapidJSON package did not provide RapidJSON::RapidJSON or rapidjson")
+endif()
+
 if(TARGET miniz::miniz)
     set(LODE_MINIZ_TARGET miniz::miniz)
 elseif(TARGET miniz::miniz_static)
@@ -242,7 +250,7 @@ add_library(LodeCore SHARED
 target_compile_definitions(LodeCore PRIVATE LODE_CORE_BUILD MINIZ_STATIC_DEFINE)
 target_link_libraries(LodeCore PRIVATE
     nlohmann_json::nlohmann_json
-    RapidJSON::RapidJSON
+    ${LODE_RAPIDJSON_TARGET}
     ${LODE_MINIZ_TARGET}
 )
 if(WIN32)
@@ -298,7 +306,13 @@ if(WIN32)
     target_sources(lode PRIVATE src/Runtime.rc)
 endif()
 
-target_link_libraries(lode PRIVATE LodeCore Luau.Compiler Luau.Ast Luau.Analysis)
+target_link_libraries(lode PRIVATE
+    LodeCore
+    nlohmann_json::nlohmann_json
+    Luau.Compiler
+    Luau.Ast
+    Luau.Analysis
+)
 
 # Benchmark harness (opt-in: -DLODE_BUILD_BENCH=ON keeps the nightly build unchanged)
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/bench/CMakeLists.txt")

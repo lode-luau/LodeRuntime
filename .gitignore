@@ -11,6 +11,7 @@ obj/
 *.so
 *.dylib
 *.lib
+*.exp
 *.a
 *.bin
 
