@@ -107,19 +107,18 @@ describe("ffi", function()
         end)
 
         it("reports the final source line for truncated declarations", function()
-            local ok, err = pcall(ffi.load, declarationLibrary, "\n\nint Truncated(")
+            local ok, err = pcall(ffi.C, "\n\nint Truncated(")
             expect(ok).toBe(false)
             expect(tostring(err):find("line 3", 1, true) ~= nil).toBe(true)
         end)
 
         it("rejects structs and unions passed by value", function()
-            expect(pcall(ffi.load, declarationLibrary, "int InvalidStruct(struct Native value);")).toBe(false)
-            expect(pcall(ffi.load, declarationLibrary, "int InvalidUnion(union Native value);")).toBe(false)
+            expect(pcall(ffi.C, "int InvalidStruct(struct Native value);")).toBe(false)
+            expect(pcall(ffi.C, "int InvalidUnion(union Native value);")).toBe(false)
         end)
 
         it("rejects opaque aggregate typedefs passed by value", function()
-            local library = isWindows and "kernel32" or (isMac and "libSystem.B.dylib" or "libc.so.6")
-            local ok, err = pcall(ffi.load, library, [[
+            local ok, err = pcall(ffi.C, [[
                 typedef struct OpaqueHandle OpaqueHandle;
                 int InvalidOpaqueValue(OpaqueHandle value);
             ]])
