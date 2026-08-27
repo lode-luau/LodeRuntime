@@ -221,7 +221,7 @@ jobs:
         run: |
           ./.github/scripts/generate-release-notes.sh
 
-      - name: Publish nightly release
+      - name: Create nightly release draft
         env:
           GH_TOKEN: ${{ github.token }}
           NIGHTLY_VERSION: ${{ steps.version.outputs.version }}
@@ -241,7 +241,8 @@ jobs:
           gh release create "$version" @assets `
             --title "Nightly $version" `
             --notes-file "${{ runner.temp }}/release-notes.md" `
-            --prerelease
+            --prerelease `
+            --draft
 
   # Windows creates the release and POSIX jobs add their platform archives.
   # The final job refreshes one checksum catalog covering every archive.
@@ -408,3 +409,9 @@ jobs:
           sha256sum lode-*.zip > SHA256SUMS
           gh release upload "$NIGHTLY_VERSION" SHA256SUMS \
             --clobber --repo "$GITHUB_REPOSITORY"
+
+      - name: Publish nightly release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NIGHTLY_VERSION: ${{ needs.build-and-publish.outputs.version }}
+        run: gh release edit "$NIGHTLY_VERSION" --draft=false --repo "$GITHUB_REPOSITORY"
