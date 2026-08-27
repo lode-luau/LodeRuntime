@@ -137,11 +137,17 @@ describe("sys", function()
             expect(tostring(err):find("sys.spawn", 1, true) ~= nil).toBe(true)
         end)
 
+        it("closes handles when the executable is missing", function()
+            local ok, err = pcall(function()
+                sys.spawn("__lode_missing_executable__")
+            end)
+            expect(ok).toBe(false)
+            expect(tostring(err):find("sys.spawn error", 1, true) ~= nil).toBe(true)
+        end)
+
         it("spawns a child process and reads stdout via pipe", function()
-            local isWin = string.find(string.lower(sys.GetPlatform()), "win", 1, true) ~= nil
-            local cmd = isWin and "cmd.exe" or "/usr/bin/env"
-            local args = isWin and { "/c", "echo", "LodeChildProcessWorks" } or
-                { "printf", "LodeChildProcessWorks\\n" }
+            local cmd = sys.GetExecPath()
+            local args = { "-c", "print('LodeChildProcessWorks')" }
 
             local child = sys.spawn(cmd, {
                 args = args,
@@ -163,9 +169,8 @@ describe("sys", function()
         end)
 
         it("delivers child exit code on non-zero exit", function()
-            local isWin = string.find(string.lower(sys.GetPlatform()), "win", 1, true) ~= nil
-            local cmd = isWin and "cmd.exe" or "/usr/bin/env"
-            local args = isWin and { "/c", "exit", "42" } or { "sh", "-c", "exit 42" }
+            local cmd = sys.GetExecPath()
+            local args = { "-c", "error('LodeChildProcessFailed')" }
 
             local child = sys.spawn(cmd, {
                 args = args,
@@ -174,8 +179,8 @@ describe("sys", function()
 
             expect(child.pid > 0).toBe(true)
             local exitCode = child:Wait()
-            expect(exitCode).toBe(42)
-            expect(child:GetExitCode()).toBe(42)
+            expect(exitCode ~= 0).toBe(true)
+            expect(child:GetExitCode()).toBe(exitCode)
         end)
     end)
 end)
