@@ -51,7 +51,7 @@ endfunction()
 
 function(lode_add_native_module target_name)
     set(options)
-    set(one_value_arguments)
+    set(one_value_arguments ARTIFACT LAYOUT)
     set(multi_value_arguments SOURCES)
     cmake_parse_arguments(LODE_MODULE "${options}" "${one_value_arguments}" "${multi_value_arguments}" ${ARGN})
 
@@ -63,6 +63,17 @@ function(lode_add_native_module target_name)
     target_link_libraries(${target_name} PRIVATE Lode::Module)
     target_compile_features(${target_name} PRIVATE cxx_std_20)
 
+    if(LODE_MODULE_ARTIFACT)
+        set(native_artifact "${LODE_MODULE_ARTIFACT}")
+    else()
+        set(native_artifact "${target_name}")
+    endif()
+    if(LODE_MODULE_LAYOUT)
+        set(native_layout "${LODE_MODULE_LAYOUT}")
+    else()
+        set(native_layout "libs/{platform}/{architecture}/{configuration}/{artifact}{extension}")
+    endif()
+
     # Native packages are loaded by the package implementation artifact. Avoid
     # CMake's default lib prefix on Unix and keep the output beside the
     # package's generated libs/<platform>/<architecture>/<config> tree.
@@ -73,26 +84,75 @@ function(lode_add_native_module target_name)
 
     lode_get_platform_name(target_platform)
     lode_get_architecture_name(target_architecture)
-    set(native_output_directory
-        "${CMAKE_CURRENT_SOURCE_DIR}/libs/${target_platform}/${target_architecture}/$<CONFIG>")
+    if(WIN32)
+        set(native_extension ".dll")
+    elseif(APPLE)
+        set(native_extension ".dylib")
+    elseif(EMSCRIPTEN)
+        set(native_extension ".wasm")
+    else()
+        set(native_extension ".so")
+    endif()
+
+    function(lode_expand_native_layout output_variable layout configuration)
+        set(expanded_layout "${layout}")
+        string(REPLACE "{platform}" "${target_platform}" expanded_layout "${expanded_layout}")
+        string(REPLACE "{architecture}" "${target_architecture}" expanded_layout "${expanded_layout}")
+        string(REPLACE "{configuration}" "${configuration}" expanded_layout "${expanded_layout}")
+        string(REPLACE "{artifact}" "${native_artifact}" expanded_layout "${expanded_layout}")
+        string(REPLACE "{extension}" "${native_extension}" expanded_layout "${expanded_layout}")
+        if(expanded_layout MATCHES "[{}]")
+            message(FATAL_ERROR "lode_add_native_module(${target_name}) received an unknown layout substitution")
+        endif()
+        if(IS_ABSOLUTE "${expanded_layout}" OR
+           "${expanded_layout}" MATCHES "(^|[/\\\\])\\.\\.([/\\\\]|$)")
+            message(FATAL_ERROR "lode_add_native_module(${target_name}) layout must remain inside the module directory")
+        endif()
+        set(${output_variable} "${expanded_layout}" PARENT_SCOPE)
+    endfunction()
 
     foreach(configuration_name ${CMAKE_CONFIGURATION_TYPES})
         string(TOUPPER "${configuration_name}" configuration_name_upper)
+        lode_expand_native_layout(expanded_layout "${native_layout}" "${configuration_name}")
+        get_filename_component(native_output_name "${expanded_layout}" NAME_WE)
+        get_filename_component(native_output_directory "${expanded_layout}" DIRECTORY)
+        if(native_output_directory STREQUAL "" OR native_output_directory STREQUAL ".")
+            set(native_output_directory "${CMAKE_CURRENT_SOURCE_DIR}")
+        else()
+            set(native_output_directory "${CMAKE_CURRENT_SOURCE_DIR}/${native_output_directory}")
+        endif()
         set_target_properties(${target_name} PROPERTIES
             RUNTIME_OUTPUT_DIRECTORY_${configuration_name_upper}
-                "${CMAKE_CURRENT_SOURCE_DIR}/libs/${target_platform}/${target_architecture}/${configuration_name}"
+                "${native_output_directory}"
             LIBRARY_OUTPUT_DIRECTORY_${configuration_name_upper}
-                "${CMAKE_CURRENT_SOURCE_DIR}/libs/${target_platform}/${target_architecture}/${configuration_name}"
+                "${native_output_directory}"
             ARCHIVE_OUTPUT_DIRECTORY_${configuration_name_upper}
-                "${CMAKE_CURRENT_SOURCE_DIR}/libs/${target_platform}/${target_architecture}/${configuration_name}"
+                "${native_output_directory}"
+            RUNTIME_OUTPUT_NAME_${configuration_name_upper}
+                "${native_output_name}"
+            LIBRARY_OUTPUT_NAME_${configuration_name_upper}
+                "${native_output_name}"
+            ARCHIVE_OUTPUT_NAME_${configuration_name_upper}
+                "${native_output_name}"
         )
     endforeach()
 
     if(NOT CMAKE_CONFIGURATION_TYPES)
+        lode_expand_native_layout(expanded_layout "${native_layout}" "$<CONFIG>")
+        get_filename_component(native_output_name "${expanded_layout}" NAME_WE)
+        get_filename_component(native_output_directory "${expanded_layout}" DIRECTORY)
+        if(native_output_directory STREQUAL "" OR native_output_directory STREQUAL ".")
+            set(native_output_directory "${CMAKE_CURRENT_SOURCE_DIR}")
+        else()
+            set(native_output_directory "${CMAKE_CURRENT_SOURCE_DIR}/${native_output_directory}")
+        endif()
         set_target_properties(${target_name} PROPERTIES
             RUNTIME_OUTPUT_DIRECTORY "${native_output_directory}"
             LIBRARY_OUTPUT_DIRECTORY "${native_output_directory}"
             ARCHIVE_OUTPUT_DIRECTORY "${native_output_directory}"
+            RUNTIME_OUTPUT_NAME "${native_output_name}"
+            LIBRARY_OUTPUT_NAME "${native_output_name}"
+            ARCHIVE_OUTPUT_NAME "${native_output_name}"
         )
     endif()
 endfunction()

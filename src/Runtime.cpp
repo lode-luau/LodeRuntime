@@ -261,7 +261,7 @@ std::vector<std::string> AddDependencyToManifest(
 
     if (!manifest.is_object())
     {
-        errors.push_back("Package manifest must contain a JSON object.");
+        errors.push_back("Package manifest must contain a Luau table.");
         return errors;
     }
 

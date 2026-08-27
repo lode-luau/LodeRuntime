@@ -29,6 +29,7 @@ namespace
 namespace fs = std::filesystem;
 using json = nlohmann::json;
 using Lode::Detail::PathToUtf8;
+using Lode::Detail::PathFromUtf8;
 
 void AddError(PackResult& result, std::string message)
 {
@@ -108,6 +109,39 @@ bool ReadManifest(const fs::path& packageRoot, json& manifest, PackResult& resul
     return true;
 }
 
+std::string NativeLibraryExtension(const std::string& platform)
+{
+    if (platform == "windows") return ".dll";
+    if (platform == "macos" || platform == "ios") return ".dylib";
+    if (platform == "wasm") return ".wasm";
+    return ".so";
+}
+
+std::string ExpandImplementationLayout(std::string layout,
+                                       const std::string& platform,
+                                       const std::string& architecture,
+                                       const std::string& configuration,
+                                       const std::string& artifact)
+{
+    const std::pair<std::string_view, std::string> substitutions[] = {
+        { "{platform}", platform },
+        { "{architecture}", architecture },
+        { "{configuration}", configuration },
+        { "{artifact}", artifact },
+        { "{extension}", NativeLibraryExtension(platform) }
+    };
+    for (const auto& [token, replacement] : substitutions)
+    {
+        size_t position = 0;
+        while ((position = layout.find(token, position)) != std::string::npos)
+        {
+            layout.replace(position, token.size(), replacement);
+            position += replacement.size();
+        }
+    }
+    return layout;
+}
+
 struct PackageFile
 {
     fs::path source;
@@ -115,6 +149,7 @@ struct PackageFile
 };
 
 bool CollectPackageFiles(const fs::path& packageRoot,
+                         const json& manifest,
                          std::vector<PackageFile>& files,
                          PackResult& result)
 {
@@ -183,6 +218,37 @@ bool CollectPackageFiles(const fs::path& packageRoot,
     {
         AddError(result, "Cannot enumerate package files: " + ec.message());
         return false;
+    }
+
+    // The validator is the source of truth for the declared artifact matrix,
+    // but the packer must explicitly include custom layouts as well as the
+    // standard libs/ layout. Runtime libraries found elsewhere are not
+    // included implicitly; only artifacts declared by the package manifest
+    // are added here.
+    if (manifest.contains("implementation") && manifest["implementation"].is_object())
+    {
+        const json& implementation = manifest["implementation"];
+        const std::string artifact = implementation.value("artifact", manifest.value("name", ""));
+        const std::string layout = implementation.value(
+            "layout", "libs/{platform}/{architecture}/{configuration}/{artifact}{extension}");
+        const json targets = implementation.value("targets", json::object());
+        const json releaseTargets = targets.value("release", json::array());
+        for (const json& target : releaseTargets)
+        {
+            if (!target.is_string())
+                continue;
+            const std::string value = target.get<std::string>();
+            const size_t separator = value.find('/');
+            if (separator == std::string::npos)
+                continue;
+            const std::string platform = value.substr(0, separator);
+            const std::string architecture = value.substr(separator + 1);
+            for (const std::string& configuration : { std::string("Debug"), std::string("Release") })
+            {
+                addFile(PathFromUtf8(ExpandImplementationLayout(
+                    layout, platform, architecture, configuration, artifact)));
+            }
+        }
     }
 
     files.reserve(collected.size());
@@ -313,7 +379,7 @@ PackResult PackPackage(const fs::path& packageRoot,
     }
 
     std::vector<PackageFile> files;
-    if (!CollectPackageFiles(root, files, result))
+    if (!CollectPackageFiles(root, manifest, files, result))
         return result;
 
     fs::create_directories(archivePath.parent_path(), ec);

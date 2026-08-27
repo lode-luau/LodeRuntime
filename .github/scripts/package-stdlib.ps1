@@ -27,6 +27,18 @@ cmake --install build-debug --config Debug --prefix $sdkDist --component LodeSDK
 cmake --install build-release --config Release --prefix $sdkDist --component LodeSDK
 Copy-Item LICENSE, README.md $sdkDist
 Set-Content -Path "$sdkDist/VERSION" -Value $ver
+$sdkMetadataPath = Join-Path $sdkDist "lode-sdk.json"
+if (-not (Test-Path -LiteralPath $sdkMetadataPath)) {
+    throw "Installed SDK metadata was not found: $sdkMetadataPath"
+}
+$sdkMetadata = Get-Content -Raw -LiteralPath $sdkMetadataPath
+$sdkMetadataPattern = '"sdkVersion"\s*:\s*"[^"]*"'
+if (-not [regex]::IsMatch($sdkMetadata, $sdkMetadataPattern)) {
+    throw "Installed SDK metadata does not contain sdkVersion: $sdkMetadataPath"
+}
+$sdkMetadata = [regex]::new($sdkMetadataPattern).Replace(
+    $sdkMetadata, ('"sdkVersion": "' + $ver + '"'), 1)
+Set-Content -Path $sdkMetadataPath -Value $sdkMetadata -NoNewline
 
 # ---- Runtime distribution: executable and runtime DLLs ----
 # The end-user archive contains the runtime and the bundled stdlib.
@@ -56,6 +68,18 @@ function Read-LuauStringField {
     return ConvertFrom-Json ('"' + $match.Groups[1].Value + '"')
 }
 
+function Read-LuauOptionalStringField {
+    param(
+        [Parameter(Mandatory = $true)] [string]$Source,
+        [Parameter(Mandatory = $true)] [string]$Field
+    )
+
+    $fieldPattern = '(?m)^\s*(?:' + [regex]::Escape($Field) + '|\["' + [regex]::Escape($Field) + '"\])\s*=\s*"((?:\\.|[^"])*)"'
+    $match = [regex]::Match($Source, $fieldPattern)
+    if (-not $match.Success) { return $null }
+    return ConvertFrom-Json ('"' + $match.Groups[1].Value + '"')
+}
+
 function Read-LuauPackageManifest {
     param(
         [Parameter(Mandatory = $true)] [string]$Path
@@ -76,7 +100,37 @@ function Read-LuauPackageManifest {
         name = Read-LuauStringField -Source $source -Field "name" -Path $Path
         version = Read-LuauStringField -Source $source -Field "version" -Path $Path
         dependencies = $dependencies
+        implementation = if ($null -ne (Read-LuauOptionalStringField -Source $source -Field "artifact") -or
+            $null -ne (Read-LuauOptionalStringField -Source $source -Field "layout")) {
+            [pscustomobject]@{
+                artifact = Read-LuauOptionalStringField -Source $source -Field "artifact"
+                layout = Read-LuauOptionalStringField -Source $source -Field "layout"
+            }
+        } else { $null }
     }
+}
+
+function Expand-NativeArtifactPath {
+    param(
+        [Parameter(Mandatory = $true)] [object]$Manifest,
+        [Parameter(Mandatory = $true)] [string]$Platform,
+        [Parameter(Mandatory = $true)] [string]$Architecture,
+        [Parameter(Mandatory = $true)] [string]$Configuration
+    )
+
+    $artifact = if ($Manifest.implementation.artifact) { [string]$Manifest.implementation.artifact } else { [string]$Manifest.name }
+    $layout = if ($Manifest.implementation.layout) {
+        [string]$Manifest.implementation.layout
+    } else {
+        "libs/{platform}/{architecture}/{configuration}/{artifact}{extension}"
+    }
+    $expanded = $layout.Replace("{platform}", $Platform).Replace("{architecture}", $Architecture).
+        Replace("{configuration}", $Configuration).Replace("{artifact}", $artifact).
+        Replace("{extension}", ".dll")
+    if ([System.IO.Path]::IsPathRooted($expanded) -or $expanded -match '(^|[\\/])\.\.([\\/]|$)') {
+        throw "Native implementation layout escapes the package: $expanded"
+    }
+    return $expanded.Replace('/', '\')
 }
 
 $moduleDirs = Get-ChildItem modules -Directory -Recurse | Where-Object { Test-Path (Join-Path $_.FullName "package.luau") }
@@ -164,9 +218,11 @@ foreach ($record in ($moduleRecords.Values | Sort-Object RelativePath)) {
     # own libs/<platform>/<arch>/<config> entry from package.luau; the
     # loader resolves the config-aware subdir per runtime build.
     if ($isNative) {
-        $libRelease = "$src/libs/windows/x64/Release/$name.dll"
-        $libFlat = "$src/libs/windows/x64/$name.dll"
-        $libBin = "build-release/bin/Release/$name.dll"
+        $relativeArtifact = Expand-NativeArtifactPath -Manifest $record.Manifest -Platform "windows" -Architecture "x64" -Configuration "Release"
+        $libRelease = Join-Path $src $relativeArtifact
+        $artifactName = Split-Path $relativeArtifact -Leaf
+        $libFlat = Join-Path $src (Join-Path "libs/windows/x64" $artifactName)
+        $libBin = "build-release/bin/Release/$artifactName"
 
         $sourceDll = $null
         if (Test-Path $libRelease) {
@@ -178,9 +234,9 @@ foreach ($record in ($moduleRecords.Values | Sort-Object RelativePath)) {
         }
 
         if ($sourceDll) {
-            $libDirRelease = "$dst/libs/windows/x64/Release"
+            $libDirRelease = Split-Path (Join-Path $dst $relativeArtifact) -Parent
             New-Item -ItemType Directory -Force -Path $libDirRelease | Out-Null
-            Copy-Item $sourceDll "$libDirRelease/$name.dll" -Force
+            Copy-Item $sourceDll (Join-Path $libDirRelease $artifactName) -Force
         } else {
             Write-Error "Native library for $name was not found at $libRelease, $libFlat, or $libBin"
         }

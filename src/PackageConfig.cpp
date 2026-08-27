@@ -40,6 +40,17 @@ bool IsIdentifierContinue(char character)
     return std::isalnum(static_cast<unsigned char>(character)) || character == '_';
 }
 
+bool IsSafeRelativeAliasPath(const std::string& value)
+{
+    const fs::path path = fs::path(value).lexically_normal();
+    if (value.empty() || path.empty() || path.is_absolute() ||
+        !path.root_name().empty() || !path.root_directory().empty())
+        return false;
+
+    const auto first = path.begin();
+    return first != path.end() && *first != "..";
+}
+
 void SkipWhitespaceAndComments(std::string_view text, size_t& position)
 {
     while (position < text.size())
@@ -396,7 +407,7 @@ ConfigAliasUpdateResult UpdateConfigAliases(
             AddError(result, "Cannot update .config.luau: unsafe package alias '" + alias + "'.");
             continue;
         }
-        if (path.empty() || fs::path(path).is_absolute())
+        if (!IsSafeRelativeAliasPath(path))
         {
             AddError(result, "Cannot update .config.luau: alias '" + alias +
                 "' must use a non-empty relative path.");
@@ -519,7 +530,7 @@ ConfigAliasUpdateResult WriteGeneratedConfigAliases(
             AddError(result, "Cannot create .config.luau: unsafe package alias '" + alias + "'.");
             continue;
         }
-        if (path.empty() || fs::path(path).is_absolute())
+        if (!IsSafeRelativeAliasPath(path))
         {
             AddError(result, "Cannot create .config.luau: alias '" + alias +
                 "' must use a non-empty relative path.");

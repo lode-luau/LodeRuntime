@@ -574,9 +574,8 @@ static ModuleLoadResult LoadModuleNoJump(lua_State* L, void* ctx, const char* pa
         if (packageManifestNative)
         {
             // A package with an implementation is native.
-            // Its `init.luau` is type-only and must not be executed while
-            // The selected artifact is resolved from the package implementation.
-            // loading the compiled implementation.
+            // Its `init.luau` is type-only and must not be executed. The
+            // selected artifact is resolved from the package implementation.
             std::string platform = std::string(Platform::GetOSName());
             std::string arch = std::string(Platform::GetArchitectureName());
 
