@@ -1,5 +1,6 @@
-if(NOT DEFINED LODE_EXECUTABLE OR NOT DEFINED TEST_BINARY_DIR OR NOT DEFINED LODE_BUILD_DIR OR NOT DEFINED LODE_CONFIGURATION)
-    message(FATAL_ERROR "project_init_test.cmake requires LODE_EXECUTABLE, TEST_BINARY_DIR, LODE_BUILD_DIR and LODE_CONFIGURATION")
+if(NOT DEFINED LODE_EXECUTABLE OR NOT DEFINED TEST_BINARY_DIR OR NOT DEFINED LODE_BUILD_DIR OR NOT DEFINED LODE_CONFIGURATION OR
+   NOT DEFINED LODE_PLATFORM OR NOT DEFINED LODE_ARCHITECTURE OR NOT DEFINED LODE_GENERATOR OR NOT DEFINED LODE_LIBRARY_SUFFIX)
+    message(FATAL_ERROR "project_init_test.cmake requires runtime, build, host target, generator and configuration arguments")
 endif()
 
 set(test_root "${TEST_BINARY_DIR}/lode-project-init-test")
@@ -49,7 +50,7 @@ foreach(required_file IN ITEMS lode.json init.luau LICENSE README.md CMakeLists.
     endif()
 endforeach()
 file(READ "${native_root}/lode.json" native_manifest)
-foreach(required_text IN ITEMS "releaseTargets" "\"platform\": \"windows\"" "\"architecture\": \"x64\"")
+foreach(required_text IN ITEMS "releaseTargets" "\"platform\": \"${LODE_PLATFORM}\"" "\"architecture\": \"${LODE_ARCHITECTURE}\"")
     string(FIND "${native_manifest}" "${required_text}" position)
     if(position LESS 0)
         message(FATAL_ERROR "Native project manifest is missing '${required_text}'")
@@ -69,10 +70,17 @@ execute_process(
 if(NOT result EQUAL 0)
     message(FATAL_ERROR "Could not install the current SDK for the generated native project:\n${output}\n${error}")
 endif()
+set(native_configure_command
+    "${CMAKE_COMMAND}" -S "${native_root}" -B "${native_root}/build"
+    -G "${LODE_GENERATOR}"
+    "-DCMAKE_PREFIX_PATH=${sdk_root}")
+if(LODE_MULTI_CONFIG)
+    list(APPEND native_configure_command "-DCMAKE_CONFIGURATION_TYPES=${LODE_CONFIGURATION}")
+else()
+    list(APPEND native_configure_command "-DCMAKE_BUILD_TYPE=${LODE_CONFIGURATION}")
+endif()
 execute_process(
-    COMMAND "${CMAKE_COMMAND}" -S "${native_root}" -B "${native_root}/build"
-        "-DCMAKE_PREFIX_PATH=${sdk_root}"
-        "-DCMAKE_CONFIGURATION_TYPES=${LODE_CONFIGURATION}"
+    COMMAND ${native_configure_command}
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
 if(NOT result EQUAL 0)
     message(FATAL_ERROR "Generated native project did not configure:\n${output}\n${error}")
@@ -80,7 +88,8 @@ endif()
 execute_process(
     COMMAND "${CMAKE_COMMAND}" --build "${native_root}/build" --config "${LODE_CONFIGURATION}"
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
-if(NOT result EQUAL 0 OR NOT EXISTS "${native_root}/libs/windows/x64/${LODE_CONFIGURATION}/native_project.dll")
+set(native_library "${native_root}/libs/${LODE_PLATFORM}/${LODE_ARCHITECTURE}/${LODE_CONFIGURATION}/native_project${LODE_LIBRARY_SUFFIX}")
+if(NOT result EQUAL 0 OR NOT EXISTS "${native_library}")
     message(FATAL_ERROR "Generated native project did not build for the host:\n${output}\n${error}")
 endif()
 

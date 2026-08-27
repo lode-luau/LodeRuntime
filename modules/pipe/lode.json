@@ -9,9 +9,11 @@
       "x64": "libs/windows/x64/pipe.dll"
     },
     "linux": {
+      "arm64": "libs/linux/arm64/pipe.so",
       "x64": "libs/linux/x64/pipe.so"
     },
     "macos": {
+      "arm64": "libs/macos/arm64/pipe.dylib",
       "x64": "libs/macos/x64/pipe.dylib"
     }
   },

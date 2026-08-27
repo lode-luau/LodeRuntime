@@ -9,9 +9,11 @@
       "x64": "libs/windows/x64/tty.dll"
     },
     "linux": {
+      "arm64": "libs/linux/arm64/tty.so",
       "x64": "libs/linux/x64/tty.so"
     },
     "macos": {
+      "arm64": "libs/macos/arm64/tty.dylib",
       "x64": "libs/macos/x64/tty.dylib"
     }
   },

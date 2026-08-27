@@ -14,7 +14,7 @@ if(MSVC)
     target_link_options(native_module PRIVATE $<$<NOT:$<CONFIG:Debug>>:/OPT:REF> $<$<NOT:$<CONFIG:Debug>>:/OPT:ICF> $<$<NOT:$<CONFIG:Debug>>:/LTCG>)
 else()
     target_compile_options(native_module PRIVATE -Os -fno-rtti -fvisibility=hidden -flto)
-    target_link_options(native_module PRIVATE -flto -Wl,--gc-sections)
+    target_link_options(native_module PRIVATE -flto ${LODE_GC_SECTIONS_LINK_OPTION})
 endif()
 
 # 1. Universal Platform Detection

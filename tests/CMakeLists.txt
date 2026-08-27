@@ -55,6 +55,21 @@ lode_add_script_test(integration_marshal_bench   native/marshal_bench.luau)
 lode_add_script_test(integration_config_mismatch native/config_mismatch.luau)
 lode_add_script_test(integration_abi_mismatch  native/abi_mismatch.luau)
 
+lode_get_platform_name(LODE_TEST_PLATFORM)
+lode_get_architecture_name(LODE_TEST_ARCHITECTURE)
+if(WIN32)
+    set(LODE_TEST_LIBRARY_SUFFIX ".dll")
+elseif(APPLE)
+    set(LODE_TEST_LIBRARY_SUFFIX ".dylib")
+else()
+    set(LODE_TEST_LIBRARY_SUFFIX ".so")
+endif()
+if(CMAKE_CONFIGURATION_TYPES)
+    set(LODE_TEST_MULTI_CONFIG ON)
+else()
+    set(LODE_TEST_MULTI_CONFIG OFF)
+endif()
+
 # Keep the fixture path configuration-aware rather than relying on the system
 # loader search path. This also makes the test independent of the host libc.
 add_test(
@@ -190,6 +205,11 @@ add_test(
         -DTEST_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}
         -DLODE_BUILD_DIR=${CMAKE_BINARY_DIR}
         -DLODE_CONFIGURATION=$<CONFIG>
+        -DLODE_PLATFORM=${LODE_TEST_PLATFORM}
+        -DLODE_ARCHITECTURE=${LODE_TEST_ARCHITECTURE}
+        -DLODE_GENERATOR=${CMAKE_GENERATOR}
+        -DLODE_MULTI_CONFIG=${LODE_TEST_MULTI_CONFIG}
+        -DLODE_LIBRARY_SUFFIX=${LODE_TEST_LIBRARY_SUFFIX}
         -P "${CMAKE_SOURCE_DIR}/tests/package/project_init_test.cmake"
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
 )

@@ -22,11 +22,7 @@ else()
     set(TARGET_LIB_NAME "config_mismatch_module.so")
 endif()
 
-if(CMAKE_SIZEOF_VOID_P EQUAL 8)
-    set(TARGET_ARCH "x64")
-else()
-    set(TARGET_ARCH "x86")
-endif()
+lode_get_architecture_name(TARGET_ARCH)
 
 set(NATIVE_OUTPUT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/libs/${TARGET_PLATFORM}/${TARGET_ARCH}/$<CONFIG>")
 

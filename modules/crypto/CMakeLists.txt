@@ -2,7 +2,8 @@ cmake_minimum_required(VERSION 3.20)
 project(crypto LANGUAGES CXX)
 
 if(NOT WIN32)
-    message(FATAL_ERROR "crypto currently supports Windows x64 through the BCrypt/CNG provider only")
+    message(STATUS "Skipping crypto: BCrypt/CNG provider is currently Windows-only")
+    return()
 endif()
 
 lode_add_native_module(crypto
@@ -30,5 +31,5 @@ if(MSVC)
     )
 else()
     target_compile_options(crypto PRIVATE -Os -fno-rtti -fvisibility=hidden -flto)
-    target_link_options(crypto PRIVATE -flto -Wl,--gc-sections)
+    target_link_options(crypto PRIVATE -flto ${LODE_GC_SECTIONS_LINK_OPTION})
 endif()
