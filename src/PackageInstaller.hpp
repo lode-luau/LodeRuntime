@@ -41,8 +41,8 @@ LODE_API InstallResult InstallLocked(
     bool includeDevelopmentDependencies);
 
 // Resolves and installs stdlib, local path, pure-Luau Git, and supported
-// Windows x64 GitHub Release artifact packages, then writes its deterministic
-// lockfile. It never builds native packages locally.
+// current-platform GitHub Release artifact packages, then writes its
+// deterministic lockfile. It never builds native packages locally.
 LODE_API InstallResult InstallLocal(
     const std::filesystem::path& packageRoot,
     const std::filesystem::path& standardLibraryRoot,

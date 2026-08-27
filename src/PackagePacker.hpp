@@ -23,7 +23,7 @@ struct PackResult
     }
 };
 
-// Validates and publishes the current package as the supported Windows x64
+// Validates and publishes the current package as the supported host-target
 // ZIP artifact. The output receives a sibling .sha256 checksum file.
 LODE_API PackResult PackPackage(
     const std::filesystem::path& packageRoot,

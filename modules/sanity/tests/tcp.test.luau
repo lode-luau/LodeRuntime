@@ -5,6 +5,7 @@ local it = sanity.it
 local expect = sanity.expect
 
 local task = require("../../../modules/task")
+local sys = require("../../sys")
 local tcp = require("../../tcp")
 
 describe("tcp", function()
@@ -52,13 +53,18 @@ describe("tcp", function()
     end)
 
     it("supports TLS client option on socket connection", function()
+        local isWin = string.find(string.lower(sys.GetPlatform()), "win", 1, true) ~= nil
         local ok, err = pcall(function()
             local socket = tcp.TcpSocket.Create()
             socket:Connect("127.0.0.1", 1, { tls = true })
         end)
         expect(ok).toBe(false)
         local msg = tostring(err)
-        expect(msg:find("connect:", 1, true) ~= nil).toBe(true)
+        if isWin then
+            expect(msg:find("connect:", 1, true) ~= nil or msg:find("tls:", 1, true) ~= nil).toBe(true)
+        else
+            expect(msg:find("tls: TLS is not supported on this platform", 1, true) ~= nil).toBe(true)
+        end
     end)
 
     it("rejects a server on an invalid host", function()

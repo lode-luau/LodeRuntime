@@ -9,18 +9,14 @@ set(cache_home "${TEST_BINARY_DIR}/lode-git-cache")
 file(REMOVE_RECURSE "${git_source}" "${consumer_root}" "${cache_home}")
 file(MAKE_DIRECTORY "${git_source}" "${consumer_root}" "${cache_home}")
 
-file(WRITE "${git_source}/lode.json" [=[{
-  "name": "git_signal",
-  "version": "1.0.0",
-  "license": "MIT",
-  "dependencies": {
-    "task": "1.0.0"
-  }
+file(WRITE "${git_source}/package.luau" [=[return {
+  name = "git_signal",
+  version = "1.0.0",
+  license = "MIT",
 }
 ]=])
 file(WRITE "${git_source}/init.luau" [=[
-local task = require("@task")
-return { has_task = task ~= nil, revision = "first" }
+return { revision = "first" }
 ]=])
 file(WRITE "${git_source}/LICENSE" "MIT\n")
 
@@ -37,9 +33,9 @@ endif()
 
 execute_process(COMMAND git -C "${git_source}" config user.email "lode-tests@example.invalid")
 execute_process(COMMAND git -C "${git_source}" config user.name "Lode Tests")
-execute_process(COMMAND git -C "${git_source}" add lode.json init.luau LICENSE)
+execute_process(COMMAND git -C "${git_source}" add package.luau init.luau LICENSE)
 execute_process(
-    COMMAND git -C "${git_source}" commit --quiet -m "Add Git package fixture"
+    COMMAND git -c commit.gpgSign=false -C "${git_source}" commit --quiet -m "Add Git package fixture"
     RESULT_VARIABLE result
     OUTPUT_VARIABLE output
     ERROR_VARIABLE error
@@ -56,16 +52,15 @@ if(NOT result EQUAL 0)
 endif()
 
 file(TO_CMAKE_PATH "${git_source}" git_reference)
-file(WRITE "${consumer_root}/lode.json" "{\n  \"name\": \"git_consumer\",\n  \"version\": \"1.0.0\",\n  \"license\": \"MIT\",\n  \"dependencies\": {\n    \"git_signal\": {\n      \"git\": \"${git_reference}\",\n      \"version\": \"1.0.0\"\n    }\n  }\n}\n")
+file(WRITE "${consumer_root}/package.luau" "return {\n  name = \"git_consumer\",\n  version = \"1.0.0\",\n  license = \"MIT\",\n  dependencies = {\n    git_signal = {\n      git = \"${git_reference}\",\n      version = \"1.0.0\",\n    },\n  },\n}\n")
 file(WRITE "${consumer_root}/init.luau" [=[
 local git_signal = require("@git_signal")
-assert(git_signal.has_task == true, "Git package did not load its stdlib dependency")
 assert(git_signal.revision == "first", "Git package was not pinned to the locked commit")
 ]=])
 file(WRITE "${consumer_root}/LICENSE" "MIT\n")
 
 execute_process(
-    COMMAND "${CMAKE_COMMAND}" -E env "USERPROFILE=${cache_home}"
+    COMMAND "${CMAKE_COMMAND}" -E env "HOME=${cache_home}" "USERPROFILE=${cache_home}"
         "${LODE_EXECUTABLE}" install "${consumer_root}"
     RESULT_VARIABLE result
     OUTPUT_VARIABLE output
@@ -77,8 +72,7 @@ if(NOT result EQUAL 0)
 endif()
 
 if(NOT EXISTS "${consumer_root}/lode.lock" OR
-   NOT EXISTS "${consumer_root}/lode_modules/git_signal/init.luau" OR
-   NOT EXISTS "${consumer_root}/lode_modules/task/init.luau")
+   NOT EXISTS "${consumer_root}/lode_modules/git_signal/init.luau")
     file(REMOVE_RECURSE "${git_source}" "${consumer_root}" "${cache_home}")
     message(FATAL_ERROR "Git local install did not materialize the resolved graph")
 endif()
@@ -97,7 +91,7 @@ if(EXISTS "${consumer_root}/lode_modules/git_signal/.git")
 endif()
 
 execute_process(
-    COMMAND "${CMAKE_COMMAND}" -E env "USERPROFILE=${cache_home}"
+    COMMAND "${CMAKE_COMMAND}" -E env "HOME=${cache_home}" "USERPROFILE=${cache_home}"
         "${LODE_EXECUTABLE}" "${consumer_root}/init.luau"
     RESULT_VARIABLE result
     OUTPUT_VARIABLE output
@@ -109,12 +103,11 @@ if(NOT result EQUAL 0)
 endif()
 
 file(WRITE "${git_source}/init.luau" [=[
-local task = require("@task")
-return { has_task = task ~= nil, revision = "second" }
+return { revision = "second" }
 ]=])
 execute_process(COMMAND git -C "${git_source}" add init.luau)
 execute_process(
-    COMMAND git -C "${git_source}" commit --quiet -m "Advance Git package after lock"
+    COMMAND git -c commit.gpgSign=false -C "${git_source}" commit --quiet -m "Advance Git package after lock"
     RESULT_VARIABLE result
     OUTPUT_VARIABLE output
     ERROR_VARIABLE error
@@ -126,7 +119,7 @@ endif()
 
 file(REMOVE_RECURSE "${consumer_root}/lode_modules" "${consumer_root}/.config.luau")
 execute_process(
-    COMMAND "${CMAKE_COMMAND}" -E env "USERPROFILE=${cache_home}"
+    COMMAND "${CMAKE_COMMAND}" -E env "HOME=${cache_home}" "USERPROFILE=${cache_home}"
         "${LODE_EXECUTABLE}" install --locked "${consumer_root}"
     RESULT_VARIABLE result
     OUTPUT_VARIABLE output

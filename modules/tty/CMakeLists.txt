@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(tty LANGUAGES CXX)
 
-lode_add_native_module(tty
+lode_add_module(tty
     SOURCES
         src/Main.cpp
         src/TtyManager.cpp
@@ -17,5 +17,5 @@ if(MSVC)
     target_link_options(tty PRIVATE $<$<NOT:$<CONFIG:Debug>>:/OPT:REF> $<$<NOT:$<CONFIG:Debug>>:/OPT:ICF> $<$<NOT:$<CONFIG:Debug>>:/LTCG>)
 else()
     target_compile_options(tty PRIVATE -Os -fno-rtti -fvisibility=hidden -flto)
-    target_link_options(tty PRIVATE -flto -Wl,--gc-sections)
+    target_link_options(tty PRIVATE -flto ${LODE_GC_SECTIONS_LINK_OPTION})
 endif()

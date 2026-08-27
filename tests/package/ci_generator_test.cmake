@@ -6,27 +6,24 @@ set(package_root "${TEST_BINARY_DIR}/ci-generator-package")
 file(REMOVE_RECURSE "${package_root}")
 file(MAKE_DIRECTORY "${package_root}")
 
-file(WRITE "${package_root}/lode.json" [=[{
-  "name": "ci_generator_package",
-  "version": "1.0.0",
-  "license": "MIT",
-  "libraries": {
-    "windows": {
-      "x64": "libs/windows/x64/ci_generator_package.dll"
+file(WRITE "${package_root}/package.luau" [=[return {
+  name = "ci_generator_package",
+  version = "1.0.0",
+  license = "MIT",
+  implementation = {
+    artifact = "ci_generator_package",
+    required = true,
+    targets = {
+      build = { "windows/x64" },
+      release = { "windows/x64" },
     },
-    "linux": {
-      "x64": "libs/linux/x64/ci_generator_package.so"
-    }
   },
-  "releaseTargets": [
-    { "platform": "windows", "architecture": "x64" }
-  ],
-  "dependencies": {
-    "example": {
-      "git": "https://github.com/example/example.git",
-      "version": "1.0.0"
-    }
-  }
+  dependencies = {
+    example = {
+      git = "https://github.com/example/example.git",
+      version = "1.0.0",
+    },
+  },
 }
 ]=])
 file(WRITE "${package_root}/init.luau" "return {}\n")
@@ -38,31 +35,33 @@ execute_process(
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
 if(result EQUAL 0)
     file(REMOVE_RECURSE "${package_root}")
-    message(FATAL_ERROR "ci init unexpectedly accepted an unpinned SDK:\n${output}\n${error}")
+    message(FATAL_ERROR "ci init unexpectedly accepted an unpinned Lode version:\n${output}\n${error}")
 endif()
 if(EXISTS "${package_root}/.github/workflows/lode.yml")
     file(REMOVE_RECURSE "${package_root}")
-    message(FATAL_ERROR "ci init left a workflow after rejecting an unpinned SDK")
+    message(FATAL_ERROR "ci init left a workflow after rejecting an unpinned Lode version")
 endif()
 
-set(sdk_version "1.0.0-nightly.20260820.2")
-set(sdk_sha256 "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+set(lode_version "1.0.0-nightly.20260820.2")
+set(lode_sha256 "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 execute_process(
     COMMAND "${LODE_EXECUTABLE}" ci init
-        --sdk-version "${sdk_version}"
-        --sdk-sha256 "${sdk_sha256}"
+        --lode-version "${lode_version}"
+        --lode-sha256 "${lode_sha256}"
         "${package_root}"
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
 if(NOT result EQUAL 0)
     file(REMOVE_RECURSE "${package_root}")
-    message(FATAL_ERROR "ci init failed with a valid SDK pin:\n${output}\n${error}")
+    message(FATAL_ERROR "ci init failed with a valid Lode pin:\n${output}\n${error}")
 endif()
 
 set(workflow_path "${package_root}/.github/workflows/lode.yml")
 file(READ "${workflow_path}" workflow)
 foreach(required_text IN ITEMS
-    "LODE_SDK_VERSION: \"${sdk_version}\""
-    "LODE_SDK_SHA256: \"${sdk_sha256}\""
+    "LODE_VERSION: \"${lode_version}\""
+    "LODE_SHA256: \"${lode_sha256}\""
+    "LODE_PACKAGE_NAME: \"ci_generator_package\""
+    "LODE_PACKAGE_VERSION: \"1.0.0\""
     "install --dev --locked ."
     "ci validate --source --locked ."
     "ci validate --artifact --locked ."
@@ -73,7 +72,7 @@ foreach(required_text IN ITEMS
         message(FATAL_ERROR "Generated workflow is missing '${required_text}':\n${workflow}")
     endif()
 endforeach()
-foreach(placeholder IN ITEMS "<nightly-version>" "<sdk-sha256>")
+foreach(placeholder IN ITEMS "<nightly-version>" "<lode-sha256>")
     string(FIND "${workflow}" "${placeholder}" position)
     if(NOT position LESS 0)
         file(REMOVE_RECURSE "${package_root}")
@@ -96,29 +95,30 @@ if(user_content_position LESS 0)
     file(REMOVE_RECURSE "${package_root}")
     message(FATAL_ERROR "ci update removed user-owned workflow content")
 endif()
-string(FIND "${workflow}" "LODE_SDK_VERSION: \"${sdk_version}\"" position)
+string(FIND "${workflow}" "LODE_VERSION: \"${lode_version}\"" position)
 if(position LESS 0)
     file(REMOVE_RECURSE "${package_root}")
-    message(FATAL_ERROR "ci update did not preserve the pinned SDK version")
+    message(FATAL_ERROR "ci update did not preserve the pinned Lode version")
 endif()
 
-string(FIND "${workflow}" "native-linux-x64" linux_job_position)
+string(FIND "${workflow}" "module-linux-x64" linux_job_position)
 if(NOT linux_job_position LESS 0)
     file(REMOVE_RECURSE "${package_root}")
     message(FATAL_ERROR "Generated workflow inferred an undeclared linux release target")
 endif()
 
-file(WRITE "${package_root}/lode.json" [=[{
-  "name": "ci_generator_package",
-  "version": "1.0.0",
-  "license": "MIT",
-  "libraries": {
-    "windows": { "x64": "libs/windows/x64/ci_generator_package.dll" },
-    "linux": { "x64": "libs/linux/x64/ci_generator_package.so" }
+file(WRITE "${package_root}/package.luau" [=[return {
+  name = "ci_generator_package",
+  version = "1.0.0",
+  license = "MIT",
+  implementation = {
+    artifact = "ci_generator_package",
+    required = true,
+    targets = {
+      build = { "linux/x64" },
+      release = { "linux/x64" },
+    },
   },
-  "releaseTargets": [
-    { "platform": "linux", "architecture": "x64" }
-  ]
 }
 ]=])
 execute_process(
@@ -126,9 +126,9 @@ execute_process(
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
 if(result EQUAL 0)
     file(REMOVE_RECURSE "${package_root}")
-    message(FATAL_ERROR "ci update accepted a target without an implemented runner/SDK matrix")
+    message(FATAL_ERROR "ci update accepted a target without an implemented runner/platform matrix")
 endif()
-string(FIND "${output}${error}" "no runner and SDK matrix" unsupported_target_message)
+string(FIND "${output}${error}" "no runner and platform matrix" unsupported_target_message)
 if(unsupported_target_message LESS 0)
     file(REMOVE_RECURSE "${package_root}")
     message(FATAL_ERROR "ci update did not report the unsupported target clearly:\n${output}\n${error}")

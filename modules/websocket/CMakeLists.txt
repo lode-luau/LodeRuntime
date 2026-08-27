@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(websocket LANGUAGES CXX)
 
-lode_add_native_module(websocket
+lode_add_module(websocket
     SOURCES
         src/Main.cpp
         src/WsHelpers.cpp
@@ -26,6 +26,15 @@ if(NOT WIN32 AND NOT EMSCRIPTEN)
     find_package(OpenSSL REQUIRED)
     target_compile_definitions(websocket PRIVATE LODE_HAS_OPENSSL_TLS)
     target_link_libraries(websocket PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+    if(APPLE)
+        set(WEBSOCKET_MODULE_RPATH "@loader_path")
+    else()
+        set(WEBSOCKET_MODULE_RPATH "$ORIGIN")
+    endif()
+    set_target_properties(websocket PROPERTIES
+        BUILD_RPATH "${WEBSOCKET_MODULE_RPATH};$<TARGET_FILE_DIR:OpenSSL::SSL>"
+        INSTALL_RPATH "${WEBSOCKET_MODULE_RPATH}"
+    )
 endif()
 
 if(MSVC)
@@ -33,5 +42,5 @@ if(MSVC)
     target_link_options(websocket PRIVATE $<$<NOT:$<CONFIG:Debug>>:/OPT:REF> $<$<NOT:$<CONFIG:Debug>>:/OPT:ICF> $<$<NOT:$<CONFIG:Debug>>:/LTCG>)
 else()
     target_compile_options(websocket PRIVATE -Os -fno-rtti -fvisibility=hidden -flto)
-    target_link_options(websocket PRIVATE -flto -Wl,--gc-sections)
+    target_link_options(websocket PRIVATE -flto ${LODE_GC_SECTIONS_LINK_OPTION})
 endif()

@@ -40,7 +40,7 @@
 
 /**
  * @def LODE_ABI_ID
- * @brief Opaque ABI identifier shared by a Lode runtime and its native SDK.
+ * @brief Opaque ABI identifier shared by a Lode runtime and its module distribution.
  *
  * The identifier changes when the native module contract is incompatible.
  * It is intentionally a C string literal so it can be exported without

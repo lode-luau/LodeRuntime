@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(http LANGUAGES CXX)
 
-lode_add_native_module(http
+lode_add_module(http
     SOURCES
         src/Main.cpp
         src/HttpManager.cpp
@@ -22,6 +22,15 @@ elseif(NOT EMSCRIPTEN)
     find_package(OpenSSL REQUIRED)
     target_compile_definitions(http PRIVATE LODE_HAS_OPENSSL_TLS)
     target_link_libraries(http PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+    if(APPLE)
+        set(HTTP_MODULE_RPATH "@loader_path")
+    else()
+        set(HTTP_MODULE_RPATH "$ORIGIN")
+    endif()
+    set_target_properties(http PROPERTIES
+        BUILD_RPATH "${HTTP_MODULE_RPATH};$<TARGET_FILE_DIR:OpenSSL::SSL>"
+        INSTALL_RPATH "${HTTP_MODULE_RPATH}"
+    )
 endif()
 
 if(MSVC)
@@ -37,5 +46,5 @@ if(MSVC)
     )
 else()
     target_compile_options(http PRIVATE -Os -fno-rtti -fvisibility=hidden -flto)
-    target_link_options(http PRIVATE -flto -Wl,--gc-sections)
+    target_link_options(http PRIVATE -flto ${LODE_GC_SECTIONS_LINK_OPTION})
 endif()

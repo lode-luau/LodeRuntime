@@ -1,7 +1,7 @@
 --!strict
 
 -- Type definitions for every value exported by the native DLL. The runtime
--- loads the implementation from lode.json, while this file provides LSP
+-- loads the implementation from package.luau, while this file provides LSP
 -- completion and type checking for Luau callers.
 
 export type Vector3 = {

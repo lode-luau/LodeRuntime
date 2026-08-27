@@ -63,7 +63,7 @@ endforeach()
 
 set(LODE_FFI_LIB_TARGET ffi_static)
 
-lode_add_native_module(ffi
+lode_add_module(ffi
     SOURCES
         src/Main.cpp
         src/CdefParser.cpp
@@ -95,5 +95,5 @@ if(MSVC)
     target_link_options(ffi PRIVATE $<$<NOT:$<CONFIG:Debug>>:/OPT:REF> $<$<NOT:$<CONFIG:Debug>>:/OPT:ICF> $<$<NOT:$<CONFIG:Debug>>:/LTCG>)
 else()
     target_compile_options(ffi PRIVATE -Os -fno-rtti -fvisibility=hidden -flto)
-    target_link_options(ffi PRIVATE -flto -Wl,--gc-sections)
+    target_link_options(ffi PRIVATE -flto ${LODE_GC_SECTIONS_LINK_OPTION})
 endif()

@@ -6,6 +6,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_library(native_module SHARED src/native_module.cpp)
 
+# Keep the filename aligned with package.luau on POSIX, where shared-library
+# targets receive a `lib` prefix by default.
+set_target_properties(native_module PROPERTIES PREFIX "")
+
 target_link_libraries(native_module PRIVATE LodeCore)
 
 # Size Optimization Flags (Option C)
@@ -14,7 +18,7 @@ if(MSVC)
     target_link_options(native_module PRIVATE $<$<NOT:$<CONFIG:Debug>>:/OPT:REF> $<$<NOT:$<CONFIG:Debug>>:/OPT:ICF> $<$<NOT:$<CONFIG:Debug>>:/LTCG>)
 else()
     target_compile_options(native_module PRIVATE -Os -fno-rtti -fvisibility=hidden -flto)
-    target_link_options(native_module PRIVATE -flto -Wl,--gc-sections)
+    target_link_options(native_module PRIVATE -flto ${LODE_GC_SECTIONS_LINK_OPTION})
 endif()
 
 # 1. Universal Platform Detection

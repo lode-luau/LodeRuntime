@@ -8,9 +8,13 @@ obj/
 *.exe
 *.dll
 *.pdb
+*.ilk
+*.ipdb
+*.iobj
 *.so
 *.dylib
 *.lib
+*.exp
 *.a
 *.bin
 
@@ -28,6 +32,8 @@ Thumbs.db
 # Dependencies
 deps/
 third_party/
+.deps-*/
+build-*/
 
 # Bench per-run outputs (history lives in CI artifacts; baseline.json is tracked)
 bench/results/bench-results-*.json
@@ -45,3 +51,4 @@ bench/results/fs_bench_tmp.bin
 # Local scratch directories
 /f/
 /t/
+/project-m/

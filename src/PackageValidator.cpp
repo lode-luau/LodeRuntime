@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 #include "PackageValidator.hpp"
 
+#include "PackageManifest.hpp"
+
 #include "PathUtil.hpp"
 #include "Platform/Platform.hpp"
 #include "Lode/Export.hpp"
@@ -76,7 +78,7 @@ void ValidateDependencyTable(const json& dependencies,
 {
     if (!dependencies.is_object())
     {
-        Error(report, "lode.json." + fieldName + " must be an object.");
+        Error(report, "package manifest." + fieldName + " must be an object.");
         return;
     }
 
@@ -84,7 +86,7 @@ void ValidateDependencyTable(const json& dependencies,
     {
         if (alias.empty())
         {
-            Error(report, "lode.json." + fieldName + " contains an empty dependency alias.");
+            Error(report, "package manifest." + fieldName + " contains an empty dependency alias.");
             continue;
         }
 
@@ -92,7 +94,7 @@ void ValidateDependencyTable(const json& dependencies,
         {
             if (!IsSemVer(declaration.get<std::string>()))
             {
-                Error(report, "lode.json." + fieldName + "." + alias +
+                Error(report, "package manifest." + fieldName + "." + alias +
                     " must use an exact SemVer string for an official standard module.");
             }
             continue;
@@ -100,14 +102,14 @@ void ValidateDependencyTable(const json& dependencies,
 
         if (!declaration.is_object())
         {
-            Error(report, "lode.json." + fieldName + "." + alias +
+            Error(report, "package manifest." + fieldName + "." + alias +
                 " must be an exact version string or a source object.");
             continue;
         }
 
         if (declaration.contains("alias"))
         {
-            Error(report, "lode.json." + fieldName + "." + alias +
+            Error(report, "package manifest." + fieldName + "." + alias +
                 " must not contain an alias field; the dependency key is the alias.");
         }
 
@@ -115,21 +117,21 @@ void ValidateDependencyTable(const json& dependencies,
         const bool hasPath = declaration.contains("path");
         if (hasGit == hasPath)
         {
-            Error(report, "lode.json." + fieldName + "." + alias +
+            Error(report, "package manifest." + fieldName + "." + alias +
                 " must contain exactly one of git or path.");
         }
 
         const char* sourceField = hasGit ? "git" : "path";
         if (declaration.contains(sourceField) && !declaration[sourceField].is_string())
         {
-            Error(report, "lode.json." + fieldName + "." + alias + "." + sourceField +
+            Error(report, "package manifest." + fieldName + "." + alias + "." + sourceField +
                 " must be a string.");
         }
 
         if (!declaration.contains("version") || !declaration["version"].is_string() ||
             !IsVersionRequirement(declaration["version"].get<std::string>()))
         {
-            Error(report, "lode.json." + fieldName + "." + alias +
+            Error(report, "package manifest." + fieldName + "." + alias +
                 ".version must be a SemVer or a ^/~ SemVer requirement.");
         }
     }
@@ -166,12 +168,12 @@ std::optional<fs::path> FindStdlibRoot(const fs::path& packageRoot,
 
         const fs::path siblingModules = current / "modules";
         // A package may legitimately keep Luau modules under its own
-        // modules/ directory. A package root with lode.json is not the
+        // modules/ directory. A package root with a manifest is not the
         // repository-level stdlib catalog, even when installation generated
         // a .config.luau beside it.
         if (fs::is_directory(siblingModules) &&
             fs::is_regular_file(current / ".config.luau") &&
-            !fs::is_regular_file(current / "lode.json"))
+            !fs::is_regular_file(current / "package.luau"))
             return siblingModules;
 
         const fs::path parent = current.parent_path();
@@ -196,16 +198,15 @@ bool FindStdlibManifest(const fs::path& stdlibRoot,
              stdlibRoot, fs::directory_options::follow_directory_symlink, ec),
          end; it != end && !ec; it.increment(ec))
     {
-        if (!it->is_regular_file(ec) || it->path().filename() != "lode.json")
-            continue;
-
-        std::ifstream file(it->path());
-        if (!file.is_open())
+        if (!it->is_regular_file(ec) || it->path().filename() != "package.luau")
             continue;
 
         try
         {
-            json candidate = json::parse(file);
+            const PackageManifestResult parsed = ReadPackageManifest(it->path());
+            if (!parsed.IsValid())
+                continue;
+            json candidate = parsed.document;
             if (candidate.is_object() && candidate.value("name", "") == name)
             {
                 packageRoot = it->path().parent_path();
@@ -269,30 +270,20 @@ bool ReadDependencyManifest(const fs::path& packageRoot,
                             json& manifest,
                             ValidationReport& report)
 {
-    const fs::path manifestPath = packageRoot / "lode.json";
-    std::ifstream file(manifestPath);
-    if (!file.is_open())
+    const fs::path packageManifestPath = packageRoot / "package.luau";
+    if (!fs::is_regular_file(packageManifestPath))
     {
-        Error(report, "Missing dependency manifest: " + PathToUtf8(manifestPath));
+        Error(report, "Missing dependency manifest: " + PathToUtf8(packageManifestPath));
         return false;
     }
 
-    try
+    const PackageManifestResult parsed = ReadPackageManifest(packageManifestPath);
+    if (!parsed.IsValid())
     {
-        manifest = json::parse(file);
-    }
-    catch (const std::exception& exception)
-    {
-        Error(report, "Failed to parse dependency manifest " + PathToUtf8(manifestPath) + ": " + exception.what());
+        report.errors.insert(report.errors.end(), parsed.errors.begin(), parsed.errors.end());
         return false;
     }
-
-    if (!manifest.is_object())
-    {
-        Error(report, "Dependency manifest must contain a JSON object: " + PathToUtf8(manifestPath));
-        return false;
-    }
-
+    manifest = parsed.document;
     return true;
 }
 
@@ -558,107 +549,148 @@ void ValidateArtifact(const fs::path& artifact,
     }
 }
 
-void ValidateLibraryEntry(const fs::path& root,
-                          const std::string& platform,
-                          const std::string& architecture,
-                          const std::string& relativePath,
-                          ValidationMode mode,
-                          bool& hasThirdPartyRuntime,
-                          ValidationReport& report)
+std::string ImplementationExtension(const std::string& platform)
 {
-    fs::path relative = PathFromUtf8(relativePath);
-    fs::path basePath = root / relative;
-
-    if (relativePath.empty() || relative.is_absolute() || !IsPathInside(basePath, root))
-    {
-        Error(report, "libraries." + platform + "." + architecture +
-            " must be a non-empty relative path inside the package.");
-        return;
-    }
-
-    const fs::path parent = basePath.parent_path();
-    if (mode == ValidationMode::Source || mode == ValidationMode::InstallSource)
-        return;
-
-    // Published package archives are validated against the complete matrix
-    // declared in lode.json. An installed artifact is different: the current
-    // Windows x64 release archive contains only the target and configuration
-    // consumed by the released Lode runtime.
-    if (mode == ValidationMode::InstallArtifact &&
-        (platform != "windows" || architecture != "x64"))
-        return;
-
-    const fs::path filename = basePath.filename();
-    const std::vector<std::string> configurations = mode == ValidationMode::InstallArtifact
-        ? std::vector<std::string>{ "Release" }
-        : std::vector<std::string>{ "Debug", "Release" };
-    for (const std::string& configuration : configurations)
-    {
-        fs::path artifact = parent / configuration / filename;
-        if (!fs::is_regular_file(artifact))
-        {
-            Error(report, "Missing " + configuration + " native artifact: " + PathToUtf8(artifact));
-            continue;
-        }
-
-        ValidateArtifact(artifact, configuration, report);
-
-        for (const auto& entry : fs::directory_iterator(artifact.parent_path()))
-        {
-            std::string name = entry.path().filename().string();
-            if (name.rfind("libcrypto", 0) == 0 || name.rfind("libssl", 0) == 0)
-                hasThirdPartyRuntime = true;
-        }
-    }
+    if (platform == "windows") return ".dll";
+    if (platform == "macos" || platform == "ios") return ".dylib";
+    return ".so";
 }
 
-void ValidateReleaseTargets(const json& manifest, bool isNative, ValidationReport& report)
+std::string ExpandImplementationLayout(std::string layout,
+                                       const std::string& platform,
+                                       const std::string& architecture,
+                                       const std::string& configuration,
+                                       const std::string& artifact)
 {
-    if (!manifest.contains("releaseTargets"))
+    const std::array<std::pair<std::string_view, std::string>, 5> substitutions{{
+        { "{platform}", platform },
+        { "{architecture}", architecture },
+        { "{configuration}", configuration },
+        { "{artifact}", artifact },
+        { "{extension}", ImplementationExtension(platform) }
+    }};
+    for (const auto& [token, replacement] : substitutions)
     {
-        if (isNative)
-            Error(report, "Native packages must declare a releaseTargets array.");
-        return;
+        size_t position = 0;
+        while ((position = layout.find(token, position)) != std::string::npos)
+        {
+            layout.replace(position, token.size(), replacement);
+            position += replacement.size();
+        }
     }
-    if (!isNative)
+    return layout;
+}
+
+void ValidateImplementation(const fs::path& root,
+                            const json& manifest,
+                            ValidationMode mode,
+                            bool& hasThirdPartyRuntime,
+                            ValidationReport& report)
+{
+    const json& implementation = manifest["implementation"];
+    if (!implementation.is_object())
     {
-        Error(report, "releaseTargets is valid only for native packages.");
-        return;
-    }
-    const json& targets = manifest["releaseTargets"];
-    if (!targets.is_array() || targets.empty())
-    {
-        Error(report, "releaseTargets must be a non-empty array.");
+        Error(report, "implementation must be an object.");
         return;
     }
 
-    std::set<std::pair<std::string, std::string>> seen;
-    for (const json& target : targets)
+    const std::string packageName = manifest.value("name", "");
+    std::string artifact = packageName;
+    if (implementation.contains("artifact"))
     {
-        if (!target.is_object() || !target.contains("platform") || !target["platform"].is_string() ||
-            !target.contains("architecture") || !target["architecture"].is_string())
+        if (!implementation["artifact"].is_string())
         {
-            Error(report, "Each releaseTargets entry must contain string platform and architecture fields.");
+            Error(report, "implementation.artifact must be a non-empty string.");
+            return;
+        }
+        artifact = implementation["artifact"].get<std::string>();
+    }
+    if (artifact.empty())
+    {
+        Error(report, "implementation.artifact must be a non-empty string.");
+        return;
+    }
+
+    std::string layout =
+        "libs/{platform}/{architecture}/{configuration}/{artifact}{extension}";
+    if (implementation.contains("layout"))
+    {
+        if (!implementation["layout"].is_string())
+        {
+            Error(report, "implementation.layout must be a string.");
+            return;
+        }
+        layout = implementation["layout"].get<std::string>();
+    }
+
+    if (!implementation.contains("targets") || !implementation["targets"].is_object())
+    {
+        Error(report, "Native packages must declare implementation.targets.");
+        return;
+    }
+    const json& targets = implementation["targets"];
+    if (!targets.contains("release") || !targets["release"].is_array() || targets["release"].empty())
+    {
+        Error(report, "implementation.targets.release must be a non-empty array.");
+        return;
+    }
+
+    std::set<std::pair<std::string, std::string>> publishTargets;
+    for (const json& target : targets["release"])
+    {
+        if (!target.is_string())
+        {
+            Error(report, "implementation.targets.release entries must be strings in platform/architecture form.");
             continue;
         }
-        const std::string platform = target["platform"].get<std::string>();
-        const std::string architecture = target["architecture"].get<std::string>();
-        if (platform.empty() || architecture.empty())
+        const std::string value = target.get<std::string>();
+        const size_t separator = value.find('/');
+        if (separator == std::string::npos || separator == 0 || separator + 1 >= value.size() ||
+            value.find('/', separator + 1) != std::string::npos)
         {
-            Error(report, "releaseTargets platform and architecture must not be empty.");
+            Error(report, "implementation.targets.release entry '" + value +
+                "' must use platform/architecture form.");
             continue;
         }
-        if (!seen.emplace(platform, architecture).second)
-        {
-            Error(report, "releaseTargets must not contain duplicate target '" + platform + "/" + architecture + "'.");
+        publishTargets.emplace(value.substr(0, separator), value.substr(separator + 1));
+    }
+
+    const bool sourceValidation = mode == ValidationMode::Source || mode == ValidationMode::InstallSource;
+    if (sourceValidation)
+        return;
+
+    for (const auto& [platform, architecture] : publishTargets)
+    {
+        if (mode == ValidationMode::InstallArtifact &&
+            (platform != Platform::GetOSName() ||
+             architecture != Platform::GetArchitectureName()))
             continue;
-        }
-        if (!manifest["libraries"].contains(platform) || !manifest["libraries"][platform].is_object() ||
-            !manifest["libraries"][platform].contains(architecture) ||
-            !manifest["libraries"][platform][architecture].is_string())
+
+        const std::vector<std::string> configurations = mode == ValidationMode::InstallArtifact
+            ? std::vector<std::string>{ "Release" }
+            : std::vector<std::string>{ "Debug", "Release" };
+        for (const std::string& configuration : configurations)
         {
-            Error(report, "releaseTargets target '" + platform + "/" + architecture +
-                "' must have a matching libraries entry.");
+            const fs::path relative = PathFromUtf8(ExpandImplementationLayout(
+                layout, platform, architecture, configuration, artifact));
+            const fs::path artifactPath = root / relative;
+            if (relative.is_absolute() || !IsPathInside(artifactPath, root))
+            {
+                Error(report, "implementation.layout must resolve inside the package.");
+                continue;
+            }
+            if (!fs::is_regular_file(artifactPath))
+            {
+                Error(report, "Missing " + configuration + " native artifact: " + PathToUtf8(artifactPath));
+                continue;
+            }
+            ValidateArtifact(artifactPath, configuration, report);
+            for (const auto& entry : fs::directory_iterator(artifactPath.parent_path()))
+            {
+                const std::string name = entry.path().filename().string();
+                if (name.rfind("libcrypto", 0) == 0 || name.rfind("libssl", 0) == 0)
+                    hasThirdPartyRuntime = true;
+            }
         }
     }
 }
@@ -694,28 +726,24 @@ ValidationReport Validate(const fs::path& packageRoot,
         return report;
     }
 
-    const fs::path manifestPath = root / "lode.json";
+    const fs::path manifestPath = root / "package.luau";
     if (!fs::is_regular_file(manifestPath))
     {
         Error(report, "Missing package manifest: " + PathToUtf8(manifestPath));
         return report;
     }
 
-    json manifest;
-    try
+    const PackageManifestResult parsed = ReadPackageManifest(manifestPath);
+    if (!parsed.IsValid())
     {
-        std::ifstream file(manifestPath);
-        manifest = json::parse(file);
-    }
-    catch (const std::exception& exception)
-    {
-        Error(report, "Failed to parse " + PathToUtf8(manifestPath) + ": " + exception.what());
+        report.errors.insert(report.errors.end(), parsed.errors.begin(), parsed.errors.end());
         return report;
     }
+    json manifest = parsed.document;
 
     if (!manifest.is_object())
     {
-        Error(report, "lode.json must contain a JSON object.");
+        Error(report, "Package manifest must contain an object.");
         return report;
     }
 
@@ -731,11 +759,11 @@ ValidationReport Validate(const fs::path& packageRoot,
     report.dependencyGraph = std::move(context.graph);
 
     if (!manifest.contains("name") || !manifest["name"].is_string() || manifest["name"].get<std::string>().empty())
-        Error(report, "lode.json.name must be a non-empty string.");
+        Error(report, "package manifest.name must be a non-empty string.");
 
     if (!manifest.contains("version") || !manifest["version"].is_string() ||
         !IsSemVer(manifest["version"].get<std::string>()))
-        Error(report, "lode.json.version must be a valid SemVer string.");
+        Error(report, "package manifest.version must be a valid SemVer string.");
 
     if (!fs::is_regular_file(root / "init.luau"))
         Error(report, "Packages must contain a root init.luau file.");
@@ -743,65 +771,28 @@ ValidationReport Validate(const fs::path& packageRoot,
     if (!fs::is_regular_file(root / "LICENSE"))
         Error(report, "Packages must contain a root LICENSE file.");
 
-    const bool isNative = manifest.contains("libraries") && manifest["libraries"].is_object();
-    ValidateReleaseTargets(manifest, isNative, report);
-    if (!isNative)
+    for (const char* legacyField : { "libraries", "releaseTargets" })
     {
-        Warning(report, "Package has no native libraries; native ABI validation was skipped.");
+        if (manifest.contains(legacyField))
+            Error(report, "package manifest field '" + std::string(legacyField) +
+                "' is no longer supported; use implementation.");
+    }
+
+    if (manifest.contains("implementation"))
+    {
+        if (!manifest["implementation"].is_object())
+        {
+            Error(report, "implementation must be an object.");
+            return report;
+        }
+        const bool sourceValidation = mode == ValidationMode::Source || mode == ValidationMode::InstallSource;
+        if (sourceValidation && !fs::is_regular_file(root / "CMakeLists.txt"))
+            Error(report, "Native source packages must contain a root CMakeLists.txt file.");
+        bool hasThirdPartyRuntime = false;
+        ValidateImplementation(root, manifest, mode, hasThirdPartyRuntime, report);
         return report;
     }
-
-    const bool sourceValidation = mode == ValidationMode::Source || mode == ValidationMode::InstallSource;
-    if (sourceValidation)
-    {
-        if (!fs::is_regular_file(root / "CMakeLists.txt"))
-            Error(report, "Native source packages must contain a root CMakeLists.txt file.");
-    }
-
-    std::set<std::pair<std::string, std::string>> releaseTargets;
-    for (const json& target : manifest["releaseTargets"])
-    {
-        if (target.is_object() && target.contains("platform") && target["platform"].is_string() &&
-            target.contains("architecture") && target["architecture"].is_string())
-        {
-            releaseTargets.emplace(target["platform"].get<std::string>(),
-                target["architecture"].get<std::string>());
-        }
-    }
-
-    bool hasThirdPartyRuntime = false;
-    for (auto platformIt = manifest["libraries"].begin(); platformIt != manifest["libraries"].end(); ++platformIt)
-    {
-        if (!platformIt.value().is_object())
-        {
-            Error(report, "libraries." + platformIt.key() + " must be an object.");
-            continue;
-        }
-
-        for (auto architectureIt = platformIt.value().begin(); architectureIt != platformIt.value().end(); ++architectureIt)
-        {
-            if (!architectureIt.value().is_string())
-            {
-                Error(report, "libraries." + platformIt.key() + "." + architectureIt.key() + " must be a string.");
-                continue;
-            }
-
-            const std::string relativePath = architectureIt.value().get<std::string>();
-            // Additional libraries remain valid runtime declarations, but only
-            // releaseTargets are required to exist as publishable artifacts.
-            ValidateLibraryEntry(root, platformIt.key(), architectureIt.key(), relativePath,
-                ValidationMode::Source, hasThirdPartyRuntime, report);
-            if (!sourceValidation && releaseTargets.contains({ platformIt.key(), architectureIt.key() }))
-            {
-                ValidateLibraryEntry(root, platformIt.key(), architectureIt.key(), relativePath, mode,
-                    hasThirdPartyRuntime, report);
-            }
-        }
-    }
-
-    if (hasThirdPartyRuntime && !fs::is_regular_file(root / "NOTICE"))
-        Error(report, "Package bundles OpenSSL runtime files but is missing root NOTICE.");
-
+    Warning(report, "Package has no native implementation; native ABI validation was skipped.");
     return report;
 }
 

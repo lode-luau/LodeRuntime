@@ -125,10 +125,18 @@ end)
 
 describe("path additions", function()
     it("isAbsolute performs a lexical check", function()
-        expect(path.isAbsolute("C:/x/y")).toBe(true)
-        -- Em Windows, caminho com raiz mas sem drive nao e absoluto
-        expect(path.isAbsolute("/usr/local")).toBe(false)
-        expect(path.isAbsolute("\\\\server\\\\share")).toBe(true)
+        -- The native path module follows the host filesystem's lexical rules.
+        local isWindowsStyle = path.isAbsolute("C:/x/y")
+        if isWindowsStyle then
+            expect(path.isAbsolute("C:/x/y")).toBe(true)
+            -- On Windows, a rooted path without a drive is not absolute.
+            expect(path.isAbsolute("/usr/local")).toBe(false)
+            expect(path.isAbsolute("\\\\server\\\\share")).toBe(true)
+        else
+            expect(path.isAbsolute("C:/x/y")).toBe(false)
+            expect(path.isAbsolute("/usr/local")).toBe(true)
+            expect(path.isAbsolute("\\\\server\\\\share")).toBe(false)
+        end
         expect(path.isAbsolute("relative/x")).toBe(false)
         expect(pcall(function() return path.isAbsolute(123) end)).toBe(false)
     end)

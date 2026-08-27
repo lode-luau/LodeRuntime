@@ -5,8 +5,10 @@
 #include "PackageArchive.hpp"
 #include "PackageInstaller.hpp"
 #include "PackageLockfile.hpp"
+#include "PackageManifest.hpp"
 #include "PackageValidator.hpp"
 #include "PathUtil.hpp"
+#include "Platform/Platform.hpp"
 #include "Sha256.hpp"
 
 #include <algorithm>
@@ -28,6 +30,7 @@ namespace
 namespace fs = std::filesystem;
 using json = nlohmann::json;
 using Lode::Detail::PathToUtf8;
+using Lode::Detail::PathFromUtf8;
 
 void AddError(PackResult& result, std::string message)
 {
@@ -89,29 +92,55 @@ bool IsRegularFileWithoutSymlink(const fs::path& path)
 
 bool ReadManifest(const fs::path& packageRoot, json& manifest, PackResult& result)
 {
-    std::ifstream file(packageRoot / "lode.json");
-    if (!file.is_open())
+    const fs::path packageManifestPath = packageRoot / "package.luau";
+    if (!fs::is_regular_file(packageManifestPath))
     {
         AddError(result, "Cannot open package manifest: " +
-            PathToUtf8(packageRoot / "lode.json"));
+            PathToUtf8(packageManifestPath));
         return false;
     }
 
-    try
+    const PackageManifestResult parsed = ReadPackageManifest(packageManifestPath);
+    if (!parsed.IsValid())
     {
-        file >> manifest;
-    }
-    catch (const std::exception& error)
-    {
-        AddError(result, "Failed to parse package manifest: " + std::string(error.what()));
+        result.errors.insert(result.errors.end(), parsed.errors.begin(), parsed.errors.end());
         return false;
     }
-    if (!manifest.is_object())
-    {
-        AddError(result, "Package manifest must contain a JSON object.");
-        return false;
-    }
+    manifest = parsed.document;
     return true;
+}
+
+std::string NativeLibraryExtension(const std::string& platform)
+{
+    if (platform == "windows") return ".dll";
+    if (platform == "macos" || platform == "ios") return ".dylib";
+    if (platform == "wasm") return ".wasm";
+    return ".so";
+}
+
+std::string ExpandImplementationLayout(std::string layout,
+                                       const std::string& platform,
+                                       const std::string& architecture,
+                                       const std::string& configuration,
+                                       const std::string& artifact)
+{
+    const std::pair<std::string_view, std::string> substitutions[] = {
+        { "{platform}", platform },
+        { "{architecture}", architecture },
+        { "{configuration}", configuration },
+        { "{artifact}", artifact },
+        { "{extension}", NativeLibraryExtension(platform) }
+    };
+    for (const auto& [token, replacement] : substitutions)
+    {
+        size_t position = 0;
+        while ((position = layout.find(token, position)) != std::string::npos)
+        {
+            layout.replace(position, token.size(), replacement);
+            position += replacement.size();
+        }
+    }
+    return layout;
 }
 
 struct PackageFile
@@ -121,6 +150,7 @@ struct PackageFile
 };
 
 bool CollectPackageFiles(const fs::path& packageRoot,
+                         const json& manifest,
                          std::vector<PackageFile>& files,
                          PackResult& result)
 {
@@ -145,8 +175,9 @@ bool CollectPackageFiles(const fs::path& packageRoot,
         collected.emplace(archiveName, source);
     };
 
-    for (const char* required : { "lode.json", "init.luau", "LICENSE" })
-        addFile(required);
+    addFile("package.luau");
+    addFile("init.luau");
+    addFile("LICENSE");
 
     for (const char* optional : { "README.md", "NOTICE" })
     {
@@ -188,6 +219,37 @@ bool CollectPackageFiles(const fs::path& packageRoot,
     {
         AddError(result, "Cannot enumerate package files: " + ec.message());
         return false;
+    }
+
+    // The validator is the source of truth for the declared artifact matrix,
+    // but the packer must explicitly include custom layouts as well as the
+    // standard libs/ layout. Runtime libraries found elsewhere are not
+    // included implicitly; only artifacts declared by the package manifest
+    // are added here.
+    if (manifest.contains("implementation") && manifest["implementation"].is_object())
+    {
+        const json& implementation = manifest["implementation"];
+        const std::string artifact = implementation.value("artifact", manifest.value("name", ""));
+        const std::string layout = implementation.value(
+            "layout", "libs/{platform}/{architecture}/{configuration}/{artifact}{extension}");
+        const json targets = implementation.value("targets", json::object());
+        const json releaseTargets = targets.value("release", json::array());
+        for (const json& target : releaseTargets)
+        {
+            if (!target.is_string())
+                continue;
+            const std::string value = target.get<std::string>();
+            const size_t separator = value.find('/');
+            if (separator == std::string::npos)
+                continue;
+            const std::string platform = value.substr(0, separator);
+            const std::string architecture = value.substr(separator + 1);
+            for (const std::string& configuration : { std::string("Debug"), std::string("Release") })
+            {
+                addFile(PathFromUtf8(ExpandImplementationLayout(
+                    layout, platform, architecture, configuration, artifact)));
+            }
+        }
     }
 
     files.reserve(collected.size());
@@ -239,7 +301,7 @@ fs::path ResolveOutputPath(const fs::path& packageRoot,
     if (!manifest.contains("name") || !manifest["name"].is_string() ||
         !manifest.contains("version") || !manifest["version"].is_string())
     {
-        AddError(result, "Cannot determine package archive name from lode.json.");
+        AddError(result, "Cannot determine package archive name from package.luau.");
         return {};
     }
 
@@ -251,8 +313,10 @@ fs::path ResolveOutputPath(const fs::path& packageRoot,
         return {};
     }
 
+    const std::string target = std::string(Platform::GetOSName()) + "-" +
+        std::string(Platform::GetArchitectureName());
     const fs::path output = requested.empty()
-        ? packageRoot / "out" / ("lode-" + name + "-" + version + "-windows-x64.zip")
+        ? packageRoot / "out" / ("lode-" + name + "-" + version + "-" + target + ".zip")
         : requested;
     return fs::absolute(output);
 }
@@ -318,7 +382,7 @@ PackResult PackPackage(const fs::path& packageRoot,
     }
 
     std::vector<PackageFile> files;
-    if (!CollectPackageFiles(root, files, result))
+    if (!CollectPackageFiles(root, manifest, files, result))
         return result;
 
     fs::create_directories(archivePath.parent_path(), ec);

@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(sys LANGUAGES CXX)
 
-lode_add_native_module(sys
+lode_add_module(sys
     SOURCES
         src/Main.cpp
         src/SysInfo.cpp
@@ -17,5 +17,5 @@ if(MSVC)
     target_link_options(sys PRIVATE $<$<NOT:$<CONFIG:Debug>>:/OPT:REF> $<$<NOT:$<CONFIG:Debug>>:/OPT:ICF> $<$<NOT:$<CONFIG:Debug>>:/LTCG>)
 else()
     target_compile_options(sys PRIVATE -Os -fno-rtti -fvisibility=hidden -flto)
-    target_link_options(sys PRIVATE -flto -Wl,--gc-sections)
+    target_link_options(sys PRIVATE -flto ${LODE_GC_SECTIONS_LINK_OPTION})
 endif()

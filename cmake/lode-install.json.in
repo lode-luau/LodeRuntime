@@ -1,0 +1,11 @@
+{
+  "format": 1,
+  "version": "@PROJECT_VERSION@",
+  "abiId": "@LODE_ABI_ID@",
+  "platform": "@LODE_PLATFORM@",
+  "architecture": "@LODE_ARCHITECTURE@",
+  "compiler": "@CMAKE_CXX_COMPILER_ID@",
+  "crt": "dynamic",
+  "configurations": ["Debug", "Release"],
+  "cmakePackage": "Lode"
+}

@@ -1,0 +1,10 @@
+return {
+    name = "stdlib_dependency_consumer",
+    version = "1.0.0",
+    description = "Official standard library dependency graph regression fixture",
+    author = "Lode Tests",
+    license = "MIT",
+    dependencies = {
+        signal = "1.0.0",
+    },
+}

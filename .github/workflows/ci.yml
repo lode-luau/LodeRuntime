@@ -102,6 +102,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: ddd0023b0eee70986e42ed49d9d4afb8098f212e
+
+      - name: Cache vcpkg binary packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/vcpkg-binary-cache
+          key: ${{ runner.os }}-vcpkg-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+          restore-keys: |
+            ${{ runner.os }}-vcpkg-
+
       # 1. Set up the sccache tool. The Visual Studio (MSBuild) generator
       #    ignores CMAKE_<LANG>_COMPILER_LAUNCHER, so CI uses the Ninja
       #    generator (with separate Debug/Release trees), which honors it.
@@ -123,9 +136,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/sccache
-          key: ${{ runner.os }}-sccache-${{ github.event.pull_request.head.sha || github.sha }}
+          key: ${{ runner.os }}-x64-windows-sccache-${{ github.event.pull_request.head.sha || github.sha }}
           restore-keys: |
-            ${{ runner.os }}-sccache-
+            ${{ runner.os }}-x64-windows-sccache-
 
       # 3. Restore/save dependencies downloaded via FetchContent. Both build
       #    trees share one base via FETCHCONTENT_BASE_DIR so there is a single
@@ -148,9 +161,12 @@ jobs:
       - name: Configure Debug
         env:
           SCCACHE_DIR: ${{ runner.temp }}/sccache
+          VCPKG_BINARY_SOURCES: clear;files,${{ runner.temp }}/vcpkg-binary-cache,readwrite
         run: >-
           cmake -B build-debug -G Ninja -DCMAKE_BUILD_TYPE=Debug
           -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl
+          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+          -DVCPKG_TARGET_TRIPLET=x64-windows
           -DFETCHCONTENT_BASE_DIR=${{ runner.temp }}/_deps
           -DCMAKE_C_COMPILER_LAUNCHER=sccache
           -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
@@ -170,9 +186,12 @@ jobs:
       - name: Configure Release
         env:
           SCCACHE_DIR: ${{ runner.temp }}/sccache
+          VCPKG_BINARY_SOURCES: clear;files,${{ runner.temp }}/vcpkg-binary-cache,readwrite
         run: >-
           cmake -B build-release -G Ninja -DCMAKE_BUILD_TYPE=Release
           -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl
+          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+          -DVCPKG_TARGET_TRIPLET=x64-windows
           -DFETCHCONTENT_BASE_DIR=${{ runner.temp }}/_deps
           -DCMAKE_C_COMPILER_LAUNCHER=sccache
           -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
@@ -189,6 +208,116 @@ jobs:
         run: ctest --test-dir build-release -C Release --output-on-failure
 
       # 7. Report cache hit rate in the log
+      - name: Show sccache stats
+        env:
+          SCCACHE_DIR: ${{ runner.temp }}/sccache
+        run: sccache --show-stats
+
+  # Keep the POSIX build in the required CI path as well. This catches
+  # platform-specific linker flags, OpenSSL discovery, native module output
+  # paths, and the generated Lode consumer test on both Linux and macOS.
+  build-posix:
+    needs: change-gate
+    if: needs.change-gate.outputs.real == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: ddd0023b0eee70986e42ed49d9d4afb8098f212e
+
+      - name: Select vcpkg triplet
+        id: triplet
+        shell: bash
+        run: |
+          if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
+            echo "value=x64-linux" >> "$GITHUB_OUTPUT"
+          elif [ "$(uname -m)" = "arm64" ]; then
+            echo "value=arm64-osx" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=x64-osx" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Cache vcpkg binary packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/vcpkg-binary-cache
+          key: ${{ runner.os }}-${{ steps.triplet.outputs.value }}-vcpkg-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ steps.triplet.outputs.value }}-vcpkg-
+            ${{ runner.os }}-vcpkg-
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.8
+
+      - name: Cache sccache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/sccache
+          key: ${{ runner.os }}-${{ steps.triplet.outputs.value }}-sccache-${{ github.event.pull_request.head.sha || github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-${{ steps.triplet.outputs.value }}-sccache-
+
+      - name: Cache FetchContent
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/_deps
+          key: ${{ runner.os }}-fetchcontent-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-fetchcontent-
+
+      - name: Configure Debug
+        env:
+          SCCACHE_DIR: ${{ runner.temp }}/sccache
+          VCPKG_BINARY_SOURCES: clear;files,${{ runner.temp }}/vcpkg-binary-cache,readwrite
+        run: >-
+          cmake -B build-debug -G Ninja -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+          -DVCPKG_TARGET_TRIPLET=${{ steps.triplet.outputs.value }}
+          -DFETCHCONTENT_BASE_DIR=${{ runner.temp }}/_deps
+          -DCMAKE_C_COMPILER_LAUNCHER=sccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+
+      - name: Build Debug
+        env:
+          SCCACHE_DIR: ${{ runner.temp }}/sccache
+        run: cmake --build build-debug
+
+      - name: Validate Debug (sanity suite)
+        run: ./build-debug/bin/Debug/lode modules/sanity/run.luau
+
+      - name: Validate Debug (ctest)
+        run: ctest --test-dir build-debug -C Debug --output-on-failure
+
+      - name: Configure Release
+        env:
+          SCCACHE_DIR: ${{ runner.temp }}/sccache
+          VCPKG_BINARY_SOURCES: clear;files,${{ runner.temp }}/vcpkg-binary-cache,readwrite
+        run: >-
+          cmake -B build-release -G Ninja -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+          -DVCPKG_TARGET_TRIPLET=${{ steps.triplet.outputs.value }}
+          -DFETCHCONTENT_BASE_DIR=${{ runner.temp }}/_deps
+          -DCMAKE_C_COMPILER_LAUNCHER=sccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+
+      - name: Build Release
+        env:
+          SCCACHE_DIR: ${{ runner.temp }}/sccache
+        run: cmake --build build-release
+
+      - name: Validate Release (sanity suite)
+        run: ./build-release/bin/Release/lode modules/sanity/run.luau
+
+      - name: Validate Release (ctest)
+        run: ctest --test-dir build-release -C Release --output-on-failure
+
       - name: Show sccache stats
         env:
           SCCACHE_DIR: ${{ runner.temp }}/sccache

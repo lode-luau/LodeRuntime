@@ -1,5 +1,7 @@
 #include <Lode/Module.hpp>
+#if defined(LODE_SIMD_AVX2)
 #include <immintrin.h>
+#endif
 #include <iostream>
 
 LODE_MODULE(vm)
@@ -27,8 +29,9 @@ LODE_MODULE(vm)
         size_t count = bufferSize / sizeof(float);
         float* data = static_cast<float*>(bufferPtr);
 
-        // Process 8 floats at a time using AVX2
         size_t i = 0;
+#if defined(LODE_SIMD_AVX2)
+        // Process 8 floats at a time using AVX2 on x86/x64 hosts.
         __m256 v_scalar = _mm256_set1_ps(scalar);
         
         for (; i + 7 < count; i += 8)
@@ -40,8 +43,10 @@ LODE_MODULE(vm)
             // Store back
             _mm256_storeu_ps(&data[i], v_result);
         }
+#endif
 
-        // Process any remaining floats normally
+        // Process all values normally on non-AVX2 hosts and any remainder on
+        // x86/x64 hosts.
         for (; i < count; ++i)
         {
             data[i] *= scalar;

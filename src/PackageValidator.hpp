@@ -36,7 +36,7 @@ struct ValidationReport
 };
 
 // Checks a resolved package version against the exact or ^/~ requirement
-// syntax accepted by lode.json dependency declarations.
+// syntax accepted by package manifest dependency declarations.
 LODE_API bool PackageVersionSatisfies(const std::string& actual,
                                       const std::string& requirement);
 

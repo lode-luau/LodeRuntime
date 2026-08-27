@@ -390,6 +390,16 @@ CachePopulationResult PopulatePackageCache(const PackageCacheLayout& layout,
     result.installationDirectory = identity.installationDirectory;
 
     std::error_code ec;
+    // The MSVC implementation of weakly_canonical may fail when the complete
+    // cache root does not exist yet. Create the intended root before checking
+    // containment so a first install is handled like subsequent installs.
+    if (!fs::create_directories(layout.globalModulesDirectory, ec) && ec)
+    {
+        result.installationDirectory.clear();
+        AddError(result, "Cannot create package cache directory: " + ec.message());
+        return result;
+    }
+    ec.clear();
     const fs::path globalRoot = fs::weakly_canonical(layout.globalModulesDirectory, ec);
     const fs::path destination = fs::weakly_canonical(identity.installationDirectory, ec);
     if (ec || !IsPathInside(destination, globalRoot))

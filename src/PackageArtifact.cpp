@@ -4,13 +4,16 @@
 
 #include "HttpDownloader.hpp"
 #include "PackageArchive.hpp"
+#include "PackageManifest.hpp"
 #include "PathUtil.hpp"
+#include "Platform/Platform.hpp"
 #include "Sha256.hpp"
 
 #include <algorithm>
 #include <cctype>
 #include <fstream>
 #include <map>
+#include <nlohmann/json.hpp>
 #include <optional>
 #include <sstream>
 #include <system_error>
@@ -111,6 +114,99 @@ std::optional<std::string> ParseChecksum(const fs::path& checksumPath,
     return digest;
 }
 
+std::optional<std::string> ParseChecksumCatalog(const fs::path& checksumPath,
+                                                const std::string& assetName)
+{
+    std::ifstream file(checksumPath, std::ios::binary);
+    if (!file.is_open())
+        return std::nullopt;
+
+    std::string line;
+    while (std::getline(file, line))
+    {
+        std::istringstream input(line);
+        std::string digest;
+        std::string filename;
+        input >> digest >> filename;
+        while (!filename.empty() && (filename.front() == '*' || filename.front() == ' '))
+            filename.erase(filename.begin());
+        std::transform(digest.begin(), digest.end(), digest.begin(),
+            [](unsigned char character) { return static_cast<char>(std::tolower(character)); });
+        if (filename == assetName && IsSha256(digest))
+            return digest;
+    }
+    return std::nullopt;
+}
+
+std::optional<fs::path> FindPackageInBundle(const fs::path& bundleRoot,
+                                            const std::string& packageName,
+                                            const std::string& packageVersion,
+                                            PackageArtifactResult& result)
+{
+    std::ifstream input(bundleRoot / "index.json", std::ios::binary);
+    if (!input.is_open())
+    {
+        AddError(result, "Stdlib bundle has no index.json catalog.");
+        return std::nullopt;
+    }
+
+    nlohmann::json index;
+    try
+    {
+        input >> index;
+    }
+    catch (const std::exception& error)
+    {
+        AddError(result, "Stdlib bundle index.json is invalid: " + std::string(error.what()));
+        return std::nullopt;
+    }
+    if (!index.is_object() || index.value("format", 0) != 1 ||
+        !index.contains("packages") || !index["packages"].is_object() ||
+        !index["packages"].contains(packageName) ||
+        !index["packages"][packageName].is_object())
+    {
+        AddError(result, "Stdlib bundle index.json has no entry for package '" + packageName + "'.");
+        return std::nullopt;
+    }
+
+    const nlohmann::json& entry = index["packages"][packageName];
+    const std::string indexedVersion = entry.value("version", "");
+    const std::string indexedPath = entry.value("path", "");
+    if (indexedVersion != packageVersion || indexedPath.empty())
+    {
+        AddError(result, "Stdlib bundle index entry for '" + packageName +
+            "' does not match the requested version.");
+        return std::nullopt;
+    }
+
+    const fs::path relativePath = Lode::Detail::PathFromUtf8(indexedPath);
+    if (relativePath.empty() || relativePath.is_absolute() || relativePath.root_name() != fs::path() ||
+        relativePath.root_directory() != fs::path() ||
+        *relativePath.begin() == ".." || relativePath.lexically_normal() != relativePath)
+    {
+        AddError(result, "Stdlib bundle index path escapes the bundle: " + indexedPath);
+        return std::nullopt;
+    }
+
+    const fs::path packageRoot = bundleRoot / relativePath;
+    const fs::path manifestPath = packageRoot / "package.luau";
+    if (!fs::is_regular_file(manifestPath))
+    {
+        AddError(result, "Stdlib bundle index path has no package.luau: " +
+            PathToUtf8(packageRoot));
+        return std::nullopt;
+    }
+    const PackageManifestResult parsed = ReadPackageManifest(manifestPath);
+    if (!parsed.IsValid() || parsed.manifest.name != packageName ||
+        parsed.manifest.version != packageVersion)
+    {
+        AddError(result, "Stdlib bundle package manifest does not match its index entry: " +
+            PathToUtf8(manifestPath));
+        return std::nullopt;
+    }
+    return packageRoot;
+}
+
 bool MoveVerifiedArchive(const fs::path& downloaded,
                          const fs::path& cached,
                          const std::string& expected,
@@ -178,13 +274,23 @@ PackageArtifactResult DownloadGitHubReleaseArtifact(
         return result;
     }
 
+    const std::string platform(Platform::GetOSName());
+    const std::string architecture(Platform::GetArchitectureName());
+    if (platform == "unknown" || architecture == "unknown")
+    {
+        AddError(result, "The current runtime target cannot select a native package artifact.");
+        return result;
+    }
+
     const std::string baseUrl = "https://github.com/" + *slug +
         "/releases/download/" + release + "/";
     const std::string operationKey = Lode::Detail::Sha256Hex(
         *slug + "\n" + release + "\n" + assetName).substr(0, 16);
     const fs::path operationRoot = stagingDirectory /
         ("artifact-download-" + operationKey);
-    const fs::path checksumPath = operationRoot / (assetName + ".sha256");
+    const bool isStdlibBundle = packageKind == "stdlib";
+    const std::string checksumAsset = isStdlibBundle ? "SHA256SUMS" : assetName + ".sha256";
+    const fs::path checksumPath = operationRoot / checksumAsset;
     const fs::path downloadedPath = operationRoot / assetName;
 
     std::error_code ec;
@@ -196,13 +302,15 @@ PackageArtifactResult DownloadGitHubReleaseArtifact(
     }
 
     const DownloadResult checksum = DownloadHttpsFile(
-        baseUrl + assetName + ".sha256", checksumPath);
+        baseUrl + checksumAsset, checksumPath);
     if (!checksum.IsValid())
     {
         result.errors.insert(result.errors.end(), checksum.errors.begin(), checksum.errors.end());
         return result;
     }
-    const std::optional<std::string> expected = ParseChecksum(checksumPath, assetName);
+    const std::optional<std::string> expected = isStdlibBundle
+        ? ParseChecksumCatalog(checksumPath, assetName)
+        : ParseChecksum(checksumPath, assetName);
     if (!expected)
     {
         AddError(result, "GitHub Release checksum for '" + assetName +
@@ -266,9 +374,22 @@ PackageArtifactResult DownloadGitHubReleaseArtifact(
     }
 
     result.packageRoot = extraction.packageRoot;
+    if (isStdlibBundle)
+    {
+        const std::optional<fs::path> packageRoot = FindPackageInBundle(
+            extraction.packageRoot, packageName, packageVersion, result);
+        if (!packageRoot)
+        {
+            if (result.IsValid())
+                AddError(result, "Stdlib bundle does not contain package '" +
+                    packageName + "@" + packageVersion + "'.");
+            return result;
+        }
+        result.packageRoot = *packageRoot;
+    }
     result.artifact = {
-        "windows",
-        "x64",
+        platform,
+        architecture,
         "",
         LodeAbiId(),
         release,
@@ -290,7 +411,9 @@ PackageArtifactResult DownloadGitHubPackageArtifact(
         packageName,
         packageVersion,
         "v" + packageVersion,
-        "lode-" + packageName + "-" + packageVersion + "-windows-x64.zip",
+        "lode-" + packageName + "-" + packageVersion + "-" +
+            std::string(Platform::GetOSName()) + "-" +
+            std::string(Platform::GetArchitectureName()) + ".zip",
         cacheLayout,
         stagingDirectory,
         "native Git");
@@ -309,7 +432,8 @@ PackageArtifactResult DownloadGitHubStdlibArtifact(
         packageName,
         packageVersion,
         release,
-        "lode-stdlib-" + packageName + "-" + packageVersion + "-windows-x64.zip",
+        "lode-stdlib-" + std::string(Platform::GetOSName()) + "-" +
+            std::string(Platform::GetArchitectureName()) + "-" + release + ".zip",
         cacheLayout,
         stagingDirectory,
         "stdlib");

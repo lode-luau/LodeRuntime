@@ -95,7 +95,7 @@ lead to a loss of confidentiality, integrity, or availability.
 * The file system when requiring a module. `require` resolves paths relative
   to the requirer and may traverse the file system; this is documented
   behavior and not a security boundary. The only constraint enforced by the
-  runtime is that a `lode.json` manifest may only reference native library
+  runtime is that a package manifest may only resolve native implementation
   files inside its own module directory. That check is evaluated on the
   canonical path at load time and is a packaging-correctness constraint, not a
   security boundary against a hostile file system. In addition, a native
@@ -194,9 +194,9 @@ following criteria:
   not considered a vulnerability if the size of that artifact is large enough
   to impact performance or cause the runtime to run out of resources.
 
-#### The `lode.json` native library path constraint
+#### The package manifest native implementation path constraint
 
-* The check that `lode.json` library paths remain inside the module directory
+* The check that package manifest implementation paths remain inside the module directory
   is enforced on the canonical path at load time. Reports that depend on the
   attacker already having control over the module directory or the file
   system are not considered vulnerabilities: at that point the attacker

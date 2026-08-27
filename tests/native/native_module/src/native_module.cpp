@@ -50,7 +50,7 @@ LODE_MODULE(vm)
 
     // --- Test 1: require("@self/utils") ---
     // Loads native_module/utils/init.luau — internal to this package.
-    // @self always resolves to the package directory (the folder containing lode.json),
+    // @self always resolves to the package directory (the folder containing package.luau),
     // so @self/utils finds: native_module/utils/init.luau  (or native_module/utils.luau).
     //
     // vm.Require() raises a Lua error if the module is not found, exactly like

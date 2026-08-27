@@ -4,7 +4,7 @@ project(ffi_module LANGUAGES CXX)
 # A small, self-contained shared library used to exercise the ffi module in
 # CTest.  Do not replace this with libc/libm: minimal Linux images such as
 # Alpine use musl and do not provide libc.so.6.
-lode_add_native_module(ffi_module
+lode_add_module(ffi_module
     SOURCES src/ffi_module.cpp
 )
 
@@ -28,9 +28,16 @@ foreach(ffi_fixture_config ${CMAKE_CONFIGURATION_TYPES})
 endforeach()
 
 if(NOT CMAKE_CONFIGURATION_TYPES)
+    if(CMAKE_BUILD_TYPE)
+        set(ffi_fixture_single_config_directory
+            "${CMAKE_CURRENT_SOURCE_DIR}/libs/${ffi_fixture_platform}/${ffi_fixture_architecture}/${CMAKE_BUILD_TYPE}")
+    else()
+        set(ffi_fixture_single_config_directory
+            "${CMAKE_CURRENT_SOURCE_DIR}/libs/${ffi_fixture_platform}/${ffi_fixture_architecture}")
+    endif()
     set_target_properties(ffi_dependency PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/libs/${ffi_fixture_platform}/${ffi_fixture_architecture}"
-        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/libs/${ffi_fixture_platform}/${ffi_fixture_architecture}"
+        RUNTIME_OUTPUT_DIRECTORY "${ffi_fixture_single_config_directory}"
+        LIBRARY_OUTPUT_DIRECTORY "${ffi_fixture_single_config_directory}"
     )
 endif()
 

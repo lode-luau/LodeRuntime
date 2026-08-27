@@ -100,7 +100,7 @@ namespace
                     if (aliasName == "self")
                     {
                         // @self resolves to the module's own directory (the folder
-                        // containing init.luau or lode.json), mirroring the runtime.
+                        // containing init.luau or a package manifest), mirroring the runtime.
                         fs::path requirerPath = PathFromUtf8(context ? context->name : "");
                         fs::path pkgDir;
                         if (requirerPath.filename() == "init.luau")
@@ -109,7 +109,7 @@ namespace
                         }
                         else
                         {
-                            pkgDir = Lode::FindLodeJson(requirerPath);
+                            pkgDir = Lode::FindPackageRoot(requirerPath);
                             if (pkgDir.empty())
                                 pkgDir = requirerPath.parent_path();
                         }
@@ -843,7 +843,12 @@ void Compiler::PruneCache(int ttlDays)
         auto lastWrite = entry.last_write_time(ec);
         if (ec)
             continue;
-        auto sysWrite = std::chrono::clock_cast<std::chrono::system_clock>(lastWrite);
+        // `clock_cast` is not implemented by all C++20 standard libraries
+        // used by the supported toolchains. Approximate the conversion using
+        // the two clocks' current offset, as the filesystem module does.
+        auto sysWrite = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
+            lastWrite - decltype(lastWrite)::clock::now() + std::chrono::system_clock::now()
+        );
         if (sysWrite < cutoff)
             fs::remove(entry.path(), ec);
     }

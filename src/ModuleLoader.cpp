@@ -1,6 +1,7 @@
 // Copyright (c) 2026 yanlvl99, Lode Runtime Contributors
 // SPDX-License-Identifier: MIT
 #include "ModuleLoader.hpp"
+#include "PackageManifest.hpp"
 #include "Lode/Compiler.hpp"
 #include "PathUtil.hpp"
 #include "Platform/Platform.hpp"
@@ -8,7 +9,6 @@
 #include "Luau/Compiler.h"
 #include "Luau/Config.h"
 #include "Luau/LuauConfig.h"
-#include "nlohmann/json.hpp"
 
 #include "lua.h"
 #include "lualib.h"
@@ -27,7 +27,7 @@ namespace Lode
 using Lode::Detail::PathFromUtf8;
 using Lode::Detail::PathToUtf8;
 
-fs::path FindLodeJson(const fs::path& startPath)
+fs::path FindPackageRoot(const fs::path& startPath)
 {
     fs::path current = startPath;
     if (fs::is_regular_file(current))
@@ -38,7 +38,7 @@ fs::path FindLodeJson(const fs::path& startPath)
     // terminate when we would stop making progress instead of looping forever.
     while (current.has_parent_path() && current.parent_path() != current)
     {
-        if (fs::exists(current / "lode.json") || fs::exists(current / "init.luau"))
+        if (fs::exists(current / "package.luau") || fs::exists(current / "init.luau"))
             return current;
         current = current.parent_path();
     }
@@ -52,7 +52,7 @@ struct LodeNavigationContext
     fs::path currentPath;
     fs::path rootPath;
     fs::path standardLibraryRoot;
-    // Root directory of the current package (the folder that contains init.luau or lode.json).
+    // Root directory of the current package (the folder that contains init.luau or a manifest).
     // Used to resolve @self aliases to the package's own internal files.
     fs::path packagePath;
 };
@@ -100,11 +100,16 @@ static luarequire_NavigateResult reset(lua_State* L, void* ctx, const char* requ
         if (fs::is_regular_file(canonicalP))
         {
             nav->currentPath = canonicalP.parent_path();
-            nav->packagePath = canonicalP.parent_path();
+            // Keep runtime @self resolution aligned with the Luau resolver:
+            // nested files (for example src/Runner.luau) belong to the
+            // nearest package root, not to their immediate source directory.
+            nav->packagePath = FindPackageRoot(canonicalP);
+            if (nav->packagePath.empty())
+                nav->packagePath = canonicalP.parent_path();
         }
         else
         {
-            nav->packagePath = FindLodeJson(p);
+            nav->packagePath = FindPackageRoot(p);
             nav->currentPath = p.parent_path();
         }
 
@@ -205,7 +210,7 @@ static luarequire_NavigateResult jump_to_alias(lua_State* L, void* ctx, const ch
         if (aliasStr == "@self" || aliasStr == "self")
         {
             // @self always resolves to the package's own directory (the folder containing
-            // init.luau or lode.json), allowing native and Luau modules to require their
+            // init.luau or a manifest), allowing native and Luau modules to require their
             // own internal files regardless of where the caller is located.
             if (!nav->packagePath.empty())
             {
@@ -273,25 +278,87 @@ static bool check_path_exists(const fs::path& p)
     luauPath += ".luau";
     if (fs::is_regular_file(luauPath)) return true;
     if (fs::is_regular_file(p / "init.luau")) return true;
-    if (fs::is_regular_file(p / "lode.json")) return true;
+    if (fs::is_regular_file(p / "package.luau")) return true;
     return false;
 }
 
 static bool IsPathInside(const fs::path& candidate, const fs::path& root)
 {
     std::error_code ec;
-    fs::path canonicalRoot = fs::weakly_canonical(root, ec);
-    if (ec) return false;
-
-    fs::path canonicalCandidate = fs::weakly_canonical(candidate, ec);
-    if (ec) return false;
-
-    fs::path relative = canonicalCandidate.lexically_relative(canonicalRoot);
-    if (relative.empty() || relative.is_absolute())
+    fs::path relative = fs::relative(
+        fs::weakly_canonical(candidate, ec),
+        fs::weakly_canonical(root, ec),
+        ec);
+    if (ec)
         return false;
 
+    if (relative.empty() || relative == ".")
+        return true;
+
     auto first = relative.begin();
-    return first != relative.end() && *first != "..";
+    return first == relative.end() || *first != "..";
+}
+
+static void ReplaceAll(std::string& value, std::string_view token, std::string_view replacement)
+{
+    size_t position = 0;
+    while ((position = value.find(token, position)) != std::string::npos)
+    {
+        value.replace(position, token.size(), replacement);
+        position += replacement.size();
+    }
+}
+
+static const char* NativeLibraryExtension(std::string_view platform)
+{
+    if (platform == "windows")
+        return ".dll";
+    if (platform == "macos" || platform == "ios")
+        return ".dylib";
+    if (platform == "wasm")
+        return ".wasm";
+    return ".so";
+}
+
+static std::optional<fs::path> ResolveCompiledArtifact(
+    const fs::path& packageRoot,
+    const Lode::Package::PackageManifest& manifest,
+    std::string_view platform,
+    std::string_view architecture,
+    std::string_view configuration,
+    std::string& error)
+{
+    const auto& implementation = manifest.implementation;
+    if (implementation.artifact.empty() ||
+        implementation.artifact.find_first_of("/\\") != std::string::npos)
+    {
+        error = "implementation.artifact must be a non-empty filename stem";
+        return std::nullopt;
+    }
+
+    std::string layout = implementation.layout;
+    if (layout.empty())
+        layout = "libs/{platform}/{architecture}/{configuration}/{artifact}{extension}";
+
+    ReplaceAll(layout, "{platform}", platform);
+    ReplaceAll(layout, "{architecture}", architecture);
+    ReplaceAll(layout, "{configuration}", configuration);
+    ReplaceAll(layout, "{artifact}", implementation.artifact);
+    ReplaceAll(layout, "{extension}", NativeLibraryExtension(platform));
+    if (layout.find('{') != std::string::npos || layout.find('}') != std::string::npos)
+    {
+        error = "implementation.layout contains an unknown substitution";
+        return std::nullopt;
+    }
+
+    const fs::path relativePath = PathFromUtf8(layout);
+    if (relativePath.empty() || relativePath.is_absolute() ||
+        !IsPathInside(packageRoot / relativePath, packageRoot))
+    {
+        error = "implementation.layout must resolve inside the package directory";
+        return std::nullopt;
+    }
+    return relativePath;
 }
 
 static bool is_module_present(lua_State* L, void* ctx)
@@ -342,7 +409,13 @@ static std::string GetChunkname(const LodeNavigationContext& nav)
 
 static std::string GetCacheKey(const LodeNavigationContext& nav)
 {
-    return PathToUtf8(nav.currentPath);
+    std::string key = PathToUtf8(nav.currentPath);
+    for (char& character : key)
+    {
+        if (character == '\\')
+            character = '/';
+    }
+    return key;
 }
 
 static luarequire_WriteResult get_chunkname(lua_State* L, void* ctx, char* buffer, size_t buffer_size, size_t* size_out)
@@ -480,69 +553,59 @@ static ModuleLoadResult LoadModuleNoJump(lua_State* L, void* ctx, const char* pa
         dirPath = targetPath.parent_path();
     }
 
-    // Check for lode.json
-    fs::path lodeJsonPath = dirPath / "lode.json";
-    if (fs::exists(lodeJsonPath))
+    // package.luau is the package manifest and is never executed by the loader.
+    fs::path packageManifestPath = dirPath / "package.luau";
+    if (fs::is_regular_file(packageManifestPath))
     {
-        nlohmann::json jsonDoc;
-        try
-        {
-            std::ifstream f(lodeJsonPath);
-            jsonDoc = nlohmann::json::parse(f);
-        }
-        catch (const std::exception& e)
-        {
-            return { 0, "Failed to parse lode.json in " + PathToUtf8(dirPath) + ": " + e.what() };
-        }
+        bool packageManifestNative = false;
+        bool packageManifestRequired = false;
+        std::optional<fs::path> relativeArtifact;
 
-        if (jsonDoc.contains("libraries") && jsonDoc["libraries"].is_object() &&
-            !jsonDoc["libraries"].empty())
+        const auto packageResult = Lode::Package::ReadPackageManifest(packageManifestPath);
+        if (!packageResult.IsValid())
+            return { 0, packageResult.errors.front() };
+
+        packageManifestNative = packageResult.manifest.hasImplementation;
+        packageManifestRequired = packageResult.manifest.implementation.required;
+        if (packageManifestNative)
         {
-            // RFC 01: any non-empty `libraries` map marks a native package.
-            // Its `init.luau` is type-only and must not be executed, even when
-            // the current platform/arch has no entry — that is a platform
-            // error, not a Luau fallback (prevents cross-platform silent fallback).
+            std::string artifactError;
+            const std::string platform = std::string(Platform::GetOSName());
+            const std::string arch = std::string(Platform::GetArchitectureName());
+            const char* buildConfig = LodeBuildConfigName();
+            const std::string configuration = buildConfig ? buildConfig : "";
+            relativeArtifact = ResolveCompiledArtifact(
+                dirPath, packageResult.manifest, platform, arch, configuration, artifactError);
+            if (!relativeArtifact)
+                return { 0, "Invalid package implementation in " + PathToUtf8(dirPath) + ": " + artifactError };
+
+            if (!packageManifestRequired && !fs::is_regular_file(dirPath / *relativeArtifact))
+                packageManifestNative = false;
+        }
+        if (packageManifestNative)
+        {
+            // A package with an implementation is native.
+            // Its `init.luau` is type-only and must not be executed. The
+            // selected artifact is resolved from the package implementation.
             std::string platform = std::string(Platform::GetOSName());
             std::string arch = std::string(Platform::GetArchitectureName());
 
-            if (!jsonDoc["libraries"].contains(platform) ||
-                !jsonDoc["libraries"][platform].is_object() ||
-                !jsonDoc["libraries"][platform].contains(arch))
+            if (!relativeArtifact)
+                return { 0, "Invalid package implementation in " + PathToUtf8(dirPath) +
+                    ": no artifact path was resolved" };
+
+            const fs::path fullLibPath = dirPath / *relativeArtifact;
+            if (!IsPathInside(fullLibPath, dirPath))
             {
-                return { 0, "Native package '" + PathToUtf8(dirPath) +
-                    "' has no library for the current platform/architecture (" +
-                    platform + "/" + arch + "); its init.luau is type-only and not executed." };
+                return { 0, "Native implementation path must remain inside module directory: " +
+                    PathToUtf8(*relativeArtifact) };
             }
 
-            {
-                const auto& libraryEntry = jsonDoc["libraries"][platform][arch];
-                if (!libraryEntry.is_string())
+                if (packageManifestRequired && !fs::is_regular_file(fullLibPath))
                 {
-                    return { 0, "Invalid library path in lode.json: expected a string" };
-                }
-
-                std::string relLibPath = libraryEntry.get<std::string>();
-                fs::path baseLibPath = dirPath / PathFromUtf8(relLibPath);
-                fs::path fullLibPath = baseLibPath;
-
-                // Prefer the config-aware copy the module CMake writes to
-                // libs/<platform>/<arch>/<config>/<name>. Debug and Release
-                // builds no longer clobber each other's binary: each POST_BUILD
-                // step outputs into its own config subdirectory, so the runtime
-                // always loads a module built with the same CRT/std::string ABI
-                // as itself. Flat paths still work for third-party/prebuilt
-                // modules that do not ship config subdirectories.
-                const char* buildConfig = LodeBuildConfigName();
-                if (buildConfig && buildConfig[0] != '\0')
-                {
-                    fs::path configAwareLibPath = baseLibPath.parent_path() / buildConfig / baseLibPath.filename();
-                    if (fs::exists(configAwareLibPath) || !fs::exists(baseLibPath))
-                        fullLibPath = configAwareLibPath;
-                }
-
-                if (relLibPath.empty() || !IsPathInside(baseLibPath, dirPath))
-                {
-                    return { 0, "Native library path must remain inside module directory: " + relLibPath };
+                    return { 0, "Native package '" + PathToUtf8(dirPath) +
+                        "' has no compiled artifact for the current platform/architecture (" +
+                        platform + "/" + arch + "); its init.luau is type-only and not executed." };
                 }
 
                 auto libResult = Platform::DynamicLibrary::Open(PathToUtf8(fullLibPath));
@@ -584,7 +647,7 @@ static ModuleLoadResult LoadModuleNoJump(lua_State* L, void* ctx, const char* pa
                             }
                         }
 
-                        // SDK-built modules expose an opaque ABI identifier.
+                        // Lode-built modules expose an opaque ABI identifier.
                         // Compare it before calling LodeModuleInit so a module
                         // built against an incompatible C++/Luau boundary is
                         // rejected without crossing that boundary. Modules
@@ -628,10 +691,9 @@ static ModuleLoadResult LoadModuleNoJump(lua_State* L, void* ctx, const char* pa
                         return { 0, "Failed to find LodeModuleInit symbol in native library " + PathToUtf8(fullLibPath) };
                     }
                 }
-                else
-                {
-                    return { 0, libResult.GetError().ErrorMessage() };
-                }
+            else
+            {
+                return { 0, libResult.GetError().ErrorMessage() };
             }
         }
     }

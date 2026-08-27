@@ -21,7 +21,7 @@ file(GLOB dev_entries "${dev_fixture}/*")
 file(COPY ${dev_entries} DESTINATION "${dev_test_root}")
 
 execute_process(
-    COMMAND "${CMAKE_COMMAND}" -E env "USERPROFILE=${cache_home}"
+    COMMAND "${CMAKE_COMMAND}" -E env "HOME=${cache_home}" "USERPROFILE=${cache_home}"
         "${LODE_EXECUTABLE}" install "${unlocked_test_root}"
     RESULT_VARIABLE result
     OUTPUT_VARIABLE output
@@ -41,7 +41,7 @@ if(NOT EXISTS "${unlocked_test_root}/lode.lock" OR
 endif()
 
 execute_process(
-    COMMAND "${CMAKE_COMMAND}" -E env "USERPROFILE=${cache_home}"
+    COMMAND "${CMAKE_COMMAND}" -E env "HOME=${cache_home}" "USERPROFILE=${cache_home}"
         "${LODE_EXECUTABLE}" "${unlocked_test_root}/init.luau"
     RESULT_VARIABLE result
     OUTPUT_VARIABLE output
@@ -53,7 +53,7 @@ if(NOT result EQUAL 0)
 endif()
 
 execute_process(
-    COMMAND "${CMAKE_COMMAND}" -E env "USERPROFILE=${cache_home}"
+    COMMAND "${CMAKE_COMMAND}" -E env "HOME=${cache_home}" "USERPROFILE=${cache_home}"
         "${LODE_EXECUTABLE}" install --locked "${unlocked_test_root}"
     RESULT_VARIABLE result
     OUTPUT_VARIABLE output
@@ -65,7 +65,7 @@ if(NOT result EQUAL 0)
 endif()
 
 execute_process(
-    COMMAND "${CMAKE_COMMAND}" -E env "USERPROFILE=${cache_home}"
+    COMMAND "${CMAKE_COMMAND}" -E env "HOME=${cache_home}" "USERPROFILE=${cache_home}"
         "${LODE_EXECUTABLE}" install --locked "${test_root}"
     RESULT_VARIABLE result
     OUTPUT_VARIABLE output
@@ -84,7 +84,7 @@ if(NOT EXISTS "${test_root}/.config.luau" OR
 endif()
 
 execute_process(
-    COMMAND "${CMAKE_COMMAND}" -E env "USERPROFILE=${cache_home}"
+    COMMAND "${CMAKE_COMMAND}" -E env "HOME=${cache_home}" "USERPROFILE=${cache_home}"
         "${LODE_EXECUTABLE}" ci validate --source --locked "${test_root}"
     RESULT_VARIABLE result
     OUTPUT_VARIABLE output
@@ -96,7 +96,7 @@ if(NOT result EQUAL 0)
 endif()
 
 execute_process(
-    COMMAND "${CMAKE_COMMAND}" -E env "USERPROFILE=${cache_home}"
+    COMMAND "${CMAKE_COMMAND}" -E env "HOME=${cache_home}" "USERPROFILE=${cache_home}"
         "${LODE_EXECUTABLE}" ci validate --artifact --locked "${test_root}"
     RESULT_VARIABLE result
     OUTPUT_VARIABLE output
@@ -116,7 +116,7 @@ if(signal_alias LESS 0 OR task_alias LESS 0)
 endif()
 
 execute_process(
-    COMMAND "${CMAKE_COMMAND}" -E env "USERPROFILE=${cache_home}"
+    COMMAND "${CMAKE_COMMAND}" -E env "HOME=${cache_home}" "USERPROFILE=${cache_home}"
         "${LODE_EXECUTABLE}" "${test_root}/init.luau"
     RESULT_VARIABLE result
     OUTPUT_VARIABLE output
@@ -128,7 +128,7 @@ if(NOT result EQUAL 0)
 endif()
 
 execute_process(
-    COMMAND "${CMAKE_COMMAND}" -E env "USERPROFILE=${cache_home}"
+    COMMAND "${CMAKE_COMMAND}" -E env "HOME=${cache_home}" "USERPROFILE=${cache_home}"
         "${LODE_EXECUTABLE}" install --locked "${test_root}"
     RESULT_VARIABLE result
     OUTPUT_VARIABLE output
@@ -140,7 +140,7 @@ if(NOT result EQUAL 0)
 endif()
 
 execute_process(
-    COMMAND "${CMAKE_COMMAND}" -E env "USERPROFILE=${cache_home}"
+    COMMAND "${CMAKE_COMMAND}" -E env "HOME=${cache_home}" "USERPROFILE=${cache_home}"
         "${LODE_EXECUTABLE}" install --locked "${dev_test_root}"
     RESULT_VARIABLE result
     OUTPUT_VARIABLE output
@@ -152,7 +152,7 @@ if(NOT result EQUAL 0 OR EXISTS "${dev_test_root}/lode_modules")
 endif()
 
 execute_process(
-    COMMAND "${CMAKE_COMMAND}" -E env "USERPROFILE=${cache_home}"
+    COMMAND "${CMAKE_COMMAND}" -E env "HOME=${cache_home}" "USERPROFILE=${cache_home}"
         "${LODE_EXECUTABLE}" install --locked --dev "${dev_test_root}"
     RESULT_VARIABLE result
     OUTPUT_VARIABLE output

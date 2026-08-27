@@ -1,9 +1,9 @@
 @PACKAGE_INIT@
 
 include("${CMAKE_CURRENT_LIST_DIR}/LodeTargets.cmake")
-include("${CMAKE_CURRENT_LIST_DIR}/LodeNativeModule.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/LodeModule.cmake")
 
-set(LODE_SDK_VERSION "@PROJECT_VERSION@")
+set(LODE_VERSION "@PROJECT_VERSION@")
 set(LODE_ABI_ID "@LODE_ABI_ID@")
 
 check_required_components(Lode)

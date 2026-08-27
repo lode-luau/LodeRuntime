@@ -37,29 +37,30 @@ The current package workflow is:
     lode ci validate --source
     lode ci validate --artifact
 
-Use `lode ci init --sdk-version <nightly> --sdk-sha256 <sha256>` to generate
+Use `lode ci init --lode-version <nightly> --lode-sha256 <sha256>` to generate
 an initial workflow. A locked install requires an up-to-date `lode.lock` and
 uses the exact locked artifacts; the current installer does not build dependency
-sources. The currently validated and published native package path is Windows
-x64. Platform keys present in a manifest do not, by themselves, mean that a
-target is tested or published. See [the manifest and ownership RFC](rfcs/05-package-manifest-and-ownership.md), [package resolution and lockfiles](rfcs/06-package-resolution-and-lockfile.md), and [package artifacts](rfcs/09-package-artifacts-and-releases.md).
+sources. The CI runtime/module test matrix covers Windows x64, Linux x64, and
+the host architecture on macOS. Nightly runtime, development, and stdlib
+archives are published per target; a platform key in a manifest is still only
+a claim until its matching CI artifact exists. See [the manifest and ownership RFC](rfcs/05-package-manifest-and-ownership.md), [package resolution and lockfiles](rfcs/06-package-resolution-and-lockfile.md), and [package artifacts](rfcs/09-package-artifacts-and-releases.md).
 
-## Native module quick start
+## Compiled module quick start
 
-A native package typically contains `lode.json`, a type/path metadata `init.luau`,
+A compiled module package typically contains `package.luau`, a type-only `init.luau`,
 `CMakeLists.txt`, and a `src/` directory. Its CMake project uses:
 
     find_package(Lode CONFIG REQUIRED)
-    lode_add_native_module(...)
+    lode_add_module(...)
 
-Configure with the installed Lode SDK in `CMAKE_PREFIX_PATH`, then build the
-module and run it with the matching Debug or Release `lode` runtime. Native
+Configure with the Lode development distribution in `CMAKE_PREFIX_PATH`, then build the
+module and run it with the matching Debug or Release `lode` runtime. A module
 `init.luau` supplies metadata for loading and typing; it is not executed as
-the native module implementation. Publishable native artifacts must provide
+the compiled module implementation. Publishable module artifacts must provide
 `LodeModuleInit`, `LodeModuleConfig`, and `LodeModuleABI`; direct legacy
-loading may have looser checks. See [the native SDK and ABI RFC](rfcs/08-native-sdk-and-abi.md), [artifact/release rules](rfcs/09-package-artifacts-and-releases.md), [generated CI](rfcs/10-generated-ci-and-enforcement.md), and [static target validation](rfcs/11-static-native-target-validation.md).
+loading may have looser checks. See [the module development and ABI RFC](rfcs/08-native-sdk-and-abi.md), [artifact/release rules](rfcs/09-package-artifacts-and-releases.md), [generated CI](rfcs/10-generated-ci-and-enforcement.md), and [static target validation](rfcs/11-static-native-target-validation.md).
 
-Package installation and native CI behavior are evolving; the linked RFCs are
+Package installation and module CI behavior are evolving; the linked RFCs are
 the normative design documents. The runtime executes trusted code and is not a
 sandbox.
 
@@ -72,7 +73,7 @@ sandbox.
 * [05 - Package Manifest and Ownership](rfcs/05-package-manifest-and-ownership.md)
 * [06 - Package Resolution and Lockfile](rfcs/06-package-resolution-and-lockfile.md)
 * [07 - Package CI and Native Build](rfcs/07-package-ci-and-native-build.md)
-* [08 - Native SDK and ABI](rfcs/08-native-sdk-and-abi.md)
+* [08 - Module Development and ABI](rfcs/08-native-sdk-and-abi.md)
 * [09 - Package Artifacts and Releases](rfcs/09-package-artifacts-and-releases.md)
 * [10 - Generated CI and Enforcement](rfcs/10-generated-ci-and-enforcement.md)
 * [11 - Static Native Target Validation](rfcs/11-static-native-target-validation.md)
@@ -82,15 +83,24 @@ sandbox.
 ### Requirements
 * CMake 3.20+
 * C++20 compatible compiler (MSVC, GCC, or Clang)
+* vcpkg in manifest mode
 
 ### Build Commands
 
     # Windows (Visual Studio)
-    cmake -B build -G "Visual Studio 17 2022"
+    cmake -B build -G "Visual Studio 18 2026" -DCMAKE_TOOLCHAIN_FILE=C:/tools/vcpkg/scripts/buildsystems/vcpkg.cmake -DVCPKG_TARGET_TRIPLET=x64-windows
     cmake --build build --config Release
 
     # Linux
-    cmake -B build -DCMAKE_BUILD_TYPE=Release
+    cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake \
+      -DVCPKG_TARGET_TRIPLET=x64-linux
+    cmake --build build
+
+    # macOS: use arm64-osx on Apple Silicon or x64-osx on Intel
+    cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake \
+      -DVCPKG_TARGET_TRIPLET=arm64-osx
     cmake --build build
 
 > Change `--config Release` or `-DCMAKE_BUILD_TYPE=Release` to `Debug` for debug builds.

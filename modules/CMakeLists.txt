@@ -8,7 +8,7 @@
 # Pure-Luau modules (signal, sanity, toml, ...) have no CMakeLists.txt and are
 # intentionally skipped here; they are packaged by the CI as-is.
 
-file(GLOB MODULE_CMAKELISTS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*/CMakeLists.txt")
+file(GLOB MODULE_CMAKELISTS "${CMAKE_CURRENT_SOURCE_DIR}/*/CMakeLists.txt")
 
 foreach(MODULE_CMAKELIST ${MODULE_CMAKELISTS})
     get_filename_component(MODULE_DIR "${MODULE_CMAKELIST}" DIRECTORY)

@@ -10,6 +10,7 @@
 #include "CiGenerator.hpp"
 #include "GitResolver.hpp"
 #include "PackageValidator.hpp"
+#include "PackageManifest.hpp"
 #include "PackageLockfile.hpp"
 #include "PackageInstaller.hpp"
 #include "PackagePacker.hpp"
@@ -230,7 +231,7 @@ std::vector<std::string> AddDependencyToManifest(
     if (!tag.IsValid())
         return tag.errors;
 
-    const fs::path manifestPath = packageRoot / "lode.json";
+    const fs::path manifestPath = packageRoot / "package.luau";
     nlohmann::json manifest;
     std::string originalManifest;
     try
@@ -243,7 +244,14 @@ std::vector<std::string> AddDependencyToManifest(
         }
         originalManifest.assign(std::istreambuf_iterator<char>(file),
                                 std::istreambuf_iterator<char>());
-        manifest = nlohmann::json::parse(originalManifest);
+        const Lode::Package::PackageManifestResult parsed =
+            Lode::Package::ReadPackageManifest(manifestPath);
+        if (!parsed.IsValid())
+        {
+            errors.insert(errors.end(), parsed.errors.begin(), parsed.errors.end());
+            return errors;
+        }
+        manifest = parsed.document;
     }
     catch (const std::exception& exception)
     {
@@ -253,7 +261,7 @@ std::vector<std::string> AddDependencyToManifest(
 
     if (!manifest.is_object())
     {
-        errors.push_back("Package manifest must contain a JSON object.");
+        errors.push_back("Package manifest must contain a Luau table.");
         return errors;
     }
 
@@ -263,12 +271,12 @@ std::vector<std::string> AddDependencyToManifest(
         manifest[fieldName] = nlohmann::json::object();
     if (!manifest[fieldName].is_object())
     {
-        errors.push_back(std::string("lode.json.") + fieldName + " must be an object.");
+        errors.push_back(std::string("package manifest.") + fieldName + " must be an object.");
         return errors;
     }
     if (manifest.contains(otherFieldName) && !manifest[otherFieldName].is_object())
     {
-        errors.push_back(std::string("lode.json.") + otherFieldName + " must be an object.");
+        errors.push_back(std::string("package manifest.") + otherFieldName + " must be an object.");
         return errors;
     }
     if (manifest.contains(otherFieldName) && manifest[otherFieldName].contains(parsed.alias))
@@ -291,10 +299,15 @@ std::vector<std::string> AddDependencyToManifest(
     };
 
     std::string replacementError;
-    const std::string content = manifest.dump(2) + "\n";
+    const std::string content = Lode::Package::SerializePackageManifest(manifest);
+    if (content.empty())
+    {
+        errors.push_back("Cannot serialize package manifest.");
+        return errors;
+    }
     if (!ReplaceTextFileAtomically(manifestPath, content, replacementError))
     {
-        errors.push_back("Cannot update lode.json: " + replacementError);
+        errors.push_back("Cannot update package manifest: " + replacementError);
         return errors;
     }
 
@@ -305,7 +318,7 @@ std::vector<std::string> AddDependencyToManifest(
         errors.insert(errors.end(), installation.errors.begin(), installation.errors.end());
         std::string restoreError;
         if (!ReplaceTextFileAtomically(manifestPath, originalManifest, restoreError))
-            errors.push_back("Cannot restore lode.json after installation failure: " + restoreError);
+            errors.push_back("Cannot restore package manifest after installation failure: " + restoreError);
         return errors;
     }
     return errors;
@@ -547,7 +560,7 @@ void PrintCommandHelp(std::string_view command)
     else if (command == "ci")
     {
         Lode::Logger::Info("Usage: lode ci validate [--source|--artifact] [--locked] [package-root]");
-        Lode::Logger::Info("       lode ci init [--force] --sdk-version <nightly> --sdk-sha256 <sha256> [package-root]");
+        Lode::Logger::Info("       lode ci init [--force] --lode-version <nightly> --lode-sha256 <sha256> [package-root]");
         Lode::Logger::Info("       lode ci update [package-root]");
     }
     else if (command == "-c")
@@ -1063,7 +1076,7 @@ int main(int argc, char* argv[])
         if (ciCommand == "init")
         {
             bool force = false;
-            Lode::Package::CiSdkPin sdkPin;
+            Lode::Package::CiLodePin lodePin;
             fs::path packageRoot = fs::current_path();
             bool hasPackageRoot = false;
             for (int argumentIndex = 3; argumentIndex < argc; ++argumentIndex)
@@ -1073,23 +1086,23 @@ int main(int argc, char* argv[])
                 {
                     force = true;
                 }
-                else if (argument == "--sdk-version" || argument == "--sdk-sha256")
+                else if (argument == "--lode-version" || argument == "--lode-sha256")
                 {
                     if (argumentIndex + 1 >= argc)
                     {
-                        Lode::Logger::Error("Usage: lode ci init [--force] --sdk-version <nightly> --sdk-sha256 <sha256> [package-root]");
+                        Lode::Logger::Error("Usage: lode ci init [--force] --lode-version <nightly> --lode-sha256 <sha256> [package-root]");
                         PrintCommandHelp("ci");
                         return 1;
                     }
                     const std::string value = PathToUtf8(fs::path(argv[++argumentIndex]));
-                    if (argument == "--sdk-version")
-                        sdkPin.version = value;
+                    if (argument == "--lode-version")
+                        lodePin.version = value;
                     else
-                        sdkPin.sha256 = value;
+                        lodePin.sha256 = value;
                 }
                 else if (argument.rfind("--", 0) == 0 || hasPackageRoot)
                 {
-                    Lode::Logger::Error("Usage: lode ci init [--force] --sdk-version <nightly> --sdk-sha256 <sha256> [package-root]");
+                    Lode::Logger::Error("Usage: lode ci init [--force] --lode-version <nightly> --lode-sha256 <sha256> [package-root]");
                     PrintCommandHelp("ci");
                     return 1;
                 }
@@ -1101,7 +1114,7 @@ int main(int argc, char* argv[])
             }
 
             Lode::Package::ValidationReport report = Lode::Package::GenerateWorkflow(
-                packageRoot, force, sdkPin, standardLibraryPath);
+                packageRoot, force, lodePin, standardLibraryPath);
             for (const std::string& warning : report.warnings)
                 Lode::Logger::Warn(warning);
             for (const std::string& error : report.errors)

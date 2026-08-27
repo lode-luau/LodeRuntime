@@ -1167,9 +1167,11 @@ static Lode::Value SpawnProcess(Lode::State& vm, const std::shared_ptr<ProcessMa
     int r = uv_spawn(mgr->loop, &proc->process, &proc->options);
     if (r != 0)
     {
-        if (proc->stdinStream) proc->stdinStream->RequestClose();
-        if (proc->stdoutStream) proc->stdoutStream->RequestClose();
-        if (proc->stderrStream) proc->stderrStream->RequestClose();
+        // uv_spawn initializes the process handle before reporting an exec
+        // failure. Keep the owner alive until libuv finishes closing it;
+        // otherwise the loop retains a dangling uv_process_t.
+        proc->selfGuard = proc;
+        proc->RequestClose();
         vm.RaiseError(std::string("sys.spawn error: ") + uv_strerror(r));
         return Lode::Value();
     }

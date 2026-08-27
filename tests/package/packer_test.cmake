@@ -19,7 +19,7 @@ file(WRITE "${package_root}/modules/example/large.luau" "return [[${large_source
 file(WRITE "${package_root}/tests/ignored.luau" "error('test source must not be packaged')\n")
 
 execute_process(
-    COMMAND "${CMAKE_COMMAND}" -E env "USERPROFILE=${cache_home}"
+    COMMAND "${CMAKE_COMMAND}" -E env "HOME=${cache_home}" "USERPROFILE=${cache_home}"
         "${LODE_EXECUTABLE}" install --locked "${package_root}"
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
 if(NOT result EQUAL 0)
@@ -28,7 +28,7 @@ if(NOT result EQUAL 0)
 endif()
 
 execute_process(
-    COMMAND "${CMAKE_COMMAND}" -E env "USERPROFILE=${cache_home}"
+    COMMAND "${CMAKE_COMMAND}" -E env "HOME=${cache_home}" "USERPROFILE=${cache_home}"
         "${LODE_EXECUTABLE}" pack --output "${archive_path}" "${package_root}"
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
 if(NOT result EQUAL 0 OR NOT EXISTS "${archive_path}" OR
@@ -54,7 +54,7 @@ if(NOT result EQUAL 0)
 endif()
 
 foreach(required_entry IN ITEMS
-    "lode.json"
+    "package.luau"
     "init.luau"
     "LICENSE"
     "lode_modules/signal/init.luau"

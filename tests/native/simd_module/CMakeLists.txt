@@ -2,14 +2,19 @@ cmake_minimum_required(VERSION 3.14)
 
 project(simd_module)
 
-# Add AVX2 support flags
-if(MSVC)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /arch:AVX2")
-else()
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mavx2")
-endif()
-
 add_library(simd_module MODULE src/simd_module.cpp)
+
+# AVX2 is available on x86/x64, but not on Apple Silicon. The fixture keeps
+# its scalar implementation available on other hosts so the native-loader
+# regression remains portable.
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64|x86|X86")
+    if(MSVC)
+        target_compile_options(simd_module PRIVATE /arch:AVX2)
+    else()
+        target_compile_options(simd_module PRIVATE -mavx2)
+    endif()
+    target_compile_definitions(simd_module PRIVATE LODE_SIMD_AVX2)
+endif()
 
 # Link against LodeCore which provides the Luau headers and Lode::* API
 target_link_libraries(simd_module PRIVATE LodeCore)
@@ -25,11 +30,7 @@ else()
     set(_simd_module_suffix ".so")
 endif()
 
-if(CMAKE_SIZEOF_VOID_P EQUAL 8)
-    set(TARGET_ARCH "x64")
-else()
-    set(TARGET_ARCH "x86")
-endif()
+lode_get_architecture_name(TARGET_ARCH)
 
 set_target_properties(simd_module PROPERTIES
     PREFIX ""

@@ -4,11 +4,13 @@
 
 #include "PackageCache.hpp"
 #include "PackageConfig.hpp"
+#include "PackageManifest.hpp"
 #include "PackageLockfile.hpp"
 #include "PackageValidator.hpp"
 #include "GitResolver.hpp"
 #include "PackageArtifact.hpp"
 #include "PathUtil.hpp"
+#include "Platform/Platform.hpp"
 #include "nlohmann/json.hpp"
 
 #include <chrono>
@@ -358,16 +360,26 @@ bool ResolveGitDependencies(DependencyGraph& graph,
                     return false;
                 }
 
-                std::ifstream manifestFile(resolvedRoot.root / "lode.json");
                 json manifest;
-                if (!manifestFile.is_open() || !(manifestFile >> manifest))
+                const fs::path packageManifestPath = resolvedRoot.root / "package.luau";
+                if (fs::is_regular_file(packageManifestPath))
                 {
-                    AddError(result, "Cannot inspect Git package manifest for '" +
-                        resolvedRoot.name + "'.");
+                    const PackageManifestResult parsed = ReadPackageManifest(packageManifestPath);
+                    if (!parsed.IsValid())
+                    {
+                        AddError(result, "Cannot inspect Git package manifest for '" +
+                            resolvedRoot.name + "'.");
+                        return false;
+                    }
+                    manifest = parsed.document;
+                }
+                else
+                {
+                    AddError(result, "Git package '" + resolvedRoot.name +
+                        "' is missing package.luau.");
                     return false;
                 }
-                if (manifest.contains("libraries") && manifest["libraries"].is_object() &&
-                    !manifest["libraries"].empty())
+                if (manifest.contains("implementation") && manifest["implementation"].is_object())
                 {
                     const PackageArtifactResult artifact = DownloadGitHubPackageArtifact(
                         repository, resolvedRoot.name, resolvedRoot.version,
@@ -566,6 +578,8 @@ bool FindLockedStdlibRecord(const json& document,
                             LockedStdlibRecord& result,
                             InstallResult& installResult)
 {
+    const std::string currentPlatform(Platform::GetOSName());
+    const std::string currentArchitecture(Platform::GetArchitectureName());
     if (!document.is_object() || !document.contains("packages") ||
         !document["packages"].is_array())
     {
@@ -621,8 +635,8 @@ bool FindLockedStdlibRecord(const json& document,
                     artifact.release = artifactDocument.value("release", "");
                     artifact.asset = artifactDocument.value("asset", "");
                     artifact.sha256 = artifactDocument.value("sha256", "");
-                    if (artifact.platform == "windows" &&
-                        artifact.architecture == "x64" &&
+                    if (artifact.platform == currentPlatform &&
+                        artifact.architecture == currentArchitecture &&
                         artifact.abi == LodeAbiId())
                     {
                         result.artifact = std::move(artifact);
@@ -631,7 +645,8 @@ bool FindLockedStdlibRecord(const json& document,
                 }
 
                 AddError(installResult, "Locked stdlib package '" + dependency.alias +
-                    "' has no Windows x64 artifact for ABI " + LodeAbiId() + ".");
+                    "' has no " + currentPlatform + " " + currentArchitecture +
+                    " artifact for ABI " + LodeAbiId() + ".");
                 return false;
             }
         }
@@ -781,8 +796,11 @@ bool ResolveStandardLibraryDependencies(DependencyGraph& graph,
                 packageName = locked.name;
                 packageVersion = locked.version;
                 packageRelease = locked.artifact.release;
-                if (locked.artifact.asset != "lode-stdlib-" + packageName + "-" +
-                    packageVersion + "-windows-x64.zip")
+                const std::string expectedAsset = "lode-stdlib-" +
+                    std::string(Platform::GetOSName()) + "-" +
+                    std::string(Platform::GetArchitectureName()) + "-" +
+                    packageRelease + ".zip";
+                if (locked.artifact.asset != expectedAsset)
                 {
                     AddError(result, "Locked stdlib artifact name does not match package '" +
                         packageName + "'.");
