@@ -4,6 +4,7 @@
 
 #include "PackageCache.hpp"
 #include "PackageConfig.hpp"
+#include "PackageManifest.hpp"
 #include "PackageLockfile.hpp"
 #include "PackageValidator.hpp"
 #include "GitResolver.hpp"
@@ -358,16 +359,32 @@ bool ResolveGitDependencies(DependencyGraph& graph,
                     return false;
                 }
 
-                std::ifstream manifestFile(resolvedRoot.root / "lode.json");
                 json manifest;
-                if (!manifestFile.is_open() || !(manifestFile >> manifest))
+                const fs::path packageManifestPath = resolvedRoot.root / "package.luau";
+                if (fs::is_regular_file(packageManifestPath))
                 {
-                    AddError(result, "Cannot inspect Git package manifest for '" +
-                        resolvedRoot.name + "'.");
-                    return false;
+                    const PackageManifestResult parsed = ReadPackageManifest(packageManifestPath);
+                    if (!parsed.IsValid())
+                    {
+                        AddError(result, "Cannot inspect Git package manifest for '" +
+                            resolvedRoot.name + "'.");
+                        return false;
+                    }
+                    manifest = parsed.document;
                 }
-                if (manifest.contains("libraries") && manifest["libraries"].is_object() &&
-                    !manifest["libraries"].empty())
+                else
+                {
+                    std::ifstream manifestFile(resolvedRoot.root / "lode.json");
+                    if (!manifestFile.is_open() || !(manifestFile >> manifest))
+                    {
+                        AddError(result, "Cannot inspect Git package manifest for '" +
+                            resolvedRoot.name + "'.");
+                        return false;
+                    }
+                }
+                if ((manifest.contains("implementation") && manifest["implementation"].is_object()) ||
+                    (manifest.contains("libraries") && manifest["libraries"].is_object() &&
+                        !manifest["libraries"].empty()))
                 {
                     const PackageArtifactResult artifact = DownloadGitHubPackageArtifact(
                         repository, resolvedRoot.name, resolvedRoot.version,

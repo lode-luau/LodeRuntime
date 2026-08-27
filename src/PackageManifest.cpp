@@ -6,6 +6,7 @@
 
 #include <cctype>
 #include <fstream>
+#include <nlohmann/json.hpp>
 #include <string_view>
 #include <utility>
 
@@ -35,6 +36,7 @@ public:
         if (!Consume('{'))
             return Fail("manifest must return a table");
 
+        result.document = nlohmann::json::object();
         while (true)
         {
             SkipTrivia();
@@ -50,29 +52,10 @@ public:
                 return Fail("manifest fields must use key = value syntax");
 
             SkipTrivia();
-            if (key == "name" || key == "version")
-            {
-                std::string value;
-                if (!ReadString(value))
-                    return Fail("manifest field '" + key + "' must be a string");
-                if (key == "name")
-                    result.manifest.name = std::move(value);
-                else
-                    result.manifest.version = std::move(value);
-            }
-            else if (key == "implementation")
-            {
-                if (!ReadImplementation(result.manifest))
-                {
-                    if (!error_.empty())
-                        result.errors.push_back(error_);
-                    return result;
-                }
-            }
-            else if (!SkipValue())
-            {
+            nlohmann::json value;
+            if (!ReadValue(value))
                 return Fail("manifest field '" + key + "' has an invalid value");
-            }
+            result.document[key] = std::move(value);
 
             SkipTrivia();
             if (Consume(',') || Consume(';'))
@@ -84,12 +67,43 @@ public:
         SkipTrivia();
         if (position_ != source_.size())
             return Fail("unexpected content after manifest table");
+        if (!result.document.contains("name") || !result.document["name"].is_string())
+            return Fail("manifest field 'name' must be a string");
+        if (!result.document.contains("version") || !result.document["version"].is_string())
+            return Fail("manifest field 'version' must be a string");
+        result.manifest.name = result.document["name"].get<std::string>();
+        result.manifest.version = result.document["version"].get<std::string>();
         if (result.manifest.name.empty())
             return Fail("manifest field 'name' is required");
         if (result.manifest.version.empty())
             return Fail("manifest field 'version' is required");
-        if (result.manifest.hasImplementation && result.manifest.implementation.artifact.empty())
-            result.manifest.implementation.artifact = result.manifest.name;
+        if (result.document.contains("implementation"))
+        {
+            const auto& implementation = result.document["implementation"];
+            if (!implementation.is_object())
+                return Fail("manifest field 'implementation' must be a table");
+            result.manifest.hasImplementation = true;
+            if (implementation.contains("artifact"))
+            {
+                if (!implementation["artifact"].is_string())
+                    return Fail("implementation field 'artifact' must be a string");
+                result.manifest.implementation.artifact = implementation["artifact"].get<std::string>();
+            }
+            if (implementation.contains("layout"))
+            {
+                if (!implementation["layout"].is_string())
+                    return Fail("implementation field 'layout' must be a string");
+                result.manifest.implementation.layout = implementation["layout"].get<std::string>();
+            }
+            if (implementation.contains("required"))
+            {
+                if (!implementation["required"].is_boolean())
+                    return Fail("implementation field 'required' must be boolean");
+                result.manifest.implementation.required = implementation["required"].get<bool>();
+            }
+            if (result.manifest.implementation.artifact.empty())
+                result.manifest.implementation.artifact = result.manifest.name;
+        }
         return result;
     }
 
@@ -210,6 +224,120 @@ private:
                 case '"': value.push_back('"'); break;
                 default: value.push_back(escaped); break;
             }
+        }
+        return false;
+    }
+
+    bool ReadTable(nlohmann::json& value)
+    {
+        if (!Consume('{'))
+            return false;
+
+        nlohmann::json object = nlohmann::json::object();
+        nlohmann::json array = nlohmann::json::array();
+        bool hasKeyedEntries = false;
+        bool hasArrayEntries = false;
+        while (true)
+        {
+            SkipTrivia();
+            if (Consume('}'))
+                break;
+
+            const size_t entryStart = position_;
+            std::string key;
+            bool keyed = ReadKey(key);
+            if (keyed)
+            {
+                SkipTrivia();
+                keyed = Consume('=');
+            }
+            position_ = entryStart;
+
+            nlohmann::json entry;
+            if (keyed)
+            {
+                ReadKey(key);
+                SkipTrivia();
+                Consume('=');
+                SkipTrivia();
+                if (!ReadValue(entry))
+                    return false;
+                object[key] = std::move(entry);
+                hasKeyedEntries = true;
+            }
+            else
+            {
+                if (!ReadValue(entry))
+                    return false;
+                array.push_back(std::move(entry));
+                hasArrayEntries = true;
+            }
+
+            SkipTrivia();
+            if (Consume(',') || Consume(';'))
+                continue;
+            if (Peek() != '}')
+                return false;
+        }
+
+        if (hasKeyedEntries && hasArrayEntries)
+            return false;
+        value = !hasArrayEntries || hasKeyedEntries ? std::move(object) : std::move(array);
+        return true;
+    }
+
+    bool ReadValue(nlohmann::json& value)
+    {
+        if (Peek() == '\'' || Peek() == '"')
+        {
+            std::string stringValue;
+            if (!ReadString(stringValue))
+                return false;
+            value = std::move(stringValue);
+            return true;
+        }
+
+        if (Peek() == '{')
+            return ReadTable(value);
+
+        bool booleanValue = false;
+        if (ReadBoolean(booleanValue))
+        {
+            value = booleanValue;
+            return true;
+        }
+
+        if (ConsumeKeyword("nil"))
+        {
+            value = nullptr;
+            return true;
+        }
+
+        const size_t begin = position_;
+        while (position_ < source_.size())
+        {
+            const char character = Peek();
+            if (std::isspace(static_cast<unsigned char>(character)) ||
+                character == ',' || character == ';' || character == '}')
+                break;
+            ++position_;
+        }
+        if (position_ == begin)
+            return false;
+
+        const std::string token(source_.substr(begin, position_ - begin));
+        try
+        {
+            size_t consumed = 0;
+            const long long integer = std::stoll(token, &consumed);
+            if (consumed == token.size())
+            {
+                value = integer;
+                return true;
+            }
+        }
+        catch (const std::exception&)
+        {
         }
         return false;
     }

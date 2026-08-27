@@ -5,6 +5,7 @@
 #include "PackageArchive.hpp"
 #include "PackageInstaller.hpp"
 #include "PackageLockfile.hpp"
+#include "PackageManifest.hpp"
 #include "PackageValidator.hpp"
 #include "PathUtil.hpp"
 #include "Sha256.hpp"
@@ -89,11 +90,25 @@ bool IsRegularFileWithoutSymlink(const fs::path& path)
 
 bool ReadManifest(const fs::path& packageRoot, json& manifest, PackResult& result)
 {
-    std::ifstream file(packageRoot / "lode.json");
+    const fs::path packageManifestPath = packageRoot / "package.luau";
+    if (fs::is_regular_file(packageManifestPath))
+    {
+        const PackageManifestResult parsed = ReadPackageManifest(packageManifestPath);
+        if (!parsed.IsValid())
+        {
+            result.errors.insert(result.errors.end(), parsed.errors.begin(), parsed.errors.end());
+            return false;
+        }
+        manifest = parsed.document;
+        return true;
+    }
+
+    const fs::path legacyManifestPath = packageRoot / "lode.json";
+    std::ifstream file(legacyManifestPath);
     if (!file.is_open())
     {
         AddError(result, "Cannot open package manifest: " +
-            PathToUtf8(packageRoot / "lode.json"));
+            PathToUtf8(packageManifestPath));
         return false;
     }
 
@@ -145,8 +160,11 @@ bool CollectPackageFiles(const fs::path& packageRoot,
         collected.emplace(archiveName, source);
     };
 
-    for (const char* required : { "lode.json", "init.luau", "LICENSE" })
-        addFile(required);
+    addFile(fs::is_regular_file(packageRoot / "package.luau")
+        ? fs::path("package.luau")
+        : fs::path("lode.json"));
+    addFile("init.luau");
+    addFile("LICENSE");
 
     for (const char* optional : { "README.md", "NOTICE" })
     {
@@ -239,7 +257,7 @@ fs::path ResolveOutputPath(const fs::path& packageRoot,
     if (!manifest.contains("name") || !manifest["name"].is_string() ||
         !manifest.contains("version") || !manifest["version"].is_string())
     {
-        AddError(result, "Cannot determine package archive name from lode.json.");
+        AddError(result, "Cannot determine package archive name from package.luau.");
         return {};
     }
 

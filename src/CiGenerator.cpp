@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 #include "CiGenerator.hpp"
 
+#include "PackageManifest.hpp"
 #include "PathUtil.hpp"
 #include "nlohmann/json.hpp"
 
@@ -11,6 +12,7 @@
 #include <optional>
 #include <regex>
 #include <sstream>
+#include <utility>
 
 namespace fs = std::filesystem;
 
@@ -339,27 +341,67 @@ bool BuildWorkflowText(const fs::path& root,
         return false;
 
     json manifest;
-    try
+    const fs::path packageManifestPath = root / "package.luau";
+    if (fs::is_regular_file(packageManifestPath))
     {
-        std::ifstream file(root / "lode.json");
-        manifest = json::parse(file);
+        const PackageManifestResult parsed = ReadPackageManifest(packageManifestPath);
+        if (!parsed.IsValid())
+        {
+            report.errors.insert(report.errors.end(), parsed.errors.begin(), parsed.errors.end());
+            return false;
+        }
+        manifest = parsed.document;
     }
-    catch (const std::exception& exception)
+    else
     {
-        Error(report, "Failed to parse lode.json while generating CI: " + std::string(exception.what()));
-        return false;
+        try
+        {
+            std::ifstream file(root / "lode.json");
+            manifest = json::parse(file);
+        }
+        catch (const std::exception& exception)
+        {
+            Error(report, "Failed to parse package manifest while generating CI: " + std::string(exception.what()));
+            return false;
+        }
     }
 
-    const bool isNative = manifest.contains("libraries") && manifest["libraries"].is_object();
+    const bool isNative = (manifest.contains("implementation") && manifest["implementation"].is_object()) ||
+        (manifest.contains("libraries") && manifest["libraries"].is_object());
     if (isNative)
     {
-        // Validation has already checked that every declared release target has
-        // a matching library. CI deliberately uses releaseTargets rather than
-        // inferring publication claims from every library map entry.
-        for (const json& target : manifest["releaseTargets"])
+        std::vector<std::pair<std::string, std::string>> releaseTargets;
+        if (manifest.contains("implementation") && manifest["implementation"].is_object())
         {
-            const std::string platform = target["platform"].get<std::string>();
-            const std::string architecture = target["architecture"].get<std::string>();
+            const json& implementation = manifest["implementation"];
+            if (implementation.contains("targets") && implementation["targets"].is_object() &&
+                implementation["targets"].contains("release") &&
+                implementation["targets"]["release"].is_array())
+            {
+                for (const json& target : implementation["targets"]["release"])
+                {
+                    if (!target.is_string())
+                        continue;
+                    const std::string value = target.get<std::string>();
+                    const std::size_t separator = value.find('/');
+                    if (separator != std::string::npos)
+                        releaseTargets.emplace_back(value.substr(0, separator), value.substr(separator + 1));
+                }
+            }
+        }
+        else if (manifest.contains("releaseTargets") && manifest["releaseTargets"].is_array())
+        {
+            for (const json& target : manifest["releaseTargets"])
+            {
+                if (target.is_object() && target.contains("platform") && target["platform"].is_string() &&
+                    target.contains("architecture") && target["architecture"].is_string())
+                    releaseTargets.emplace_back(target["platform"].get<std::string>(),
+                        target["architecture"].get<std::string>());
+            }
+        }
+
+        for (const auto& [platform, architecture] : releaseTargets)
+        {
             if (platform != "windows" || architecture != "x64")
             {
                 Error(report, "lode ci has no runner and SDK matrix for native target '" +

@@ -5,6 +5,7 @@
 #include "Lode/Export.hpp"
 
 #include <filesystem>
+#include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
 
@@ -29,6 +30,9 @@ struct PackageManifest
 struct PackageManifestResult
 {
     PackageManifest manifest;
+    // JSON-shaped data for package tooling. It is produced by the same static
+    // parser and never by executing package.luau.
+    nlohmann::json document;
     std::vector<std::string> errors;
 
     [[nodiscard]] bool IsValid() const { return errors.empty(); }

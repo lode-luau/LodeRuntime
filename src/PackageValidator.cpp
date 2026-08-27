@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 #include "PackageValidator.hpp"
 
+#include "PackageManifest.hpp"
+
 #include "PathUtil.hpp"
 #include "Platform/Platform.hpp"
 #include "Lode/Export.hpp"
@@ -166,11 +168,12 @@ std::optional<fs::path> FindStdlibRoot(const fs::path& packageRoot,
 
         const fs::path siblingModules = current / "modules";
         // A package may legitimately keep Luau modules under its own
-        // modules/ directory. A package root with lode.json is not the
+        // modules/ directory. A package root with a manifest is not the
         // repository-level stdlib catalog, even when installation generated
         // a .config.luau beside it.
         if (fs::is_directory(siblingModules) &&
             fs::is_regular_file(current / ".config.luau") &&
+            !fs::is_regular_file(current / "package.luau") &&
             !fs::is_regular_file(current / "lode.json"))
             return siblingModules;
 
@@ -196,16 +199,27 @@ bool FindStdlibManifest(const fs::path& stdlibRoot,
              stdlibRoot, fs::directory_options::follow_directory_symlink, ec),
          end; it != end && !ec; it.increment(ec))
     {
-        if (!it->is_regular_file(ec) || it->path().filename() != "lode.json")
-            continue;
-
-        std::ifstream file(it->path());
-        if (!file.is_open())
+        if (!it->is_regular_file(ec) ||
+            (it->path().filename() != "package.luau" && it->path().filename() != "lode.json"))
             continue;
 
         try
         {
-            json candidate = json::parse(file);
+            json candidate;
+            if (it->path().filename() == "package.luau")
+            {
+                const PackageManifestResult parsed = ReadPackageManifest(it->path());
+                if (!parsed.IsValid())
+                    continue;
+                candidate = parsed.document;
+            }
+            else
+            {
+                std::ifstream file(it->path());
+                if (!file.is_open())
+                    continue;
+                candidate = json::parse(file);
+            }
             if (candidate.is_object() && candidate.value("name", "") == name)
             {
                 packageRoot = it->path().parent_path();
@@ -269,6 +283,19 @@ bool ReadDependencyManifest(const fs::path& packageRoot,
                             json& manifest,
                             ValidationReport& report)
 {
+    const fs::path packageManifestPath = packageRoot / "package.luau";
+    if (fs::is_regular_file(packageManifestPath))
+    {
+        const PackageManifestResult parsed = ReadPackageManifest(packageManifestPath);
+        if (!parsed.IsValid())
+        {
+            report.errors.insert(report.errors.end(), parsed.errors.begin(), parsed.errors.end());
+            return false;
+        }
+        manifest = parsed.document;
+        return true;
+    }
+
     const fs::path manifestPath = packageRoot / "lode.json";
     std::ifstream file(manifestPath);
     if (!file.is_open())
@@ -663,6 +690,151 @@ void ValidateReleaseTargets(const json& manifest, bool isNative, ValidationRepor
     }
 }
 
+std::string ImplementationExtension(const std::string& platform)
+{
+    if (platform == "windows") return ".dll";
+    if (platform == "macos" || platform == "ios") return ".dylib";
+    return ".so";
+}
+
+std::string ExpandImplementationLayout(std::string layout,
+                                       const std::string& platform,
+                                       const std::string& architecture,
+                                       const std::string& configuration,
+                                       const std::string& artifact)
+{
+    const std::array<std::pair<std::string_view, std::string>, 5> substitutions{{
+        { "{platform}", platform },
+        { "{architecture}", architecture },
+        { "{configuration}", configuration },
+        { "{artifact}", artifact },
+        { "{extension}", ImplementationExtension(platform) }
+    }};
+    for (const auto& [token, replacement] : substitutions)
+    {
+        size_t position = 0;
+        while ((position = layout.find(token, position)) != std::string::npos)
+        {
+            layout.replace(position, token.size(), replacement);
+            position += replacement.size();
+        }
+    }
+    return layout;
+}
+
+void ValidateImplementation(const fs::path& root,
+                            const json& manifest,
+                            ValidationMode mode,
+                            bool& hasThirdPartyRuntime,
+                            ValidationReport& report)
+{
+    const json& implementation = manifest["implementation"];
+    if (!implementation.is_object())
+    {
+        Error(report, "implementation must be an object.");
+        return;
+    }
+
+    const std::string packageName = manifest.value("name", "");
+    std::string artifact = packageName;
+    if (implementation.contains("artifact"))
+    {
+        if (!implementation["artifact"].is_string())
+        {
+            Error(report, "implementation.artifact must be a non-empty string.");
+            return;
+        }
+        artifact = implementation["artifact"].get<std::string>();
+    }
+    if (artifact.empty())
+    {
+        Error(report, "implementation.artifact must be a non-empty string.");
+        return;
+    }
+
+    std::string layout =
+        "libs/{platform}/{architecture}/{configuration}/{artifact}{extension}";
+    if (implementation.contains("layout"))
+    {
+        if (!implementation["layout"].is_string())
+        {
+            Error(report, "implementation.layout must be a string.");
+            return;
+        }
+        layout = implementation["layout"].get<std::string>();
+    }
+
+    if (!implementation.contains("targets") || !implementation["targets"].is_object())
+    {
+        Error(report, "Native packages must declare implementation.targets.");
+        return;
+    }
+    const json& targets = implementation["targets"];
+    if (!targets.contains("release") || !targets["release"].is_array() || targets["release"].empty())
+    {
+        Error(report, "implementation.targets.release must be a non-empty array.");
+        return;
+    }
+
+    std::set<std::pair<std::string, std::string>> releaseTargets;
+    for (const json& target : targets["release"])
+    {
+        if (!target.is_string())
+        {
+            Error(report, "implementation.targets.release entries must be strings in platform/architecture form.");
+            continue;
+        }
+        const std::string value = target.get<std::string>();
+        const size_t separator = value.find('/');
+        if (separator == std::string::npos || separator == 0 || separator + 1 >= value.size() ||
+            value.find('/', separator + 1) != std::string::npos)
+        {
+            Error(report, "implementation.targets.release entry '" + value +
+                "' must use platform/architecture form.");
+            continue;
+        }
+        releaseTargets.emplace(value.substr(0, separator), value.substr(separator + 1));
+    }
+
+    const bool sourceValidation = mode == ValidationMode::Source || mode == ValidationMode::InstallSource;
+    if (sourceValidation)
+        return;
+
+    for (const auto& [platform, architecture] : releaseTargets)
+    {
+        if (mode == ValidationMode::InstallArtifact &&
+            (platform != "windows" || architecture != "x64"))
+            continue;
+
+        const std::vector<std::string> configurations = mode == ValidationMode::InstallArtifact
+            ? std::vector<std::string>{ "Release" }
+            : std::vector<std::string>{ "Debug", "Release" };
+        for (const std::string& configuration : configurations)
+        {
+            const fs::path relative = PathFromUtf8(ExpandImplementationLayout(
+                layout, platform, architecture, configuration, artifact));
+            const fs::path artifactPath = root / relative;
+            if (relative.is_absolute() || !IsPathInside(artifactPath, root))
+            {
+                Error(report, "implementation.layout must resolve inside the package.");
+                continue;
+            }
+            if (!fs::is_regular_file(artifactPath))
+            {
+                Error(report, "Missing " + configuration + " native artifact: " + PathToUtf8(artifactPath));
+                continue;
+            }
+            ValidateArtifact(artifactPath, configuration, report);
+            for (const auto& entry : fs::directory_iterator(artifactPath.parent_path()))
+            {
+                const std::string name = entry.path().filename().string();
+                if (name.rfind("libcrypto", 0) == 0 || name.rfind("libssl", 0) == 0)
+                    hasThirdPartyRuntime = true;
+            }
+        }
+    }
+}
+
 } // namespace
 
 bool PackageVersionSatisfies(const std::string& actual,
@@ -694,7 +866,10 @@ ValidationReport Validate(const fs::path& packageRoot,
         return report;
     }
 
-    const fs::path manifestPath = root / "lode.json";
+    const fs::path packageManifestPath = root / "package.luau";
+    const fs::path manifestPath = fs::is_regular_file(packageManifestPath)
+        ? packageManifestPath
+        : root / "lode.json";
     if (!fs::is_regular_file(manifestPath))
     {
         Error(report, "Missing package manifest: " + PathToUtf8(manifestPath));
@@ -702,15 +877,28 @@ ValidationReport Validate(const fs::path& packageRoot,
     }
 
     json manifest;
-    try
+    if (manifestPath == packageManifestPath)
     {
-        std::ifstream file(manifestPath);
-        manifest = json::parse(file);
+        const PackageManifestResult parsed = ReadPackageManifest(manifestPath);
+        if (!parsed.IsValid())
+        {
+            report.errors.insert(report.errors.end(), parsed.errors.begin(), parsed.errors.end());
+            return report;
+        }
+        manifest = parsed.document;
     }
-    catch (const std::exception& exception)
+    else
     {
-        Error(report, "Failed to parse " + PathToUtf8(manifestPath) + ": " + exception.what());
-        return report;
+        try
+        {
+            std::ifstream file(manifestPath);
+            manifest = json::parse(file);
+        }
+        catch (const std::exception& exception)
+        {
+            Error(report, "Failed to parse " + PathToUtf8(manifestPath) + ": " + exception.what());
+            return report;
+        }
     }
 
     if (!manifest.is_object())
@@ -743,7 +931,22 @@ ValidationReport Validate(const fs::path& packageRoot,
     if (!fs::is_regular_file(root / "LICENSE"))
         Error(report, "Packages must contain a root LICENSE file.");
 
-    const bool isNative = manifest.contains("libraries") && manifest["libraries"].is_object();
+    const bool isNative = (manifest.contains("implementation") && manifest["implementation"].is_object()) ||
+        (manifest.contains("libraries") && manifest["libraries"].is_object());
+    if (manifest.contains("implementation"))
+    {
+        if (!manifest["implementation"].is_object())
+        {
+            Error(report, "implementation must be an object.");
+            return report;
+        }
+        const bool sourceValidation = mode == ValidationMode::Source || mode == ValidationMode::InstallSource;
+        if (sourceValidation && !fs::is_regular_file(root / "CMakeLists.txt"))
+            Error(report, "Native source packages must contain a root CMakeLists.txt file.");
+        bool hasThirdPartyRuntime = false;
+        ValidateImplementation(root, manifest, mode, hasThirdPartyRuntime, report);
+        return report;
+    }
     ValidateReleaseTargets(manifest, isNative, report);
     if (!isNative)
     {

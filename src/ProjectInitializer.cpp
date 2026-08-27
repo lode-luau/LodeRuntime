@@ -4,12 +4,12 @@
 
 #include "PathUtil.hpp"
 #include "Platform/Platform.hpp"
-#include "nlohmann/json.hpp"
 
 #include <algorithm>
 #include <cctype>
 #include <fstream>
 #include <regex>
+#include <string_view>
 #include <system_error>
 
 namespace fs = std::filesystem;
@@ -18,7 +18,6 @@ namespace Lode::Package
 {
 namespace
 {
-using json = nlohmann::json;
 using Lode::Detail::PathToUtf8;
 
 void Error(ProjectInitResult& result, std::string message)
@@ -39,13 +38,6 @@ bool IsSafeName(const std::string& value)
     return !value.empty() && std::all_of(value.begin(), value.end(), [](unsigned char character) {
         return std::isalnum(character) || character == '-' || character == '_' || character == '.';
     });
-}
-
-std::string LibraryExtension(std::string_view platform)
-{
-    if (platform == "windows") return ".dll";
-    if (platform == "macos" || platform == "ios") return ".dylib";
-    return ".so";
 }
 
 bool WriteTextFile(const fs::path& path, const std::string& content, ProjectInitResult& result)
@@ -87,6 +79,27 @@ std::string LicenseText(const ProjectInitOptions& options)
         "LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\n"
         "OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\n"
         "SOFTWARE.\n";
+}
+
+std::string LuauString(std::string_view value)
+{
+    std::string escaped;
+    escaped.reserve(value.size() + 2);
+    escaped.push_back('"');
+    for (const char character : value)
+    {
+        switch (character)
+        {
+            case '\\': escaped += "\\\\"; break;
+            case '"': escaped += "\\\""; break;
+            case '\n': escaped += "\\n"; break;
+            case '\r': escaped += "\\r"; break;
+            case '\t': escaped += "\\t"; break;
+            default: escaped.push_back(character); break;
+        }
+    }
+    escaped.push_back('"');
+    return escaped;
 }
 }
 
@@ -132,12 +145,11 @@ ProjectInitResult InitializeProject(const fs::path& projectRoot, const ProjectIn
         return result;
     }
 
-    json manifest = {
-        { "name", options.name },
-        { "version", options.version },
-        { "description", options.description },
-        { "license", options.license }
-    };
+    std::string manifest = "return {\n"
+        "    name = " + LuauString(options.name) + ",\n"
+        "    version = " + LuauString(options.version) + ",\n"
+        "    description = " + LuauString(options.description) + ",\n"
+        "    license = " + LuauString(options.license);
     std::string nativeSource;
     if (options.native)
     {
@@ -148,9 +160,15 @@ ProjectInitResult InitializeProject(const fs::path& projectRoot, const ProjectIn
             Error(result, "Cannot initialize a native project for an unknown host target.");
             return result;
         }
-        const std::string library = "libs/" + platform + "/" + architecture + "/" + options.name + LibraryExtension(platform);
-        manifest["libraries"] = { { platform, { { architecture, library } } } };
-        manifest["releaseTargets"] = json::array({ { { "platform", platform }, { "architecture", architecture } } });
+        manifest += ",\n"
+            "    implementation = {\n"
+            "        artifact = " + LuauString(options.name) + ",\n"
+            "        required = true,\n"
+            "        targets = {\n"
+            "            build = { " + LuauString(platform + "/" + architecture) + " },\n"
+            "            release = { " + LuauString(platform + "/" + architecture) + " }\n"
+            "        }\n"
+            "    }";
         nativeSource = "#include \"Lode/Module.hpp\"\n"
             "#include \"Lode/State.hpp\"\n"
             "#include \"Lode/Table.hpp\"\n"
@@ -169,8 +187,9 @@ ProjectInitResult InitializeProject(const fs::path& projectRoot, const ProjectIn
             "    return exports;\n"
             "}\n";
     }
+    manifest += "\n}\n";
 
-    if (!WriteTextFile(root / "lode.json", manifest.dump(2) + "\n", result) ||
+    if (!WriteTextFile(root / "package.luau", manifest, result) ||
         !WriteTextFile(root / "init.luau", options.native
             ? "--!strict\n\nexport type NativeModule = {\n    add: (left: number, right: number) -> number,\n    identity: (value: unknown) -> unknown,\n}\n\nreturn {} :: NativeModule\n"
             : "--!strict\n\nreturn {}\n", result) ||
