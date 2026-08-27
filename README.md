@@ -40,9 +40,10 @@ The current package workflow is:
 Use `lode ci init --sdk-version <nightly> --sdk-sha256 <sha256>` to generate
 an initial workflow. A locked install requires an up-to-date `lode.lock` and
 uses the exact locked artifacts; the current installer does not build dependency
-sources. The currently validated and published native package path is Windows
-x64. Platform keys present in a manifest do not, by themselves, mean that a
-target is tested or published. See [the manifest and ownership RFC](rfcs/05-package-manifest-and-ownership.md), [package resolution and lockfiles](rfcs/06-package-resolution-and-lockfile.md), and [package artifacts](rfcs/09-package-artifacts-and-releases.md).
+sources. The CI runtime/native test matrix is configured for Windows x64,
+Linux x64, and the host architecture on macOS. The currently published native
+package path is still Windows x64; platform keys present in a manifest do not,
+by themselves, mean that a target is published. See [the manifest and ownership RFC](rfcs/05-package-manifest-and-ownership.md), [package resolution and lockfiles](rfcs/06-package-resolution-and-lockfile.md), and [package artifacts](rfcs/09-package-artifacts-and-releases.md).
 
 ## Native module quick start
 
@@ -82,15 +83,24 @@ sandbox.
 ### Requirements
 * CMake 3.20+
 * C++20 compatible compiler (MSVC, GCC, or Clang)
+* vcpkg in manifest mode
 
 ### Build Commands
 
     # Windows (Visual Studio)
-    cmake -B build -G "Visual Studio 17 2022"
+    cmake -B build -G "Visual Studio 18 2026" -DCMAKE_TOOLCHAIN_FILE=C:/tools/vcpkg/scripts/buildsystems/vcpkg.cmake -DVCPKG_TARGET_TRIPLET=x64-windows
     cmake --build build --config Release
 
     # Linux
-    cmake -B build -DCMAKE_BUILD_TYPE=Release
+    cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake \
+      -DVCPKG_TARGET_TRIPLET=x64-linux
+    cmake --build build
+
+    # macOS: use arm64-osx on Apple Silicon or x64-osx on Intel
+    cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake \
+      -DVCPKG_TARGET_TRIPLET=arm64-osx
     cmake --build build
 
 > Change `--config Release` or `-DCMAKE_BUILD_TYPE=Release` to `Debug` for debug builds.

@@ -85,12 +85,19 @@ repository.
 
 * Clone the repository.
 * CMake 3.20+ and a C++20 compiler (MSVC, GCC, or Clang).
+* vcpkg in manifest mode for JSON, miniz, and OpenSSL dependencies.
 
-Configure and build:
+Configure and build on Windows:
 
-    cmake -B build
+    cmake -B build -DCMAKE_TOOLCHAIN_FILE=C:/tools/vcpkg/scripts/buildsystems/vcpkg.cmake -DVCPKG_TARGET_TRIPLET=x64-windows
     cmake --build build --config Debug
     cmake --build build --config Release
+
+On Linux use `x64-linux`; on Apple Silicon use `arm64-osx` (Intel macOS uses
+`x64-osx`):
+
+    cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake -DVCPKG_TARGET_TRIPLET=x64-linux
+    cmake --build build
 
 ### The Process of Making Changes
 
