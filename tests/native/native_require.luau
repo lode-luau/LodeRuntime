@@ -92,7 +92,12 @@ local autoFired = false
 onTick:Connect(function()
     autoFired = true
 end)
-task.wait(1.0)
+for _ = 1, 40 do
+    if autoFired then
+        break
+    end
+    task.wait(0.05)
+end
 check(autoFired, "native module's delayed task did not fire the signal in time")
 
 print("native_require: all checks passed")
