@@ -1,4 +1,4 @@
-# Packages the nightly runtime distribution, SDK, and stdlib modules.
+# Packages the nightly Lode runtime, development distribution, and stdlib bundle.
 # Invoked by the nightly workflow; requires the build trees produced by the
 # Configure/Build steps (build-debug and build-release) at the repo root.
 param(
@@ -11,38 +11,73 @@ param(
 # to $null.
 $ErrorActionPreference = 'Stop'
 
+function Copy-LodeDirectoryContents {
+    param(
+        [Parameter(Mandatory = $true)] [string]$Source,
+        [Parameter(Mandatory = $true)] [string]$Destination
+    )
+
+    Get-ChildItem -LiteralPath $Source -Force | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination $Destination -Recurse -Force
+    }
+}
+
+function Compress-LodeDirectory {
+    param(
+        [Parameter(Mandatory = $true)] [string]$Source,
+        [Parameter(Mandatory = $true)] [string]$Destination
+    )
+
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    if (Test-Path -LiteralPath $Destination) {
+        Remove-Item -LiteralPath $Destination -Force
+    }
+    $archive = [System.IO.Compression.ZipFile]::Open(
+        $Destination, [System.IO.Compression.ZipArchiveMode]::Create)
+    try {
+        $sourceRoot = (Resolve-Path -LiteralPath $Source).Path.TrimEnd('\') + '\'
+        Get-ChildItem -LiteralPath $Source -Force -Recurse -File | ForEach-Object {
+            $entryName = $_.FullName.Substring($sourceRoot.Length).Replace('\', '/')
+            [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+                $archive, $_.FullName, $entryName,
+                [System.IO.Compression.CompressionLevel]::Optimal) | Out-Null
+        }
+    } finally {
+        $archive.Dispose()
+    }
+}
+
 $ver = $Version
 $distributionDist = "dist/lode"
 $runtimeBinDist = "$distributionDist/bin"
 $stdlibDist = "$distributionDist/stdlib"
-$sdkDist = "dist/sdk"
-$modulePackagesDist = "dist/stdlib-packages"
-New-Item -ItemType Directory -Force -Path $runtimeBinDist, $stdlibDist, $sdkDist, $modulePackagesDist | Out-Null
+$developmentDist = "dist/lode-development"
+New-Item -ItemType Directory -Force -Path $runtimeBinDist, $stdlibDist, $developmentDist | Out-Null
 
-# ---- SDK artifact: install both configurations into one prefix ----
-# The SDK is consumed through find_package(Lode CONFIG REQUIRED).
+# ---- Lode development artifact: install both configurations into one prefix ----
+# The development distribution is consumed through find_package(Lode CONFIG REQUIRED).
 # Installing both configurations keeps the package workflow aligned
 # with the Debug/Release ABI contract.
-cmake --install build-debug --config Debug --prefix $sdkDist --component LodeSDK
-cmake --install build-release --config Release --prefix $sdkDist --component LodeSDK
-Copy-Item LICENSE, README.md $sdkDist
-Set-Content -Path "$sdkDist/VERSION" -Value $ver
-$sdkMetadataPath = Join-Path $sdkDist "lode-sdk.json"
-if (-not (Test-Path -LiteralPath $sdkMetadataPath)) {
-    throw "Installed SDK metadata was not found: $sdkMetadataPath"
+cmake --install build-debug --config Debug --prefix $developmentDist --component Lode
+cmake --install build-release --config Release --prefix $developmentDist --component Lode
+Copy-Item LICENSE, README.md $developmentDist
+Set-Content -Path "$developmentDist/VERSION" -Value $ver
+$lodeMetadataPath = Join-Path $developmentDist "share/lode/lode-install.json"
+if (-not (Test-Path -LiteralPath $lodeMetadataPath)) {
+    throw "Installed Lode metadata was not found: $lodeMetadataPath"
 }
-$sdkMetadata = Get-Content -Raw -LiteralPath $sdkMetadataPath
-$sdkMetadataPattern = '"sdkVersion"\s*:\s*"[^"]*"'
-if (-not [regex]::IsMatch($sdkMetadata, $sdkMetadataPattern)) {
-    throw "Installed SDK metadata does not contain sdkVersion: $sdkMetadataPath"
+$lodeMetadata = Get-Content -Raw -LiteralPath $lodeMetadataPath
+$lodeMetadataPattern = '"version"\s*:\s*"[^"]*"'
+if (-not [regex]::IsMatch($lodeMetadata, $lodeMetadataPattern)) {
+    throw "Installed Lode metadata does not contain version: $lodeMetadataPath"
 }
-$sdkMetadata = [regex]::new($sdkMetadataPattern).Replace(
-    $sdkMetadata, ('"sdkVersion": "' + $ver + '"'), 1)
-Set-Content -Path $sdkMetadataPath -Value $sdkMetadata -NoNewline
+$lodeMetadata = [regex]::new($lodeMetadataPattern).Replace(
+    $lodeMetadata, ('"version": "' + $ver + '"'), 1)
+Set-Content -Path $lodeMetadataPath -Value $lodeMetadata -NoNewline
 
 # ---- Runtime distribution: executable and runtime DLLs ----
 # The end-user archive contains the runtime and the bundled stdlib.
-# SDK headers and CMake targets remain in the separate SDK archive.
+# Development headers and CMake targets remain in the optional development archive.
 Copy-Item build-release/bin/Release/lode.exe $runtimeBinDist
 Copy-Item build-release/bin/Release/LodeCore.dll $runtimeBinDist
 Copy-Item build-release/bin/Release/uv.dll $runtimeBinDist
@@ -110,7 +145,7 @@ function Read-LuauPackageManifest {
     }
 }
 
-function Expand-NativeArtifactPath {
+function Expand-ModuleArtifactPath {
     param(
         [Parameter(Mandatory = $true)] [object]$Manifest,
         [Parameter(Mandatory = $true)] [string]$Platform,
@@ -128,7 +163,7 @@ function Expand-NativeArtifactPath {
         Replace("{configuration}", $Configuration).Replace("{artifact}", $artifact).
         Replace("{extension}", ".dll")
     if ([System.IO.Path]::IsPathRooted($expanded) -or $expanded -match '(^|[\\/])\.\.([\\/]|$)') {
-        throw "Native implementation layout escapes the package: $expanded"
+        throw "Module implementation layout escapes the package: $expanded"
     }
     return $expanded.Replace('/', '\')
 }
@@ -136,6 +171,11 @@ function Expand-NativeArtifactPath {
 $moduleDirs = Get-ChildItem modules -Directory -Recurse | Where-Object { Test-Path (Join-Path $_.FullName "package.luau") }
 $modulesRoot = (Resolve-Path modules).Path
 $moduleRecords = @{}
+$stdlibIndex = [ordered]@{
+    format = 1
+    release = $ver
+    packages = [ordered]@{}
+}
 
 foreach ($mdir in $moduleDirs) {
     $manifestPath = Join-Path $mdir.FullName "package.luau"
@@ -160,6 +200,16 @@ foreach ($mdir in $moduleDirs) {
         RelativePath = $rel
         SourcePath = $mdir.FullName
         Manifest = $manifest
+    }
+    $stdlibIndex.packages[$name] = [ordered]@{
+        version = $version
+        path = "modules/$rel"
+    }
+    if ($null -ne $manifest.implementation) {
+        $stdlibIndex.packages[$name].artifact = if ($manifest.implementation.artifact) {
+            [string]$manifest.implementation.artifact
+        } else { $name }
+        $stdlibIndex.packages[$name].targets = @("windows/x64")
     }
 }
 
@@ -200,25 +250,25 @@ foreach ($record in ($moduleRecords.Values | Sort-Object RelativePath)) {
     $dst = Join-Path $stdlibDist "modules/$rel"
     New-Item -ItemType Directory -Force -Path $dst | Out-Null
 
-    $isNative = Test-Path "$src/CMakeLists.txt"
+    $isCompiledModule = Test-Path "$src/CMakeLists.txt"
     Get-ChildItem $src | ForEach-Object {
         $childRel = "$rel/$($_.Name)"
         $isNestedModule = $_.PSIsContainer -and $moduleRelSet.ContainsKey($childRel)
         # Exclude build-time files and the libs/ tree (rebuilt below
         # with only the shipped platform, windows/x64). src/ is
-        # excluded only for native modules (those with a
+        # excluded only for compiled modules (those with a
         # CMakeLists.txt); pure-Luau modules keep their src/.
-        $isExcluded = $_.Name -eq "CMakeLists.txt" -or $_.Name -eq "libs" -or ($_.Name -eq "src" -and $isNative)
+        $isExcluded = $_.Name -eq "CMakeLists.txt" -or $_.Name -eq "libs" -or ($_.Name -eq "src" -and $isCompiledModule)
         if (-not $isNestedModule -and -not $isExcluded) {
             Copy-Item $_.FullName (Join-Path $dst $_.Name) -Recurse
         }
     }
 
-    # Native modules keep their config-matched DLL in the module's
+    # Compiled modules keep their config-matched DLL in the module's
     # own libs/<platform>/<arch>/<config> entry from package.luau; the
     # loader resolves the config-aware subdir per runtime build.
-    if ($isNative) {
-        $relativeArtifact = Expand-NativeArtifactPath -Manifest $record.Manifest -Platform "windows" -Architecture "x64" -Configuration "Release"
+    if ($isCompiledModule) {
+        $relativeArtifact = Expand-ModuleArtifactPath -Manifest $record.Manifest -Platform "windows" -Architecture "x64" -Configuration "Release"
         $libRelease = Join-Path $src $relativeArtifact
         $artifactName = Split-Path $relativeArtifact -Leaf
         $libFlat = Join-Path $src (Join-Path "libs/windows/x64" $artifactName)
@@ -238,20 +288,9 @@ foreach ($record in ($moduleRecords.Values | Sort-Object RelativePath)) {
             New-Item -ItemType Directory -Force -Path $libDirRelease | Out-Null
             Copy-Item $sourceDll (Join-Path $libDirRelease $artifactName) -Force
         } else {
-            Write-Error "Native library for $name was not found at $libRelease, $libFlat, or $libBin"
+            Write-Error "Module library for $name was not found at $libRelease, $libFlat, or $libBin"
         }
     }
-    $packageDst = Join-Path $modulePackagesDist $name
-    New-Item -ItemType Directory -Force -Path $packageDst | Out-Null
-    Copy-Item (Join-Path $dst '*') $packageDst -Recurse -Force
-    if (-not (Test-Path (Join-Path $packageDst "LICENSE"))) {
-        Copy-Item LICENSE (Join-Path $packageDst "LICENSE")
-    }
-
-    $moduleArchive = "lode-stdlib-$name-$($record.Version)-windows-x64.zip"
-    Compress-Archive -Path "$packageDst/*" -DestinationPath $moduleArchive -Force
-    $moduleHash = (Get-FileHash -LiteralPath $moduleArchive -Algorithm SHA256).Hash.ToLowerInvariant()
-    "$moduleHash  $moduleArchive" | Set-Content -Path "$moduleArchive.sha256" -Encoding ascii
 }
 
 # Alias config so require("@name") resolves for every shipped module.
@@ -272,22 +311,28 @@ $($aliasLines -join "`n")
 "@
 Set-Content -Path "$stdlibDist/.config.luau" -Value $config
 Set-Content -Path "$stdlibDist/VERSION" -Value $ver
+($stdlibIndex | ConvertTo-Json -Depth 10) | Set-Content -Path "$stdlibDist/index.json" -Encoding utf8
 
-# Package CI runs the SDK's lode executable for dependency
+# Package CI runs the Lode development distribution's lode executable for dependency
 # installation and validation. Keep the exact bundled stdlib catalog
-# beside that executable so standard-module dependencies resolve in
-# the SDK archive without requiring a second runtime download.
-$sdkStdlibDist = Join-Path $sdkDist "stdlib"
-New-Item -ItemType Directory -Force -Path $sdkStdlibDist | Out-Null
-Copy-Item "$stdlibDist/*" $sdkStdlibDist -Recurse -Force
+# beside that executable so standard-module dependencies resolve in the
+# development archive without requiring a second runtime download.
+$developmentStdlibDist = Join-Path $developmentDist "stdlib"
+New-Item -ItemType Directory -Force -Path $developmentStdlibDist | Out-Null
+Copy-LodeDirectoryContents -Source $stdlibDist -Destination $developmentStdlibDist
 
-Compress-Archive -Path "$distributionDist/*" -DestinationPath "lode-windows-x64-$ver.zip"
-Compress-Archive -Path "$sdkDist/*" -DestinationPath "lode-sdk-windows-x64-$ver.zip"
+Compress-LodeDirectory -Source $distributionDist -Destination "lode-windows-x64-$ver.zip"
+Compress-LodeDirectory -Source $developmentDist -Destination "lode-development-windows-x64-$ver.zip"
+Compress-LodeDirectory -Source $stdlibDist -Destination "lode-stdlib-windows-x64-$ver.zip"
 
+$checksums = @()
 foreach ($archive in @(
     "lode-windows-x64-$ver.zip",
-    "lode-sdk-windows-x64-$ver.zip"
+    "lode-development-windows-x64-$ver.zip",
+    "lode-stdlib-windows-x64-$ver.zip"
 )) {
     $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
-    "$hash  $archive" | Set-Content -Path "$archive.sha256" -Encoding ascii
+    if ($null -eq $checksums) { $checksums = @() }
+    $checksums += "$hash  $archive"
 }
+$checksums | Set-Content -Path "SHA256SUMS" -Encoding ascii

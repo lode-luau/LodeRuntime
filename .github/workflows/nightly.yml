@@ -227,23 +227,15 @@ jobs:
         run: |
           $version = $env:NIGHTLY_VERSION
           $runtimeZip = "lode-windows-x64-$version.zip"
-          $sdkZip = "lode-sdk-windows-x64-$version.zip"
-          $coreAssets = @($runtimeZip, "$runtimeZip.sha256", $sdkZip, "$sdkZip.sha256")
+          $developmentZip = "lode-development-windows-x64-$version.zip"
+          $stdlibZip = "lode-stdlib-windows-x64-$version.zip"
+          $coreAssets = @($runtimeZip, $developmentZip, $stdlibZip)
           foreach ($asset in $coreAssets) {
             if (-not (Test-Path $asset)) { throw "Expected release asset is missing: $asset" }
           }
+          if (-not (Test-Path "SHA256SUMS")) { throw "Release checksum catalog is missing." }
 
-          # Refuse to publish when no stdlib module packages were produced:
-          # a silent runtime-only nightly would mean packaging regressed.
-          $stdlibZips = @(Get-ChildItem -Path . -Filter 'lode-stdlib-*.zip' -File | Sort-Object Name)
-          if ($stdlibZips.Count -eq 0) {
-            throw "No stdlib module packages were produced; refusing to publish an incomplete nightly."
-          }
-          foreach ($zip in $stdlibZips) {
-            if (-not (Test-Path "$($zip.FullName).sha256")) { throw "Missing checksum for $($zip.Name)" }
-          }
-
-          $assets = @($coreAssets + ($stdlibZips | ForEach-Object FullName) + ($stdlibZips | ForEach-Object { "$($_.FullName).sha256" }))
+          $assets = @($coreAssets + "SHA256SUMS")
           gh release create "$version" @assets `
             --title "Nightly $version" `
             --notes-file "${{ runner.temp }}/release-notes.md" `
