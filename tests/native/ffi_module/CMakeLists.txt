@@ -28,9 +28,16 @@ foreach(ffi_fixture_config ${CMAKE_CONFIGURATION_TYPES})
 endforeach()
 
 if(NOT CMAKE_CONFIGURATION_TYPES)
+    if(CMAKE_BUILD_TYPE)
+        set(ffi_fixture_single_config_directory
+            "${CMAKE_CURRENT_SOURCE_DIR}/libs/${ffi_fixture_platform}/${ffi_fixture_architecture}/${CMAKE_BUILD_TYPE}")
+    else()
+        set(ffi_fixture_single_config_directory
+            "${CMAKE_CURRENT_SOURCE_DIR}/libs/${ffi_fixture_platform}/${ffi_fixture_architecture}")
+    endif()
     set_target_properties(ffi_dependency PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/libs/${ffi_fixture_platform}/${ffi_fixture_architecture}"
-        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/libs/${ffi_fixture_platform}/${ffi_fixture_architecture}"
+        RUNTIME_OUTPUT_DIRECTORY "${ffi_fixture_single_config_directory}"
+        LIBRARY_OUTPUT_DIRECTORY "${ffi_fixture_single_config_directory}"
     )
 endif()
 

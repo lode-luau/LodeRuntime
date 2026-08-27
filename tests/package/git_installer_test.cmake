@@ -39,7 +39,7 @@ execute_process(COMMAND git -C "${git_source}" config user.email "lode-tests@exa
 execute_process(COMMAND git -C "${git_source}" config user.name "Lode Tests")
 execute_process(COMMAND git -C "${git_source}" add lode.json init.luau LICENSE)
 execute_process(
-    COMMAND git -C "${git_source}" commit --quiet -m "Add Git package fixture"
+    COMMAND git -c commit.gpgSign=false -C "${git_source}" commit --quiet -m "Add Git package fixture"
     RESULT_VARIABLE result
     OUTPUT_VARIABLE output
     ERROR_VARIABLE error
@@ -114,7 +114,7 @@ return { has_task = task ~= nil, revision = "second" }
 ]=])
 execute_process(COMMAND git -C "${git_source}" add init.luau)
 execute_process(
-    COMMAND git -C "${git_source}" commit --quiet -m "Advance Git package after lock"
+    COMMAND git -c commit.gpgSign=false -C "${git_source}" commit --quiet -m "Advance Git package after lock"
     RESULT_VARIABLE result
     OUTPUT_VARIABLE output
     ERROR_VARIABLE error

@@ -41,7 +41,7 @@ execute_process(COMMAND git -C "${git_source}" config user.email "lode-tests@exa
 execute_process(COMMAND git -C "${git_source}" config user.name "Lode Tests")
 execute_process(COMMAND git -C "${git_source}" add lode.json init.luau CMakeLists.txt LICENSE)
 execute_process(
-    COMMAND git -C "${git_source}" commit --quiet -m "Add native Git fixture"
+    COMMAND git -c commit.gpgSign=false -C "${git_source}" commit --quiet -m "Add native Git fixture"
     RESULT_VARIABLE result
     OUTPUT_VARIABLE output
     ERROR_VARIABLE error

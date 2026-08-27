@@ -27,7 +27,7 @@ endif()
 execute_process(COMMAND git -C "${git_source}" config user.email "lode-tests@example.invalid")
 execute_process(COMMAND git -C "${git_source}" config user.name "Lode Tests")
 execute_process(COMMAND git -C "${git_source}" add lode.json init.luau LICENSE)
-execute_process(COMMAND git -C "${git_source}" commit --quiet -m "Add first package release"
+execute_process(COMMAND git -c commit.gpgSign=false -C "${git_source}" commit --quiet -m "Add first package release"
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
 if(NOT result EQUAL 0)
     message(FATAL_ERROR "first Git commit failed:\n${output}\n${error}")
@@ -46,7 +46,7 @@ file(WRITE "${git_source}/lode.json" [=[{
 ]=])
 file(WRITE "${git_source}/init.luau" "return { version = \"1.2.0\" }\n")
 execute_process(COMMAND git -C "${git_source}" add lode.json init.luau)
-execute_process(COMMAND git -C "${git_source}" commit --quiet -m "Add latest package release"
+execute_process(COMMAND git -c commit.gpgSign=false -C "${git_source}" commit --quiet -m "Add latest package release"
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
 if(NOT result EQUAL 0)
     message(FATAL_ERROR "latest Git commit failed:\n${output}\n${error}")
