@@ -1,7 +1,0 @@
-{
-  "name": "toml",
-  "version": "1.0.0",
-  "description": "Lode TOML serialization and parsing module (vendored from Lute batteries)",
-  "author": "Lode Team",
-  "license": "MIT"
-}

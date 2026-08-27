@@ -38,17 +38,54 @@ Copy-Item LICENSE, README.md $distributionDist
 Set-Content -Path "$distributionDist/VERSION" -Value $ver
 
 # ---- Standard library: recursive module discovery ----
-# Every directory (recursively) that has a lode.json manifest is a
-# standard module (native or pure-Luau). This supports nested modules
-# such as filesystem/path without touching this script when modules
-# change.
-$moduleDirs = Get-ChildItem modules -Directory -Recurse | Where-Object { Test-Path (Join-Path $_.FullName "lode.json") }
+# package.luau is intentionally static data (return { ... }), so this
+# script extracts only the package-manager fields it needs without running
+# arbitrary package code during a release build.
+function Read-LuauStringField {
+    param(
+        [Parameter(Mandatory = $true)] [string]$Source,
+        [Parameter(Mandatory = $true)] [string]$Field,
+        [Parameter(Mandatory = $true)] [string]$Path
+    )
+
+    $fieldPattern = '(?m)^\s*(?:' + [regex]::Escape($Field) + '|\["' + [regex]::Escape($Field) + '"\])\s*=\s*"((?:\\.|[^"])*)"'
+    $match = [regex]::Match($Source, $fieldPattern)
+    if (-not $match.Success) {
+        throw "Package manifest is missing string field '$Field': $Path"
+    }
+    return ConvertFrom-Json ('"' + $match.Groups[1].Value + '"')
+}
+
+function Read-LuauPackageManifest {
+    param(
+        [Parameter(Mandatory = $true)] [string]$Path
+    )
+
+    $source = Get-Content -Raw -LiteralPath $Path
+    $dependencies = @{}
+    $dependenciesMatch = [regex]::Match($source, '(?ms)^\s*dependencies\s*=\s*\{(.*?)^\s*\}')
+    if ($dependenciesMatch.Success) {
+        $dependencyPattern = '(?m)^\s*(?:([A-Za-z_][A-Za-z0-9_]*)|\["([^"]+)"\])\s*=\s*"((?:\\.|[^"])*)"'
+        foreach ($match in [regex]::Matches($dependenciesMatch.Groups[1].Value, $dependencyPattern)) {
+            $dependencyName = if ($match.Groups[1].Success) { $match.Groups[1].Value } else { $match.Groups[2].Value }
+            $dependencies[$dependencyName] = ConvertFrom-Json ('"' + $match.Groups[3].Value + '"')
+        }
+    }
+
+    return [pscustomobject]@{
+        name = Read-LuauStringField -Source $source -Field "name" -Path $Path
+        version = Read-LuauStringField -Source $source -Field "version" -Path $Path
+        dependencies = $dependencies
+    }
+}
+
+$moduleDirs = Get-ChildItem modules -Directory -Recurse | Where-Object { Test-Path (Join-Path $_.FullName "package.luau") }
 $modulesRoot = (Resolve-Path modules).Path
 $moduleRecords = @{}
 
 foreach ($mdir in $moduleDirs) {
-    $manifestPath = Join-Path $mdir.FullName "lode.json"
-    $manifest = Get-Content -Raw $manifestPath | ConvertFrom-Json
+    $manifestPath = Join-Path $mdir.FullName "package.luau"
+    $manifest = Read-LuauPackageManifest -Path $manifestPath
     $name = [string]$manifest.name
     $version = [string]$manifest.version
     $rel = $mdir.FullName.Substring($modulesRoot.Length + 1).Replace('\', '/')
@@ -124,7 +161,7 @@ foreach ($record in ($moduleRecords.Values | Sort-Object RelativePath)) {
     }
 
     # Native modules keep their config-matched DLL in the module's
-    # own libs/<platform>/<arch>/<config> entry from lode.json; the
+    # own libs/<platform>/<arch>/<config> entry from package.luau; the
     # loader resolves the config-aware subdir per runtime build.
     if ($isNative) {
         $libRelease = "$src/libs/windows/x64/Release/$name.dll"

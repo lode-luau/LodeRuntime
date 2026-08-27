@@ -1,6 +1,0 @@
-{
-  "name": "csv",
-  "version": "1.0.0",
-  "description": "RFC 4180-style CSV encoding and decoding (quoted fields, embedded separators/newlines/quotes)",
-  "license": "MIT"
-}

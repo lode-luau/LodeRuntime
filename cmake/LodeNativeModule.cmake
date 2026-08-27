@@ -63,7 +63,7 @@ function(lode_add_native_module target_name)
     target_link_libraries(${target_name} PRIVATE Lode::Module)
     target_compile_features(${target_name} PRIVATE cxx_std_20)
 
-    # Native packages are loaded by an exact filename from lode.json. Avoid
+    # Native packages are loaded by the package implementation artifact. Avoid
     # CMake's default lib prefix on Unix and keep the output beside the
     # package's generated libs/<platform>/<architecture>/<config> tree.
     # On Windows, ARCHIVE_OUTPUT_DIRECTORY also controls the DLL import
