@@ -138,7 +138,10 @@ std::string SdkDownloadSteps()
 )LODE";
 }
 
-std::string NativeWorkflow(const CiSdkPin& sdkPin, bool hasDependencies)
+std::string NativeWorkflow(const CiSdkPin& sdkPin,
+                           bool hasDependencies,
+                           const std::string& packageName,
+                           const std::string& packageVersion)
 {
     std::ostringstream workflow;
     workflow << R"LODE(name: Lode CI
@@ -158,7 +161,10 @@ permissions:
 env:
   LODE_REPOSITORY: lode-luau/LodeRuntime
 )LODE"
-        << SdkPinEnvironment(sdkPin) << R"LODE(
+        << SdkPinEnvironment(sdkPin)
+        << "  LODE_PACKAGE_NAME: " << json(packageName).dump() << "\n"
+        << "  LODE_PACKAGE_VERSION: " << json(packageVersion).dump() << "\n"
+        << R"LODE(
 
 jobs:
   native-windows-x64:
@@ -215,8 +221,7 @@ jobs:
       - name: Package validated artifact
         shell: pwsh
         run: |
-          $manifest = Get-Content lode.json -Raw | ConvertFrom-Json
-          $archive = "out/lode-$($manifest.name)-$($manifest.version)-windows-x64.zip"
+          $archive = "out/lode-$($env:LODE_PACKAGE_NAME)-$($env:LODE_PACKAGE_VERSION)-windows-x64.zip"
           New-Item -ItemType Directory -Force out | Out-Null
           & "$env:LODE_SDK_ROOT/bin/Release/lode.exe" pack --output $archive .
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -226,8 +231,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
         run: |
-          $manifest = Get-Content lode.json -Raw | ConvertFrom-Json
-          $expected = "v$($manifest.version)"
+          $expected = "v$($env:LODE_PACKAGE_VERSION)"
           if ("$env:GITHUB_REF_NAME" -ne $expected) {
               throw "Release tag $env:GITHUB_REF_NAME does not match $expected."
           }
@@ -416,8 +420,10 @@ bool BuildWorkflowText(const fs::path& root,
             !manifest["dependencies"].empty()) ||
         (manifest.contains("devDependencies") && manifest["devDependencies"].is_object() &&
             !manifest["devDependencies"].empty());
+    const std::string packageName = manifest.value("name", "");
+    const std::string packageVersion = manifest.value("version", "");
     workflow = isNative
-        ? NativeWorkflow(sdkPin, hasDependencies)
+        ? NativeWorkflow(sdkPin, hasDependencies, packageName, packageVersion)
         : PureLuauWorkflow(sdkPin, hasDependencies);
     return true;
 }

@@ -63,6 +63,8 @@ file(READ "${workflow_path}" workflow)
 foreach(required_text IN ITEMS
     "LODE_SDK_VERSION: \"${sdk_version}\""
     "LODE_SDK_SHA256: \"${sdk_sha256}\""
+    "LODE_PACKAGE_NAME: \"ci_generator_package\""
+    "LODE_PACKAGE_VERSION: \"1.0.0\""
     "install --dev --locked ."
     "ci validate --source --locked ."
     "ci validate --artifact --locked ."
@@ -73,6 +75,11 @@ foreach(required_text IN ITEMS
         message(FATAL_ERROR "Generated workflow is missing '${required_text}':\n${workflow}")
     endif()
 endforeach()
+string(FIND "${workflow}" "Get-Content lode.json" legacy_manifest_reader_position)
+if(NOT legacy_manifest_reader_position LESS 0)
+    file(REMOVE_RECURSE "${package_root}")
+    message(FATAL_ERROR "Generated workflow still reads lode.json as JSON")
+endif()
 foreach(placeholder IN ITEMS "<nightly-version>" "<sdk-sha256>")
     string(FIND "${workflow}" "${placeholder}" position)
     if(NOT position LESS 0)
