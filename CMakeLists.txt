@@ -166,6 +166,7 @@ set(LODE_CORE_SOURCES
     src/PackagePacker.cpp
     src/HttpDownloader.cpp
     src/PackageArtifact.cpp
+    src/PackageManifest.cpp
     src/PackageValidator.cpp
     src/PackageGraph.cpp
     src/PackageLockfile.cpp
@@ -222,6 +223,7 @@ set(LODE_CORE_HEADERS
     src/PackagePacker.hpp
     src/HttpDownloader.hpp
     src/PackageArtifact.hpp
+    src/PackageManifest.hpp
     src/GitResolver.hpp
     src/CiGenerator.hpp
     src/ProjectInitializer.hpp

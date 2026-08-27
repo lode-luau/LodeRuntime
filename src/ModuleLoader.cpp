@@ -1,6 +1,7 @@
 // Copyright (c) 2026 yanlvl99, Lode Runtime Contributors
 // SPDX-License-Identifier: MIT
 #include "ModuleLoader.hpp"
+#include "PackageManifest.hpp"
 #include "Lode/Compiler.hpp"
 #include "PathUtil.hpp"
 #include "Platform/Platform.hpp"
@@ -38,7 +39,8 @@ fs::path FindLodeJson(const fs::path& startPath)
     // terminate when we would stop making progress instead of looping forever.
     while (current.has_parent_path() && current.parent_path() != current)
     {
-        if (fs::exists(current / "lode.json") || fs::exists(current / "init.luau"))
+        if (fs::exists(current / "package.luau") || fs::exists(current / "lode.json") ||
+            fs::exists(current / "init.luau"))
             return current;
         current = current.parent_path();
     }
@@ -273,6 +275,7 @@ static bool check_path_exists(const fs::path& p)
     luauPath += ".luau";
     if (fs::is_regular_file(luauPath)) return true;
     if (fs::is_regular_file(p / "init.luau")) return true;
+    if (fs::is_regular_file(p / "package.luau")) return true;
     if (fs::is_regular_file(p / "lode.json")) return true;
     return false;
 }
@@ -292,6 +295,68 @@ static bool IsPathInside(const fs::path& candidate, const fs::path& root)
 
     auto first = relative.begin();
     return first != relative.end() && *first != "..";
+}
+
+static void ReplaceAll(std::string& value, std::string_view token, std::string_view replacement)
+{
+    size_t position = 0;
+    while ((position = value.find(token, position)) != std::string::npos)
+    {
+        value.replace(position, token.size(), replacement);
+        position += replacement.size();
+    }
+}
+
+static const char* NativeLibraryExtension(std::string_view platform)
+{
+    if (platform == "windows")
+        return ".dll";
+    if (platform == "macos" || platform == "ios")
+        return ".dylib";
+    if (platform == "wasm")
+        return ".wasm";
+    return ".so";
+}
+
+static std::optional<fs::path> ResolveCompiledArtifact(
+    const fs::path& packageRoot,
+    const Lode::Package::PackageManifest& manifest,
+    std::string_view platform,
+    std::string_view architecture,
+    std::string_view configuration,
+    std::string& error)
+{
+    const auto& implementation = manifest.implementation;
+    if (implementation.artifact.empty() ||
+        implementation.artifact.find_first_of("/\\") != std::string::npos)
+    {
+        error = "implementation.artifact must be a non-empty filename stem";
+        return std::nullopt;
+    }
+
+    std::string layout = implementation.layout;
+    if (layout.empty())
+        layout = "libs/{platform}/{architecture}/{configuration}/{artifact}{extension}";
+
+    ReplaceAll(layout, "{platform}", platform);
+    ReplaceAll(layout, "{architecture}", architecture);
+    ReplaceAll(layout, "{configuration}", configuration);
+    ReplaceAll(layout, "{artifact}", implementation.artifact);
+    ReplaceAll(layout, "{extension}", NativeLibraryExtension(platform));
+    if (layout.find('{') != std::string::npos || layout.find('}') != std::string::npos)
+    {
+        error = "implementation.layout contains an unknown substitution";
+        return std::nullopt;
+    }
+
+    const fs::path relativePath = PathFromUtf8(layout);
+    if (relativePath.empty() || relativePath.is_absolute() ||
+        !IsPathInside(packageRoot / relativePath, packageRoot))
+    {
+        error = "implementation.layout must resolve inside the package directory";
+        return std::nullopt;
+    }
+    return relativePath;
 }
 
 static bool is_module_present(lua_State* L, void* ctx)
@@ -480,22 +545,59 @@ static ModuleLoadResult LoadModuleNoJump(lua_State* L, void* ctx, const char* pa
         dirPath = targetPath.parent_path();
     }
 
-    // Check for lode.json
+    // package.luau is the canonical manifest. lode.json remains readable only
+    // as a migration fallback until the package-manager migration is complete.
+    fs::path packageManifestPath = dirPath / "package.luau";
     fs::path lodeJsonPath = dirPath / "lode.json";
-    if (fs::exists(lodeJsonPath))
+    if (fs::is_regular_file(packageManifestPath) || fs::is_regular_file(lodeJsonPath))
     {
         nlohmann::json jsonDoc;
-        try
+        bool packageManifestNative = false;
+        bool packageManifestRequired = false;
+        bool packageManifestLayout = false;
+
+        if (fs::is_regular_file(packageManifestPath))
         {
-            std::ifstream f(lodeJsonPath);
-            jsonDoc = nlohmann::json::parse(f);
+            const auto packageResult = Lode::Package::ReadPackageManifest(packageManifestPath);
+            if (!packageResult.IsValid())
+                return { 0, packageResult.errors.front() };
+
+            packageManifestNative = packageResult.manifest.hasImplementation;
+            packageManifestRequired = packageResult.manifest.implementation.required;
+            if (packageManifestNative)
+            {
+                std::string artifactError;
+                const std::string platform = std::string(Platform::GetOSName());
+                const std::string arch = std::string(Platform::GetArchitectureName());
+                const char* buildConfig = LodeBuildConfigName();
+                const std::string configuration = buildConfig ? buildConfig : "";
+                const auto relativeArtifact = ResolveCompiledArtifact(
+                    dirPath, packageResult.manifest, platform, arch, configuration, artifactError);
+                if (!relativeArtifact)
+                    return { 0, "Invalid package implementation in " + PathToUtf8(dirPath) + ": " + artifactError };
+
+                jsonDoc["libraries"][platform][arch] = PathToUtf8(*relativeArtifact);
+                jsonDoc["_lode_package_layout"] = true;
+                packageManifestLayout = true;
+                if (!packageManifestRequired && !fs::is_regular_file(dirPath / *relativeArtifact))
+                    packageManifestNative = false;
+            }
         }
-        catch (const std::exception& e)
+        else
         {
-            return { 0, "Failed to parse lode.json in " + PathToUtf8(dirPath) + ": " + e.what() };
+            try
+            {
+                std::ifstream f(lodeJsonPath);
+                jsonDoc = nlohmann::json::parse(f);
+            }
+            catch (const std::exception& e)
+            {
+                return { 0, "Failed to parse lode.json in " + PathToUtf8(dirPath) + ": " + e.what() };
+            }
         }
 
-        if (jsonDoc.contains("libraries") && jsonDoc["libraries"].is_object() &&
+        if ((packageManifestNative || !packageManifestLayout) &&
+            jsonDoc.contains("libraries") && jsonDoc["libraries"].is_object() &&
             !jsonDoc["libraries"].empty())
         {
             // RFC 01: any non-empty `libraries` map marks a native package.
@@ -533,8 +635,8 @@ static ModuleLoadResult LoadModuleNoJump(lua_State* L, void* ctx, const char* pa
                 // as itself. Flat paths still work for third-party/prebuilt
                 // modules that do not ship config subdirectories.
                 const char* buildConfig = LodeBuildConfigName();
-                if (buildConfig && buildConfig[0] != '\0')
-                {
+                if (!packageManifestLayout && buildConfig && buildConfig[0] != '\0')
+                    {
                     fs::path configAwareLibPath = baseLibPath.parent_path() / buildConfig / baseLibPath.filename();
                     if (fs::exists(configAwareLibPath) || !fs::exists(baseLibPath))
                         fullLibPath = configAwareLibPath;
