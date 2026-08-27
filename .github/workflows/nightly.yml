@@ -9,13 +9,14 @@ permissions:
   contents: write
 
 jobs:
-  # Cheap gate for scheduled runs: skip the expensive Windows build when a
+  # Cheap gate for scheduled runs: skip the expensive build matrix when a
   # nightly already shipped today and nothing changed since the last one.
   # Manual dispatches always run.
   nightly-guard:
     runs-on: ubuntu-latest
     outputs:
       needed: ${{ steps.check.outputs.needed }}
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -67,25 +68,6 @@ jobs:
           echo "A nightly already ran today and nothing changed since $PREV_TAG: skipping."
           echo "needed=false" >> "$GITHUB_OUTPUT"
 
-  build-and-publish:
-    needs: nightly-guard
-    if: needs.nightly-guard.outputs.needed == 'true'
-    runs-on: windows-latest
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-    steps:
-      # Full history and tags: the release-notes step walks commits and
-      # nightly tags to describe everything changed since the last build.
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          fetch-tags: true
-
-      - name: Setup vcpkg
-        uses: lukka/run-vcpkg@v11
-        with:
-          vcpkgGitCommitId: ddd0023b0eee70986e42ed49d9d4afb8098f212e
-
       - name: Compute nightly version
         id: version
         shell: bash
@@ -105,6 +87,21 @@ jobs:
           done
           N=$((MAX + 1))
           echo "version=1.0.0-nightly.${DATE_UTC}.${N}" >> "$GITHUB_OUTPUT"
+
+  build-windows:
+    needs: nightly-guard
+    if: needs.nightly-guard.outputs.needed == 'true'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: ddd0023b0eee70986e42ed49d9d4afb8098f212e
 
       # 1. Set up the sccache tool. The Visual Studio (MSBuild) generator
       #    ignores CMAKE_<LANG>_COMPILER_LAUNCHER, so CI uses the Ninja
@@ -211,44 +208,24 @@ jobs:
       - name: Package
         shell: pwsh
         run: |
-          ./.github/scripts/package-stdlib.ps1 -Version '${{ steps.version.outputs.version }}'
+          ./.github/scripts/package-stdlib.ps1 -Version '${{ needs.nightly-guard.outputs.version }}'
 
-      - name: Generate release notes
-        env:
-          GH_TOKEN: ${{ github.token }}
-          NIGHTLY_VERSION: ${{ steps.version.outputs.version }}
-        shell: bash
-        run: |
-          ./.github/scripts/generate-release-notes.sh
+      - name: Upload Windows archives
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-windows-x64
+          path: |
+            lode-windows-x64-${{ needs.nightly-guard.outputs.version }}.zip
+            lode-development-windows-x64-${{ needs.nightly-guard.outputs.version }}.zip
+            lode-stdlib-windows-x64-${{ needs.nightly-guard.outputs.version }}.zip
+          if-no-files-found: error
+          retention-days: 1
 
-      - name: Create nightly release draft
-        env:
-          GH_TOKEN: ${{ github.token }}
-          NIGHTLY_VERSION: ${{ steps.version.outputs.version }}
-        shell: pwsh
-        run: |
-          $version = $env:NIGHTLY_VERSION
-          $runtimeZip = "lode-windows-x64-$version.zip"
-          $developmentZip = "lode-development-windows-x64-$version.zip"
-          $stdlibZip = "lode-stdlib-windows-x64-$version.zip"
-          $coreAssets = @($runtimeZip, $developmentZip, $stdlibZip)
-          foreach ($asset in $coreAssets) {
-            if (-not (Test-Path $asset)) { throw "Expected release asset is missing: $asset" }
-          }
-          if (-not (Test-Path "SHA256SUMS")) { throw "Release checksum catalog is missing." }
-
-          $assets = @($coreAssets + "SHA256SUMS")
-          gh release create "$version" @assets `
-            --title "Nightly $version" `
-            --notes-file "${{ runner.temp }}/release-notes.md" `
-            --prerelease `
-            --draft
-
-  # Windows creates the release and POSIX jobs add their platform archives.
-  # The final job refreshes one checksum catalog covering every archive.
+  # Windows and POSIX build independently. The final job publishes one
+  # immutable release only after every platform archive is available.
   build-posix:
-    needs: build-and-publish
-    if: needs.build-and-publish.result == 'success'
+    needs: nightly-guard
+    if: needs.nightly-guard.outputs.needed == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -311,11 +288,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-fetchcontent-
 
-      - name: Compute target version
-        id: version
-        shell: bash
-        run: echo "value=${{ needs.build-and-publish.outputs.version }}" >> "$GITHUB_OUTPUT"
-
       - name: Configure Debug
         env:
           SCCACHE_DIR: ${{ runner.temp }}/sccache
@@ -368,50 +340,56 @@ jobs:
         shell: pwsh
         run: >-
           ./.github/scripts/package-stdlib.ps1
-          -Version '${{ steps.version.outputs.value }}'
+          -Version '${{ needs.nightly-guard.outputs.version }}'
           -Platform '${{ matrix.platform }}'
           -Architecture '${{ steps.target.outputs.architecture }}'
 
-      - name: Upload platform archives
-        env:
-          GH_TOKEN: ${{ github.token }}
-          NIGHTLY_VERSION: ${{ steps.version.outputs.value }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          target="${{ matrix.platform }}-${{ steps.target.outputs.architecture }}"
-          gh release upload "$NIGHTLY_VERSION" \
-            "lode-${target}-${NIGHTLY_VERSION}.zip" \
-            "lode-development-${target}-${NIGHTLY_VERSION}.zip" \
-            "lode-stdlib-${target}-${NIGHTLY_VERSION}.zip" \
-            --clobber
+      - name: Upload POSIX archives
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-${{ matrix.platform }}-${{ steps.target.outputs.architecture }}
+          path: |
+            lode-${{ matrix.platform }}-${{ steps.target.outputs.architecture }}-${{ needs.nightly-guard.outputs.version }}.zip
+            lode-development-${{ matrix.platform }}-${{ steps.target.outputs.architecture }}-${{ needs.nightly-guard.outputs.version }}.zip
+            lode-stdlib-${{ matrix.platform }}-${{ steps.target.outputs.architecture }}-${{ needs.nightly-guard.outputs.version }}.zip
+          if-no-files-found: error
+          retention-days: 1
 
   finalize-release:
-    needs: [build-and-publish, build-posix]
-    if: needs.build-and-publish.result == 'success' && needs.build-posix.result == 'success'
+    needs: [nightly-guard, build-windows, build-posix]
+    if: needs.nightly-guard.outputs.needed == 'true' && needs.build-windows.result == 'success' && needs.build-posix.result == 'success'
     runs-on: ubuntu-latest
     steps:
-      - name: Download release archives
-        env:
-          GH_TOKEN: ${{ github.token }}
-          NIGHTLY_VERSION: ${{ needs.build-and-publish.outputs.version }}
-        run: |
-          mkdir release
-          gh release download "$NIGHTLY_VERSION" --dir release --repo "$GITHUB_REPOSITORY"
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
-      - name: Rebuild checksum catalog
+      - name: Download workflow archives
+        uses: actions/download-artifact@v4
+        with:
+          pattern: nightly-*
+          path: release
+          merge-multiple: true
+
+      - name: Generate release notes
         env:
           GH_TOKEN: ${{ github.token }}
-          NIGHTLY_VERSION: ${{ needs.build-and-publish.outputs.version }}
+          NIGHTLY_VERSION: ${{ needs.nightly-guard.outputs.version }}
+        shell: bash
+        run: ./.github/scripts/generate-release-notes.sh
+
+      - name: Create and publish nightly release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NIGHTLY_VERSION: ${{ needs.nightly-guard.outputs.version }}
         run: |
           set -euo pipefail
           cd release
           sha256sum lode-*.zip > SHA256SUMS
-          gh release upload "$NIGHTLY_VERSION" SHA256SUMS \
-            --clobber --repo "$GITHUB_REPOSITORY"
-
-      - name: Publish nightly release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          NIGHTLY_VERSION: ${{ needs.build-and-publish.outputs.version }}
-        run: gh release edit "$NIGHTLY_VERSION" --draft=false --repo "$GITHUB_REPOSITORY"
+          assets=(lode-*.zip SHA256SUMS)
+          gh release create "$NIGHTLY_VERSION" "${assets[@]}" \
+            --title "Nightly $NIGHTLY_VERSION" \
+            --notes-file "${RUNNER_TEMP}/release-notes.md" \
+            --prerelease \
+            --repo "$GITHUB_REPOSITORY"
