@@ -356,20 +356,6 @@ bool BuildWorkflowText(const fs::path& root,
         }
         manifest = parsed.document;
     }
-    else
-    {
-        try
-        {
-            std::ifstream file(root / "lode.json");
-            manifest = json::parse(file);
-        }
-        catch (const std::exception& exception)
-        {
-            Error(report, "Failed to parse package manifest while generating CI: " + std::string(exception.what()));
-            return false;
-        }
-    }
-
     const bool isNative = (manifest.contains("implementation") && manifest["implementation"].is_object()) ||
         (manifest.contains("libraries") && manifest["libraries"].is_object());
     if (isNative)

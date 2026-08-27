@@ -173,8 +173,7 @@ std::optional<fs::path> FindStdlibRoot(const fs::path& packageRoot,
         // a .config.luau beside it.
         if (fs::is_directory(siblingModules) &&
             fs::is_regular_file(current / ".config.luau") &&
-            !fs::is_regular_file(current / "package.luau") &&
-            !fs::is_regular_file(current / "lode.json"))
+            !fs::is_regular_file(current / "package.luau"))
             return siblingModules;
 
         const fs::path parent = current.parent_path();
@@ -199,27 +198,15 @@ bool FindStdlibManifest(const fs::path& stdlibRoot,
              stdlibRoot, fs::directory_options::follow_directory_symlink, ec),
          end; it != end && !ec; it.increment(ec))
     {
-        if (!it->is_regular_file(ec) ||
-            (it->path().filename() != "package.luau" && it->path().filename() != "lode.json"))
+        if (!it->is_regular_file(ec) || it->path().filename() != "package.luau")
             continue;
 
         try
         {
-            json candidate;
-            if (it->path().filename() == "package.luau")
-            {
-                const PackageManifestResult parsed = ReadPackageManifest(it->path());
-                if (!parsed.IsValid())
-                    continue;
-                candidate = parsed.document;
-            }
-            else
-            {
-                std::ifstream file(it->path());
-                if (!file.is_open())
-                    continue;
-                candidate = json::parse(file);
-            }
+            const PackageManifestResult parsed = ReadPackageManifest(it->path());
+            if (!parsed.IsValid())
+                continue;
+            json candidate = parsed.document;
             if (candidate.is_object() && candidate.value("name", "") == name)
             {
                 packageRoot = it->path().parent_path();
@@ -284,42 +271,19 @@ bool ReadDependencyManifest(const fs::path& packageRoot,
                             ValidationReport& report)
 {
     const fs::path packageManifestPath = packageRoot / "package.luau";
-    if (fs::is_regular_file(packageManifestPath))
+    if (!fs::is_regular_file(packageManifestPath))
     {
-        const PackageManifestResult parsed = ReadPackageManifest(packageManifestPath);
-        if (!parsed.IsValid())
-        {
-            report.errors.insert(report.errors.end(), parsed.errors.begin(), parsed.errors.end());
-            return false;
-        }
-        manifest = parsed.document;
-        return true;
-    }
-
-    const fs::path manifestPath = packageRoot / "lode.json";
-    std::ifstream file(manifestPath);
-    if (!file.is_open())
-    {
-        Error(report, "Missing dependency manifest: " + PathToUtf8(manifestPath));
+        Error(report, "Missing dependency manifest: " + PathToUtf8(packageManifestPath));
         return false;
     }
 
-    try
+    const PackageManifestResult parsed = ReadPackageManifest(packageManifestPath);
+    if (!parsed.IsValid())
     {
-        manifest = json::parse(file);
-    }
-    catch (const std::exception& exception)
-    {
-        Error(report, "Failed to parse dependency manifest " + PathToUtf8(manifestPath) + ": " + exception.what());
+        report.errors.insert(report.errors.end(), parsed.errors.begin(), parsed.errors.end());
         return false;
     }
-
-    if (!manifest.is_object())
-    {
-        Error(report, "Dependency manifest must contain a JSON object: " + PathToUtf8(manifestPath));
-        return false;
-    }
-
+    manifest = parsed.document;
     return true;
 }
 
@@ -866,40 +830,20 @@ ValidationReport Validate(const fs::path& packageRoot,
         return report;
     }
 
-    const fs::path packageManifestPath = root / "package.luau";
-    const fs::path manifestPath = fs::is_regular_file(packageManifestPath)
-        ? packageManifestPath
-        : root / "lode.json";
+    const fs::path manifestPath = root / "package.luau";
     if (!fs::is_regular_file(manifestPath))
     {
         Error(report, "Missing package manifest: " + PathToUtf8(manifestPath));
         return report;
     }
 
-    json manifest;
-    if (manifestPath == packageManifestPath)
+    const PackageManifestResult parsed = ReadPackageManifest(manifestPath);
+    if (!parsed.IsValid())
     {
-        const PackageManifestResult parsed = ReadPackageManifest(manifestPath);
-        if (!parsed.IsValid())
-        {
-            report.errors.insert(report.errors.end(), parsed.errors.begin(), parsed.errors.end());
-            return report;
-        }
-        manifest = parsed.document;
+        report.errors.insert(report.errors.end(), parsed.errors.begin(), parsed.errors.end());
+        return report;
     }
-    else
-    {
-        try
-        {
-            std::ifstream file(manifestPath);
-            manifest = json::parse(file);
-        }
-        catch (const std::exception& exception)
-        {
-            Error(report, "Failed to parse " + PathToUtf8(manifestPath) + ": " + exception.what());
-            return report;
-        }
-    }
+    json manifest = parsed.document;
 
     if (!manifest.is_object())
     {

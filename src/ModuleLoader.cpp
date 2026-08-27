@@ -28,7 +28,7 @@ namespace Lode
 using Lode::Detail::PathFromUtf8;
 using Lode::Detail::PathToUtf8;
 
-fs::path FindLodeJson(const fs::path& startPath)
+fs::path FindPackageRoot(const fs::path& startPath)
 {
     fs::path current = startPath;
     if (fs::is_regular_file(current))
@@ -39,8 +39,7 @@ fs::path FindLodeJson(const fs::path& startPath)
     // terminate when we would stop making progress instead of looping forever.
     while (current.has_parent_path() && current.parent_path() != current)
     {
-        if (fs::exists(current / "package.luau") || fs::exists(current / "lode.json") ||
-            fs::exists(current / "init.luau"))
+        if (fs::exists(current / "package.luau") || fs::exists(current / "init.luau"))
             return current;
         current = current.parent_path();
     }
@@ -106,7 +105,7 @@ static luarequire_NavigateResult reset(lua_State* L, void* ctx, const char* requ
         }
         else
         {
-            nav->packagePath = FindLodeJson(p);
+            nav->packagePath = FindPackageRoot(p);
             nav->currentPath = p.parent_path();
         }
 
@@ -276,7 +275,6 @@ static bool check_path_exists(const fs::path& p)
     if (fs::is_regular_file(luauPath)) return true;
     if (fs::is_regular_file(p / "init.luau")) return true;
     if (fs::is_regular_file(p / "package.luau")) return true;
-    if (fs::is_regular_file(p / "lode.json")) return true;
     return false;
 }
 
@@ -545,58 +543,37 @@ static ModuleLoadResult LoadModuleNoJump(lua_State* L, void* ctx, const char* pa
         dirPath = targetPath.parent_path();
     }
 
-    // package.luau is the canonical manifest. lode.json remains readable only
-    // as a migration fallback until the package-manager migration is complete.
+    // package.luau is the package manifest and is never executed by the loader.
     fs::path packageManifestPath = dirPath / "package.luau";
-    fs::path lodeJsonPath = dirPath / "lode.json";
-    if (fs::is_regular_file(packageManifestPath) || fs::is_regular_file(lodeJsonPath))
+    if (fs::is_regular_file(packageManifestPath))
     {
         nlohmann::json jsonDoc;
         bool packageManifestNative = false;
         bool packageManifestRequired = false;
-        bool packageManifestLayout = false;
 
-        if (fs::is_regular_file(packageManifestPath))
+        const auto packageResult = Lode::Package::ReadPackageManifest(packageManifestPath);
+        if (!packageResult.IsValid())
+            return { 0, packageResult.errors.front() };
+
+        packageManifestNative = packageResult.manifest.hasImplementation;
+        packageManifestRequired = packageResult.manifest.implementation.required;
+        if (packageManifestNative)
         {
-            const auto packageResult = Lode::Package::ReadPackageManifest(packageManifestPath);
-            if (!packageResult.IsValid())
-                return { 0, packageResult.errors.front() };
+            std::string artifactError;
+            const std::string platform = std::string(Platform::GetOSName());
+            const std::string arch = std::string(Platform::GetArchitectureName());
+            const char* buildConfig = LodeBuildConfigName();
+            const std::string configuration = buildConfig ? buildConfig : "";
+            const auto relativeArtifact = ResolveCompiledArtifact(
+                dirPath, packageResult.manifest, platform, arch, configuration, artifactError);
+            if (!relativeArtifact)
+                return { 0, "Invalid package implementation in " + PathToUtf8(dirPath) + ": " + artifactError };
 
-            packageManifestNative = packageResult.manifest.hasImplementation;
-            packageManifestRequired = packageResult.manifest.implementation.required;
-            if (packageManifestNative)
-            {
-                std::string artifactError;
-                const std::string platform = std::string(Platform::GetOSName());
-                const std::string arch = std::string(Platform::GetArchitectureName());
-                const char* buildConfig = LodeBuildConfigName();
-                const std::string configuration = buildConfig ? buildConfig : "";
-                const auto relativeArtifact = ResolveCompiledArtifact(
-                    dirPath, packageResult.manifest, platform, arch, configuration, artifactError);
-                if (!relativeArtifact)
-                    return { 0, "Invalid package implementation in " + PathToUtf8(dirPath) + ": " + artifactError };
-
-                jsonDoc["libraries"][platform][arch] = PathToUtf8(*relativeArtifact);
-                jsonDoc["_lode_package_layout"] = true;
-                packageManifestLayout = true;
-                if (!packageManifestRequired && !fs::is_regular_file(dirPath / *relativeArtifact))
-                    packageManifestNative = false;
-            }
+            jsonDoc["libraries"][platform][arch] = PathToUtf8(*relativeArtifact);
+            if (!packageManifestRequired && !fs::is_regular_file(dirPath / *relativeArtifact))
+                packageManifestNative = false;
         }
-        else
-        {
-            try
-            {
-                std::ifstream f(lodeJsonPath);
-                jsonDoc = nlohmann::json::parse(f);
-            }
-            catch (const std::exception& e)
-            {
-                return { 0, "Failed to parse legacy package manifest in " + PathToUtf8(dirPath) + ": " + e.what() };
-            }
-        }
-
-        if ((packageManifestNative || !packageManifestLayout) &&
+        if (packageManifestNative &&
             jsonDoc.contains("libraries") && jsonDoc["libraries"].is_object() &&
             !jsonDoc["libraries"].empty())
         {
@@ -620,31 +597,23 @@ static ModuleLoadResult LoadModuleNoJump(lua_State* L, void* ctx, const char* pa
                 const auto& libraryEntry = jsonDoc["libraries"][platform][arch];
                 if (!libraryEntry.is_string())
                 {
-                    return { 0, "Invalid legacy library path in package manifest: expected a string" };
+                    return { 0, "Invalid package implementation path: expected a string" };
                 }
 
                 std::string relLibPath = libraryEntry.get<std::string>();
                 fs::path baseLibPath = dirPath / PathFromUtf8(relLibPath);
                 fs::path fullLibPath = baseLibPath;
 
-                // Prefer the config-aware copy the module CMake writes to
-                // libs/<platform>/<arch>/<config>/<name>. Debug and Release
-                // builds no longer clobber each other's binary: each POST_BUILD
-                // step outputs into its own config subdirectory, so the runtime
-                // always loads a module built with the same CRT/std::string ABI
-                // as itself. Flat paths still work for third-party/prebuilt
-                // modules that do not ship config subdirectories.
-                const char* buildConfig = LodeBuildConfigName();
-                if (!packageManifestLayout && buildConfig && buildConfig[0] != '\0')
-                    {
-                    fs::path configAwareLibPath = baseLibPath.parent_path() / buildConfig / baseLibPath.filename();
-                    if (fs::exists(configAwareLibPath) || !fs::exists(baseLibPath))
-                        fullLibPath = configAwareLibPath;
-                }
-
                 if (relLibPath.empty() || !IsPathInside(baseLibPath, dirPath))
                 {
                     return { 0, "Native library path must remain inside module directory: " + relLibPath };
+                }
+
+                if (packageManifestRequired && !fs::is_regular_file(fullLibPath))
+                {
+                    return { 0, "Native package '" + PathToUtf8(dirPath) +
+                        "' has no compiled artifact for the current platform/architecture (" +
+                        platform + "/" + arch + "); its init.luau is type-only and not executed." };
                 }
 
                 auto libResult = Platform::DynamicLibrary::Open(PathToUtf8(fullLibPath));

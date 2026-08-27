@@ -231,9 +231,7 @@ std::vector<std::string> AddDependencyToManifest(
     if (!tag.IsValid())
         return tag.errors;
 
-    const fs::path packageManifestPath = packageRoot / "package.luau";
-    const bool isLuauManifest = fs::is_regular_file(packageManifestPath);
-    const fs::path manifestPath = isLuauManifest ? packageManifestPath : packageRoot / "lode.json";
+    const fs::path manifestPath = packageRoot / "package.luau";
     nlohmann::json manifest;
     std::string originalManifest;
     try
@@ -246,21 +244,14 @@ std::vector<std::string> AddDependencyToManifest(
         }
         originalManifest.assign(std::istreambuf_iterator<char>(file),
                                 std::istreambuf_iterator<char>());
-        if (isLuauManifest)
+        const Lode::Package::PackageManifestResult parsed =
+            Lode::Package::ReadPackageManifest(manifestPath);
+        if (!parsed.IsValid())
         {
-            const Lode::Package::PackageManifestResult parsed =
-                Lode::Package::ReadPackageManifest(manifestPath);
-            if (!parsed.IsValid())
-            {
-                errors.insert(errors.end(), parsed.errors.begin(), parsed.errors.end());
-                return errors;
-            }
-            manifest = parsed.document;
+            errors.insert(errors.end(), parsed.errors.begin(), parsed.errors.end());
+            return errors;
         }
-        else
-        {
-            manifest = nlohmann::json::parse(originalManifest);
-        }
+        manifest = parsed.document;
     }
     catch (const std::exception& exception)
     {
@@ -308,9 +299,7 @@ std::vector<std::string> AddDependencyToManifest(
     };
 
     std::string replacementError;
-    const std::string content = isLuauManifest
-        ? Lode::Package::SerializePackageManifest(manifest)
-        : manifest.dump(2) + "\n";
+    const std::string content = Lode::Package::SerializePackageManifest(manifest);
     if (content.empty())
     {
         errors.push_back("Cannot serialize package manifest.");

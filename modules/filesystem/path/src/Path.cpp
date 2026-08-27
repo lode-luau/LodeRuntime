@@ -44,7 +44,7 @@ static fs::path ResolveImpl(Lode::State& vm, const std::string& rawPathStr)
         {
             // Non-file caller (e.g. "=stdin"): fall back to the package root
             // search. This path is cold; only the absolute case is hot.
-            packagePath = Lode::FindLodeJson(callerPath);
+            packagePath = Lode::FindPackageRoot(callerPath);
             currentPath = callerPath.parent_path();
             if (currentPath.empty())
                 currentPath = fs::current_path();

@@ -374,13 +374,9 @@ bool ResolveGitDependencies(DependencyGraph& graph,
                 }
                 else
                 {
-                    std::ifstream manifestFile(resolvedRoot.root / "lode.json");
-                    if (!manifestFile.is_open() || !(manifestFile >> manifest))
-                    {
-                        AddError(result, "Cannot inspect Git package manifest for '" +
-                            resolvedRoot.name + "'.");
-                        return false;
-                    }
+                    AddError(result, "Git package '" + resolvedRoot.name +
+                        "' is missing package.luau.");
+                    return false;
                 }
                 if ((manifest.contains("implementation") && manifest["implementation"].is_object()) ||
                     (manifest.contains("libraries") && manifest["libraries"].is_object() &&

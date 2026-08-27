@@ -91,41 +91,20 @@ bool IsRegularFileWithoutSymlink(const fs::path& path)
 bool ReadManifest(const fs::path& packageRoot, json& manifest, PackResult& result)
 {
     const fs::path packageManifestPath = packageRoot / "package.luau";
-    if (fs::is_regular_file(packageManifestPath))
-    {
-        const PackageManifestResult parsed = ReadPackageManifest(packageManifestPath);
-        if (!parsed.IsValid())
-        {
-            result.errors.insert(result.errors.end(), parsed.errors.begin(), parsed.errors.end());
-            return false;
-        }
-        manifest = parsed.document;
-        return true;
-    }
-
-    const fs::path legacyManifestPath = packageRoot / "lode.json";
-    std::ifstream file(legacyManifestPath);
-    if (!file.is_open())
+    if (!fs::is_regular_file(packageManifestPath))
     {
         AddError(result, "Cannot open package manifest: " +
             PathToUtf8(packageManifestPath));
         return false;
     }
 
-    try
+    const PackageManifestResult parsed = ReadPackageManifest(packageManifestPath);
+    if (!parsed.IsValid())
     {
-        file >> manifest;
-    }
-    catch (const std::exception& error)
-    {
-        AddError(result, "Failed to parse package manifest: " + std::string(error.what()));
+        result.errors.insert(result.errors.end(), parsed.errors.begin(), parsed.errors.end());
         return false;
     }
-    if (!manifest.is_object())
-    {
-        AddError(result, "Package manifest must contain a JSON object.");
-        return false;
-    }
+    manifest = parsed.document;
     return true;
 }
 
@@ -160,9 +139,7 @@ bool CollectPackageFiles(const fs::path& packageRoot,
         collected.emplace(archiveName, source);
     };
 
-    addFile(fs::is_regular_file(packageRoot / "package.luau")
-        ? fs::path("package.luau")
-        : fs::path("lode.json"));
+    addFile("package.luau");
     addFile("init.luau");
     addFile("LICENSE");
 

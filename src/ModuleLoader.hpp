@@ -21,6 +21,6 @@ LODE_API void UpdateModulePaths(lua_State* L, const std::vector<std::string>& mo
 LODE_API void SetStandardLibraryPath(lua_State* L, std::string_view path);
 
 LODE_API std::string GetCallerChunkName(lua_State* L);
-LODE_API std::filesystem::path FindLodeJson(const std::filesystem::path& startPath);
+LODE_API std::filesystem::path FindPackageRoot(const std::filesystem::path& startPath);
 
 } // namespace Lode

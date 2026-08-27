@@ -109,7 +109,7 @@ namespace
                         }
                         else
                         {
-                            pkgDir = Lode::FindLodeJson(requirerPath);
+                            pkgDir = Lode::FindPackageRoot(requirerPath);
                             if (pkgDir.empty())
                                 pkgDir = requirerPath.parent_path();
                         }
