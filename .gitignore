@@ -8,6 +8,9 @@ obj/
 *.exe
 *.dll
 *.pdb
+*.ilk
+*.ipdb
+*.iobj
 *.so
 *.dylib
 *.lib
@@ -29,6 +32,8 @@ Thumbs.db
 # Dependencies
 deps/
 third_party/
+.deps-*/
+build-*/
 
 # Bench per-run outputs (history lives in CI artifacts; baseline.json is tracked)
 bench/results/bench-results-*.json
