@@ -3,13 +3,25 @@
 # Configure/Build steps (build-debug and build-release) at the repo root.
 param(
     [Parameter(Mandatory = $true)]
-    [string]$Version
+    [string]$Version,
+
+    [string]$DebugBuildDirectory = "build-debug",
+    [string]$ReleaseBuildDirectory = "build-release",
+    [string]$OutputDirectory = "."
 )
 
 # No Set-StrictMode here on purpose: manifests may omit optional keys such
 # as dependencies, and the checks below rely on absent properties resolving
 # to $null.
 $ErrorActionPreference = 'Stop'
+
+Add-Type -AssemblyName System.IO.Compression
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+$outputRoot = [System.IO.Path]::GetFullPath($OutputDirectory)
+$debugBuildRoot = [System.IO.Path]::GetFullPath($DebugBuildDirectory)
+$releaseBuildRoot = [System.IO.Path]::GetFullPath($ReleaseBuildDirectory)
+New-Item -ItemType Directory -Force -Path $outputRoot | Out-Null
 
 function Copy-LodeDirectoryContents {
     param(
@@ -48,18 +60,18 @@ function Compress-LodeDirectory {
 }
 
 $ver = $Version
-$distributionDist = "dist/lode"
+$distributionDist = Join-Path $outputRoot "lode"
 $runtimeBinDist = "$distributionDist/bin"
 $stdlibDist = "$distributionDist/stdlib"
-$developmentDist = "dist/lode-development"
+$developmentDist = Join-Path $outputRoot "lode-development"
 New-Item -ItemType Directory -Force -Path $runtimeBinDist, $stdlibDist, $developmentDist | Out-Null
 
 # ---- Lode development artifact: install both configurations into one prefix ----
 # The development distribution is consumed through find_package(Lode CONFIG REQUIRED).
 # Installing both configurations keeps the package workflow aligned
 # with the Debug/Release ABI contract.
-cmake --install build-debug --config Debug --prefix $developmentDist --component Lode
-cmake --install build-release --config Release --prefix $developmentDist --component Lode
+cmake --install $debugBuildRoot --config Debug --prefix $developmentDist --component Lode
+cmake --install $releaseBuildRoot --config Release --prefix $developmentDist --component Lode
 Copy-Item LICENSE, README.md $developmentDist
 Set-Content -Path "$developmentDist/VERSION" -Value $ver
 $lodeMetadataPath = Join-Path $developmentDist "share/lode/lode-install.json"
@@ -78,9 +90,9 @@ Set-Content -Path $lodeMetadataPath -Value $lodeMetadata -NoNewline
 # ---- Runtime distribution: executable and runtime DLLs ----
 # The end-user archive contains the runtime and the bundled stdlib.
 # Development headers and CMake targets remain in the optional development archive.
-Copy-Item build-release/bin/Release/lode.exe $runtimeBinDist
-Copy-Item build-release/bin/Release/LodeCore.dll $runtimeBinDist
-Copy-Item build-release/bin/Release/uv.dll $runtimeBinDist
+Copy-Item (Join-Path $releaseBuildRoot "bin/Release/lode.exe") $runtimeBinDist
+Copy-Item (Join-Path $releaseBuildRoot "bin/Release/LodeCore.dll") $runtimeBinDist
+Copy-Item (Join-Path $releaseBuildRoot "bin/Release/uv.dll") $runtimeBinDist
 Copy-Item LICENSE, README.md $distributionDist
 Set-Content -Path "$distributionDist/VERSION" -Value $ver
 
@@ -220,7 +232,7 @@ foreach ($record in $moduleRecords.Values) {
     $dependencies = $record.Manifest.dependencies
     if ($null -eq $dependencies) { continue }
 
-    foreach ($dependency in $dependencies.PSObject.Properties) {
+    foreach ($dependency in $dependencies.GetEnumerator()) {
         if ($dependency.Value -isnot [string]) {
             throw "Standard module '$($record.Name)' must use an exact version string for dependency '$($dependency.Name)'."
         }
@@ -272,7 +284,7 @@ foreach ($record in ($moduleRecords.Values | Sort-Object RelativePath)) {
         $libRelease = Join-Path $src $relativeArtifact
         $artifactName = Split-Path $relativeArtifact -Leaf
         $libFlat = Join-Path $src (Join-Path "libs/windows/x64" $artifactName)
-        $libBin = "build-release/bin/Release/$artifactName"
+        $libBin = Join-Path $releaseBuildRoot "bin/Release/$artifactName"
 
         $sourceDll = $null
         if (Test-Path $libRelease) {
@@ -321,18 +333,18 @@ $developmentStdlibDist = Join-Path $developmentDist "stdlib"
 New-Item -ItemType Directory -Force -Path $developmentStdlibDist | Out-Null
 Copy-LodeDirectoryContents -Source $stdlibDist -Destination $developmentStdlibDist
 
-Compress-LodeDirectory -Source $distributionDist -Destination "lode-windows-x64-$ver.zip"
-Compress-LodeDirectory -Source $developmentDist -Destination "lode-development-windows-x64-$ver.zip"
-Compress-LodeDirectory -Source $stdlibDist -Destination "lode-stdlib-windows-x64-$ver.zip"
+Compress-LodeDirectory -Source $distributionDist -Destination (Join-Path $outputRoot "lode-windows-x64-$ver.zip")
+Compress-LodeDirectory -Source $developmentDist -Destination (Join-Path $outputRoot "lode-development-windows-x64-$ver.zip")
+Compress-LodeDirectory -Source $stdlibDist -Destination (Join-Path $outputRoot "lode-stdlib-windows-x64-$ver.zip")
 
 $checksums = @()
 foreach ($archive in @(
-    "lode-windows-x64-$ver.zip",
-    "lode-development-windows-x64-$ver.zip",
-    "lode-stdlib-windows-x64-$ver.zip"
+    (Join-Path $outputRoot "lode-windows-x64-$ver.zip"),
+    (Join-Path $outputRoot "lode-development-windows-x64-$ver.zip"),
+    (Join-Path $outputRoot "lode-stdlib-windows-x64-$ver.zip")
 )) {
     $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($null -eq $checksums) { $checksums = @() }
-    $checksums += "$hash  $archive"
+    $checksums += "$hash  $([System.IO.Path]::GetFileName($archive))"
 }
-$checksums | Set-Content -Path "SHA256SUMS" -Encoding ascii
+$checksums | Set-Content -Path (Join-Path $outputRoot "SHA256SUMS") -Encoding ascii
