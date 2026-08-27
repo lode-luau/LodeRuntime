@@ -70,7 +70,7 @@ assert(package.version == "1.2.0", "lode add without @ did not select the latest
 file(WRITE "${latest_consumer}/LICENSE" "MIT\n")
 
 execute_process(
-    COMMAND "${CMAKE_COMMAND}" -E env "USERPROFILE=${cache_home}"
+    COMMAND "${CMAKE_COMMAND}" -E env "HOME=${cache_home}" "USERPROFILE=${cache_home}"
         "${LODE_EXECUTABLE}" add "${git_source}" "${latest_consumer}"
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
 if(NOT result EQUAL 0)
@@ -78,7 +78,7 @@ if(NOT result EQUAL 0)
     message(FATAL_ERROR "lode add latest failed:\n${output}\n${error}")
 endif()
 execute_process(
-    COMMAND "${CMAKE_COMMAND}" -E env "USERPROFILE=${cache_home}"
+    COMMAND "${CMAKE_COMMAND}" -E env "HOME=${cache_home}" "USERPROFILE=${cache_home}"
         "${LODE_EXECUTABLE}" "${latest_consumer}/init.luau"
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
 if(NOT result EQUAL 0)
@@ -105,7 +105,7 @@ assert(package.version == "1.0.0", "lode add @version did not select the exact t
 file(WRITE "${exact_consumer}/LICENSE" "MIT\n")
 
 execute_process(
-    COMMAND "${CMAKE_COMMAND}" -E env "USERPROFILE=${cache_home}"
+    COMMAND "${CMAKE_COMMAND}" -E env "HOME=${cache_home}" "USERPROFILE=${cache_home}"
         "${LODE_EXECUTABLE}" add "${git_source}@1.0.0" "${exact_consumer}"
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
 if(NOT result EQUAL 0)
@@ -113,7 +113,7 @@ if(NOT result EQUAL 0)
     message(FATAL_ERROR "lode add exact version failed:\n${output}\n${error}")
 endif()
 execute_process(
-    COMMAND "${CMAKE_COMMAND}" -E env "USERPROFILE=${cache_home}"
+    COMMAND "${CMAKE_COMMAND}" -E env "HOME=${cache_home}" "USERPROFILE=${cache_home}"
         "${LODE_EXECUTABLE}" "${exact_consumer}/init.luau"
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
 if(NOT result EQUAL 0)

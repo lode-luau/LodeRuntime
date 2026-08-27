@@ -60,7 +60,7 @@ assert(git_signal.revision == "first", "Git package was not pinned to the locked
 file(WRITE "${consumer_root}/LICENSE" "MIT\n")
 
 execute_process(
-    COMMAND "${CMAKE_COMMAND}" -E env "USERPROFILE=${cache_home}"
+    COMMAND "${CMAKE_COMMAND}" -E env "HOME=${cache_home}" "USERPROFILE=${cache_home}"
         "${LODE_EXECUTABLE}" install "${consumer_root}"
     RESULT_VARIABLE result
     OUTPUT_VARIABLE output
@@ -91,7 +91,7 @@ if(EXISTS "${consumer_root}/lode_modules/git_signal/.git")
 endif()
 
 execute_process(
-    COMMAND "${CMAKE_COMMAND}" -E env "USERPROFILE=${cache_home}"
+    COMMAND "${CMAKE_COMMAND}" -E env "HOME=${cache_home}" "USERPROFILE=${cache_home}"
         "${LODE_EXECUTABLE}" "${consumer_root}/init.luau"
     RESULT_VARIABLE result
     OUTPUT_VARIABLE output
@@ -119,7 +119,7 @@ endif()
 
 file(REMOVE_RECURSE "${consumer_root}/lode_modules" "${consumer_root}/.config.luau")
 execute_process(
-    COMMAND "${CMAKE_COMMAND}" -E env "USERPROFILE=${cache_home}"
+    COMMAND "${CMAKE_COMMAND}" -E env "HOME=${cache_home}" "USERPROFILE=${cache_home}"
         "${LODE_EXECUTABLE}" install --locked "${consumer_root}"
     RESULT_VARIABLE result
     OUTPUT_VARIABLE output

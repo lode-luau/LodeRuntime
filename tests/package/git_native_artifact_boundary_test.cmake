@@ -63,7 +63,7 @@ file(WRITE "${consumer_root}/init.luau" "return {}\n")
 file(WRITE "${consumer_root}/LICENSE" "MIT\n")
 
 execute_process(
-    COMMAND "${CMAKE_COMMAND}" -E env "USERPROFILE=${cache_home}"
+    COMMAND "${CMAKE_COMMAND}" -E env "HOME=${cache_home}" "USERPROFILE=${cache_home}"
         "${LODE_EXECUTABLE}" install "${consumer_root}"
     RESULT_VARIABLE result
     OUTPUT_VARIABLE output
