@@ -18,6 +18,7 @@ local platform = sys.GetPlatform():lower()
 local isWindows = platform:find("windows", 1, true) ~= nil
 local isLinux = platform:find("linux", 1, true) ~= nil
 local isMac = platform:find("darwin", 1, true) ~= nil or platform:find("macos", 1, true) ~= nil
+local declarationLibrary = isWindows and "kernel32" or (isMac and "libSystem.B.dylib" or "libc.so.6")
 
 describe("ffi", function()
     describe("load", function()
@@ -38,7 +39,7 @@ describe("ffi", function()
 
         it("errors on malformed declarations with line info", function()
             local ok, err = pcall(function()
-                ffi.load("kernel32", [[
+                ffi.load(declarationLibrary, [[
                     int Broken(void);
                     int ???(int);
                 ]])
@@ -106,14 +107,14 @@ describe("ffi", function()
         end)
 
         it("reports the final source line for truncated declarations", function()
-            local ok, err = pcall(ffi.load, "kernel32", "\n\nint Truncated(")
+            local ok, err = pcall(ffi.load, declarationLibrary, "\n\nint Truncated(")
             expect(ok).toBe(false)
             expect(tostring(err):find("line 3", 1, true) ~= nil).toBe(true)
         end)
 
         it("rejects structs and unions passed by value", function()
-            expect(pcall(ffi.load, "kernel32", "int InvalidStruct(struct Native value);")).toBe(false)
-            expect(pcall(ffi.load, "kernel32", "int InvalidUnion(union Native value);")).toBe(false)
+            expect(pcall(ffi.load, declarationLibrary, "int InvalidStruct(struct Native value);")).toBe(false)
+            expect(pcall(ffi.load, declarationLibrary, "int InvalidUnion(union Native value);")).toBe(false)
         end)
 
         it("rejects opaque aggregate typedefs passed by value", function()
@@ -322,9 +323,11 @@ describe("ffi", function()
                 size_t strlen(const char* s);
                 size_t strnlen(const char* s, size_t maxlen);
                 int atoi(const char* s);
-                double pow(double x, double y);
                 void* malloc(size_t size);
                 void free(void* ptr);
+            ]])
+            local libm = ffi.load(isMac and "libSystem.B.dylib" or "libm.so.6", [[
+                double pow(double x, double y);
             ]])
 
             it("computes strlen over strings", function()
@@ -342,7 +345,7 @@ describe("ffi", function()
             end)
 
             it("computes double results", function()
-                expect(libc.pow(2, 8)).toBe(256)
+                expect(libm.pow(2, 8)).toBe(256)
             end)
 
             it("returns pointers and accepts numeric addresses", function()
@@ -357,7 +360,7 @@ describe("ffi", function()
             end)
 
             it("rejects wrong argument types", function()
-                local ok = pcall(libc.strlen, 12345)
+                local ok = pcall(libc.strlen, {})
                 expect(ok).toBe(false)
             end)
 
