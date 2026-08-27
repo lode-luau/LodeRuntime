@@ -33,13 +33,13 @@ return {
 
 For an official standard module, the package manager first checks the stdlib
 bundle associated with the installed Lode runtime. If the bundled version does
-not satisfy the requirement, unlocked installation downloads only that
-module's GitHub Release artifact from the official LodeRuntime repository. The
+not satisfy the requirement, unlocked installation downloads the aggregate
+GitHub Release bundle from the official LodeRuntime repository. The
 release tag is read from the installed catalog's `stdlib/VERSION` marker, and
 the current Windows x64 contract selects:
 
 ```text
-lode-stdlib-<name>-<exact-version>-windows-x64.zip
+lode-stdlib-windows-x64-<nightly-release>.zip
 ```
 
 This fallback currently requires an exact SemVer requirement. A `^` or `~`
@@ -399,7 +399,7 @@ implementation must use the GitHub Release artifact contract described by RFC 09
 `v<version>` release is downloaded, checked, and copied into the global cache.
 For stdlib dependencies, a compatible module is reused from the installed
 catalog. An incompatible exact requirement downloads the one matching
-`lode-stdlib-<name>-<version>-windows-x64.zip` asset from the release named by
+`lode-stdlib-windows-x64-<release>.zip` asset from the release named by
 `stdlib/VERSION`; its transitive stdlib edges are resolved by the same rule.
 Resolved packages are materialized under the project's `lode_modules`
 directory and reflected in `.config.luau` and the deterministic `lode.lock`.
@@ -420,7 +420,7 @@ already satisfies the locked requirement, no separate artifact is required.
 CI artifact validation uses the same locked graph after the package's compiled
 artifacts are built. `lode ci validate --artifact --locked` validates the
 package's complete declared artifact matrix while accepting an exact locked
-stdlib or Git artifact that is not part of the SDK's bundled catalog. It may
+stdlib or Git artifact that is not part of the Lode distribution's bundled catalog. It may
 populate the global cache, but it does not materialize dependencies or modify
 the project configuration.
 

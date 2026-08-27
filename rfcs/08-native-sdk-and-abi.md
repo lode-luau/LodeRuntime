@@ -1,21 +1,22 @@
-# RFC: Lode Module SDK and ABI Compatibility
+# RFC: Lode Module Development and ABI Compatibility
 
 ## Status
 
 Accepted design. The first CMake and runtime pieces are implemented in this
-repository. Nightly SDK packaging and external-package validation are wired
-for Windows x64; additional SDK targets and stable release publication remain
-follow-up work.
+repository. The nightly Lode development distribution and external-package
+validation are wired for Windows x64; additional targets and stable release
+publication remain follow-up work.
 
 ## Scope
 
-The Lode SDK is the development kit used to compile a module implementation outside
-the LodeRuntime source tree. It is not a runtime package, is not declared as a
+The Lode development distribution is the development kit used to compile a
+module implementation outside the LodeRuntime source tree. It is not a runtime
+package, is not declared as a
 dependency in `package.luau`, and does not add a configurable entrypoint to
 that manifest. Every module uses `init.luau` as its fixed Luau entry and type
 interface.
 
-The SDK is consumed through the standard CMake package mechanism:
+The Lode development distribution is consumed through the standard CMake package mechanism:
 
 ```cmake
 find_package(Lode CONFIG REQUIRED)
@@ -34,7 +35,7 @@ configuration definition required by the loader.
 
 ## CMake contract
 
-Packages with compiled implementations use the SDK helper instead of copying platform and output
+Packages with compiled implementations use the Lode module helper instead of copying platform and output
 directory detection into every repository:
 
 ```cmake
@@ -43,7 +44,7 @@ project(http LANGUAGES CXX)
 
 find_package(Lode CONFIG REQUIRED)
 
-lode_add_native_module(http
+lode_add_module(http
     SOURCES
         src/Main.cpp
         src/HttpManager.cpp
@@ -62,7 +63,7 @@ else()
 endif()
 ```
 
-`lode_add_native_module()` creates the compiled implementation with no Unix `lib`
+`lode_add_module()` creates the compiled implementation with no Unix `lib`
 prefix and writes it to the path described by the package manifest. With no
 extra options, it writes:
 
@@ -74,7 +75,7 @@ The helper accepts optional `ARTIFACT` and `LAYOUT` arguments when a package
 uses a non-default implementation contract:
 
 ```cmake
-lode_add_native_module(my_target
+lode_add_module(my_target
     ARTIFACT "my-artifact"
     LAYOUT "runtime/{platform}/{architecture}/{configuration}/{artifact}{extension}"
     SOURCES src/Main.cpp
@@ -86,13 +87,13 @@ not install OpenSSL, choose system libraries, or execute package code. Those
 remain normal CMake and CI responsibilities; it must not create an alternative
 module entrypoint.
 
-## SDK contents
+## Lode development distribution contents
 
-The SDK is installed with normal CMake package layout:
+The development distribution is installed with normal CMake package layout:
 
 ```text
 <prefix>/
-├── lode-sdk.json
+├── share/lode/lode-install.json
 ├── bin/<configuration>/lode[.exe]
 ├── bin/<configuration>/LodeCore[.dll]
 ├── stdlib/.config.luau
@@ -105,20 +106,21 @@ The SDK is installed with normal CMake package layout:
     ├── LodeConfig.cmake
     ├── LodeConfigVersion.cmake
     ├── LodeTargets.cmake
-    └── LodeNativeModule.cmake
+    └── LodeModule.cmake
 ```
 
-The SDK ships Debug and Release variants together. A package built in Debug
+The development distribution ships Debug and Release variants together. A package built in Debug
 must be tested with the Debug runtime; the same rule applies to Release.
 
-The SDK archive also carries the matching bundled standard-library catalog.
-This keeps the SDK's `lode` executable self-contained for `lode install` and
+The development archive also carries the matching bundled standard-library catalog.
+This keeps the Lode `lode` executable self-contained for `lode install` and
 package CI validation. It does not turn standard modules into external
-packages; the end-user runtime archive and selective standard-module artifacts
+packages; the end-user runtime archive and aggregate standard-module bundle
 remain the distribution paths described by RFC 09.
 
 The exported Luau targets are included because a compiled module calls Luau's C
-API in addition to using the Lode C++ wrappers. The SDK must therefore keep
+API in addition to using the Lode C++ wrappers. The development distribution
+must therefore keep
 the LodeCore, Luau, compiler, and CRT/toolchain build compatible.
 
 ## ABI contract
@@ -132,7 +134,7 @@ lode-abi-1
 It is defined by `LODE_ABI_ID` in the public export header. It must not be
 assembled by package authors or inferred from the package version.
 
-SDK-built modules export these C symbols before initialization:
+Modules built with Lode export these C symbols before initialization:
 
 ```cpp
 LodeModuleConfig();  // Debug/Release compatibility
@@ -161,24 +163,26 @@ compiler/toolchain family
 CRT/runtime-library policy
 ```
 
-## SDK version and distribution
+## Lode version and distribution
 
-The SDK version follows the Lode release version and is published with the
-Lode release. A package CI job downloads a platform/toolchain SDK archive,
-verifies its SHA-256 checksum, and sets `CMAKE_PREFIX_PATH` to its extracted
-prefix. The package manager stores archives by checksum and extracted SDKs in
+The development distribution follows the Lode release version and is published
+with the Lode release. A package CI job downloads the platform/toolchain
+development archive, verifies its entry in `SHA256SUMS`, and sets
+`CMAKE_PREFIX_PATH` to its extracted prefix. The package manager stores archives
+by checksum and extracted Lode distributions in
 the global `.lode` cache; no project-local `.lode` directory is used.
 
 > **Implementation note:** `CMakeLists.txt:427` keeps `LodeConfigVersion.cmake`
 > at `PROJECT_VERSION` (`1.0.0`) even for nightly `1.0.0-nightly.YYYYMMDD.N`
 > builds. CMake treats `1.0.0-nightly` < `1.0.0` (prerelease), so exposing the
 > nightly string as the CMake package version would make
-> `find_package(Lode 1.0.0)` fail on nightly SDKs. The exact nightly is
-> authoritative in the SDK's `VERSION` file and `lode-sdk.json`
-> (`nightly.yml:138`, `cmake/lode-sdk.json.in`); the CMake package version
+> `find_package(Lode 1.0.0)` fail on nightly distributions. The exact nightly is
+> authoritative in the Lode `VERSION` file and `share/lode/lode-install.json`;
+> the CMake package version
 > stays `1.0.0` with `SameMajorVersion` compatibility.
 
-The package manager never places SDK link instructions in `package.luau`.
+The package manager never places development-distribution link instructions in
+`package.luau`.
 
 ## Compiled implementation dependency ownership
 
@@ -189,7 +193,7 @@ The following remain CMake/CI concerns:
 - compiler-provided runtimes;
 - internal source relationships such as the current `tcp` and `HttpTls.cpp`
   relationship;
-- the LodeCore/Luau libraries shipped by the SDK.
+- the LodeCore/Luau libraries shipped by the development distribution.
 
 There is no `lode-tcp-core` package and no `nativeDependencies` or
 `systemDependencies` field in the initial manifest contract.

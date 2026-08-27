@@ -2,17 +2,18 @@
 
 ## Status
 
-Accepted design direction. The Lode nightly distribution now publishes the
-runtime/stdlib bundle and SDK baseline. Per-package release automation remains
-separate work.
+Accepted design direction. The Lode nightly distribution publishes the runtime,
+an optional development distribution, and one aggregate standard-library
+bundle. Per-package release automation remains separate work.
 
 ## Summary
 
 The normal package-manager installation downloads a package already built by
 package CI. The consumer does not compile the package during a regular install.
 GitHub Releases provide the compressed artifacts and their checksums. The Lode
-nightly distribution also publishes a complete runtime/stdlib bundle and
-individual standard-module artifacts for selective version resolution.
+nightly distribution also publishes a complete runtime/stdlib bundle, an
+optional development distribution, and one aggregate standard-module bundle
+for selective version resolution.
 
 ## Package source layout
 
@@ -104,7 +105,7 @@ logical package identity
 platform
 architecture
 runtime build configuration when applicable
-    Lode ABI identifier (`lode-abi-1` for the first SDK)
+    Lode ABI identifier (`lode-abi-1` for the first Lode distribution)
 ```
 
 The compiled release asset, not a moving Git branch, is the normal download
@@ -116,9 +117,10 @@ Package asset names currently produced by the generated package workflow are:
 
 ```text
 lode-<package-name>-1.0.0-windows-x64.zip
-lode-stdlib-task-1.0.0-windows-x64.zip
 lode-windows-x64-1.0.0-nightly.YYYYMMDD.N.zip
-lode-sdk-windows-x64-1.0.0-nightly.YYYYMMDD.N.zip
+lode-development-windows-x64-1.0.0-nightly.YYYYMMDD.N.zip
+lode-stdlib-windows-x64-1.0.0-nightly.YYYYMMDD.N.zip
+SHA256SUMS
 ```
 
 Package artifacts carry their package version. The runtime and stdlib bundle
@@ -192,24 +194,25 @@ VERSION
 
 The root stdlib configuration exposes the bundled module aliases. The
 `stdlib/VERSION` marker contains the exact nightly release tag used by the
-package manager when it selects a fallback artifact. The nightly also
-publishes one archive and one checksum per standard module for the current
-Windows x64 target:
+package manager when it selects a fallback artifact. The nightly publishes one
+aggregate archive and one global checksum catalog for the current Windows x64
+target:
 
 ```text
-lode-stdlib-<name>-<module-version>-windows-x64.zip
-lode-stdlib-<name>-<module-version>-windows-x64.zip.sha256
+lode-stdlib-windows-x64-<nightly-release>.zip
+SHA256SUMS
 ```
 
-A package requesting an exact standard-module version can therefore download
-only that artifact; if the bundled version is compatible, no additional
-download is required. The downloaded archive is validated as a Windows
-x64/Release installation artifact. The public `ci validate --artifact` mode
+A package requesting an exact standard-module version downloads the aggregate
+bundle and selects the matching package from its `index.json`; if the bundled
+version is compatible, no additional download is required. The downloaded
+archive is validated as a Windows x64/Release installation artifact. The public `ci validate --artifact` mode
 continues to validate the complete platform/configuration matrix declared by
 an external package. When the package has a lockfile, CI must use
 `ci validate --artifact --locked`; this keeps the complete matrix validation
 while using the exact dependency artifacts selected by `lode.lock`.
 
 No new stdlib manifest or Lode-owned registry is required. Existing module
-`package.luau` files provide names, versions, and dependency declarations, while
-the release tag from `stdlib/VERSION` and checksum provide artifact identity.
+`package.luau` files provide names, versions, and dependency declarations. The
+bundle also contains `index.json` for discovery, while the release tag from
+`stdlib/VERSION` and its `SHA256SUMS` entry provide artifact identity.

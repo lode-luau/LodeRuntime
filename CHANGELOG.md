@@ -1,7 +1,7 @@
 # Changelog
 
 All notable changes to LodeRuntime are documented here. The current
-runtime/SDK line is `1.0.0`, but the project still ships only nightly builds
+runtime/development-distribution line is `1.0.0`, but the project still ships only nightly builds
 (`1.0.0-nightly.YYYYMMDD.N`); this does not represent a stable release.
 Entries are grouped by date until a stable release is declared.
 

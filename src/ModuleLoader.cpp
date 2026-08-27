@@ -636,7 +636,7 @@ static ModuleLoadResult LoadModuleNoJump(lua_State* L, void* ctx, const char* pa
                             }
                         }
 
-                        // SDK-built modules expose an opaque ABI identifier.
+                        // Lode-built modules expose an opaque ABI identifier.
                         // Compare it before calling LodeModuleInit so a module
                         // built against an incompatible C++/Luau boundary is
                         // rejected without crossing that boundary. Modules

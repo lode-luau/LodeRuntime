@@ -14,19 +14,19 @@ The package manager will provide:
 ```text
 lode install [--dev] [--locked]
 lode pack [--output <archive>] [package-root]
-lode ci init --sdk-version <nightly> --sdk-sha256 <sha256>
+lode ci init --lode-version <nightly> --lode-sha256 <sha256>
 lode ci validate [--source|--artifact] [--locked]
 lode ci update
 ```
 
-`lode ci init` requires the exact nightly SDK release tag and SHA-256 checksum
+`lode ci init` requires the exact nightly Lode release tag and SHA-256 checksum
 that the generated workflow will download. It refuses to write a workflow when
 the pin is missing or malformed, and refuses to overwrite an existing file
 unless explicitly forced. It validates package metadata and file presence only;
 it does not execute package code. The initial generator accepts Windows x64
 compiled implementations and emits a Luau package test workflow. Other
 compiled targets are
-rejected until their runner and SDK matrix is implemented.
+rejected until their runner and Lode platform matrix is implemented.
 
 `lode ci validate --source` validates the development tree: `package.luau`,
 `init.luau`, `LICENSE`, implementation artifact declarations, and
@@ -62,7 +62,7 @@ third-party notices. The flagless `lode ci validate` form remains an alias for
 `--artifact`.
 
 `lode ci update` requires an existing workflow containing the exact managed
-markers emitted by `lode ci init` and a valid SDK pin. It reuses the existing
+markers emitted by `lode ci init` and a valid Lode pin. It reuses the existing
 pin and updates only the generated baseline section. User-owned jobs and
 configuration must remain outside that section; missing or malformed markers
 or pins cause the command to fail instead of replacing the workflow silently.
@@ -73,20 +73,21 @@ The workflow identifies a compiled implementation from
 `package.luau.implementation` and derives its publication matrix exclusively
 from `package.luau.implementation.targets.release`. The first implemented
 matrix is Windows x64; a declared target without an
-implemented runner and SDK matrix makes `lode ci init` or `lode ci update`
+implemented runner and Lode platform matrix makes `lode ci init` or `lode ci update`
 fail explicitly rather than generate a workflow that claims support. Its
 baseline job performs these operations:
 
 1. Check out the tagged source.
-2. Download and checksum the explicitly pinned Lode SDK.
+2. Download and checksum the explicitly pinned Lode development distribution
+   using its matching `SHA256SUMS` entry.
 3. Run `lode install --dev --locked` when the package declares dependencies or
    development dependencies. The command may fetch the exact locked artifact,
    but must not resolve new versions or revisions.
 4. Provision build dependencies required by the package's CMake project, such
    as OpenSSL. This does not create a Lode manifest dependency.
-5. Configure CMake with `CMAKE_PREFIX_PATH` pointing to the SDK.
+5. Configure CMake with `CMAKE_PREFIX_PATH` pointing to the Lode development distribution.
 6. Build Debug and Release for each `implementation.targets.release` target.
-7. Run CTest and the package tests through the matching SDK `lode` runtime.
+7. Run CTest and the package tests through the matching Lode `lode` runtime.
 8. Verify `LodeModuleABI()` and `LodeModuleConfig()` before packaging.
 9. Validate every published `implementation.targets.release` artifact with
    `lode ci validate --artifact --locked`.
@@ -97,11 +98,11 @@ The compiled implementation CMake must use:
 
 ```cmake
 find_package(Lode CONFIG REQUIRED)
-lode_add_native_module(...)
+lode_add_module(...)
 ```
 
 The default package test command runs `tests/run.luau` through the matching
-SDK `lode` executable. A maintainer may replace that command in the editable
+Lode `lode` executable. A maintainer may replace that command in the editable
 workflow or package CTest configuration without changing `package.luau`.
 
 The workflow must fail if an `implementation.targets.release` target was not
@@ -112,7 +113,7 @@ signing, and loading remain outside this implementation.
 ## Luau-only workflow
 
 Packages without `implementation` do not build compiled artifacts, but the
-current Windows baseline still downloads the pinned SDK because its `lode`
+current Windows baseline still downloads the pinned Lode development distribution because its `lode`
 executable is the runtime used for validation and tests. Their baseline runs
 `lode install --dev --locked` when dependencies are declared, checks the
 package root convention, and runs the package's declared Luau test entry

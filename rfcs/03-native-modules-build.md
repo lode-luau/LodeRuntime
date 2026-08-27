@@ -56,12 +56,12 @@ targets. The build must output the artifact to:
 libs/<platform>/<architecture>/<configuration>/<artifact><extension>
 ```
 
-The Lode SDK helper should expose a module-oriented command:
+The Lode module helper should expose a module-oriented command:
 
 ```cmake
 find_package(Lode CONFIG REQUIRED)
 
-lode_add_native_module(my_module
+lode_add_module(my_module
     SOURCES
         src/main.cpp
 )

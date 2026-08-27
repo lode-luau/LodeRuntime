@@ -215,7 +215,7 @@ jobs:
 
   # Keep the POSIX build in the required CI path as well. This catches
   # platform-specific linker flags, OpenSSL discovery, native module output
-  # paths, and the generated SDK consumer test on both Linux and macOS.
+  # paths, and the generated Lode consumer test on both Linux and macOS.
   build-posix:
     needs: change-gate
     if: needs.change-gate.outputs.real == 'true'

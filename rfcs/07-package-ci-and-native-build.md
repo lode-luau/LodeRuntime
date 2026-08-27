@@ -20,7 +20,7 @@ directories, compiler options, system libraries, and link targets.
 This RFC defines ownership and the baseline package lifecycle. The compiled
 ABI, artifact layout, and generated CI workflow have dedicated RFCs:
 
-- [08 - Module SDK and ABI](08-native-sdk-and-abi.md)
+- [08 - Module Development and ABI](08-native-sdk-and-abi.md)
 - [09 - Package Artifacts and Releases](09-package-artifacts-and-releases.md)
 - [10 - Generated CI and Enforcement](10-generated-ci-and-enforcement.md)
 
@@ -70,7 +70,7 @@ lode install --dev --locked
     ↓
 prepare package-local aliases and dependencies
     ↓
-prepare or select the Lode SDK and CMake toolchain
+prepare or select the Lode development distribution and CMake toolchain
     ↓
 cmake -S . -B build [toolchain/options]
     ↓
@@ -94,7 +94,7 @@ instructions in `package.luau`.
 ## Package tests
 
 The default package test entry is `tests/run.luau`, executed through the
-matching Lode SDK runtime with the package's `.config.luau` active. A package
+matching Lode runtime with the package's `.config.luau` active. A package
 test loads the root module through its configured alias. Its `init.luau` is
 executed for a Luau-only package and is type-only when a compiled
 implementation is selected.
@@ -107,7 +107,7 @@ Pull request CI must:
 
 1. validate `package.luau` and `init.luau`;
 2. install locked dependencies when declared;
-3. download and verify the pinned Lode SDK;
+3. download and verify the pinned Lode development distribution;
 4. prepare the platform toolchain and system libraries;
 5. configure and build through the package's CMake project when it has a
    compiled implementation;
