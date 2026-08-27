@@ -2,59 +2,61 @@
 
 ## Status
 
-Accepted design direction for the `package-manager` branch. Implementation is
+Accepted design direction for the `package.luau` migration. Implementation is
 not part of this RFC.
 
 ## Summary
 
-This RFC defines the canonical `lode.json` contract and assigns each field to
-the component that consumes it. The manifest describes a package; it does not
-replace CMake, `.config.luau`, the runtime loader, or CI.
+This RFC defines the canonical `package.luau` contract and assigns each field
+to the component that consumes it. The manifest describes one Lode package
+whose root module always uses `init.luau`; it does not replace CMake,
+`.config.luau`, the runtime loader, or CI.
 
 The same manifest shape may be used for a project root and for a distributable
-package. A project manifest may omit `init.luau` and `libraries`. There is no
-`type` field and no configurable `entry` field.
+package. There is no `type`, `entry`, or `modules` field.
 
 ## Package conventions
 
-The package root is identified by `lode.json` and/or `init.luau`, consistent
-with the existing module loader. A pure Luau package uses `init.luau` as its
-automatic entry module. A native package declares platform libraries in
-`libraries`; its `init.luau` provides Luau types and is not executed when a
-matching native library is loaded.
+The package root is identified by `package.luau` and/or `init.luau`. A package
+is a module package: its root module is the directory containing `init.luau`.
+Submodules are ordinary child directories containing their own `init.luau`;
+they are not listed in the package manifest.
 
-The presence of `libraries` is the native-package convention. The absence of
-`libraries` does not make a project root invalid: a project manifest may only
-declare dependencies.
+Every package module has exactly one logical Luau entry, `init.luau`. If the
+manifest declares `implementation`, the file is the LSP/type interface and is
+not executed by the runtime. The runtime loads the matching compiled artifact
+instead. If `implementation` is absent, the runtime executes `init.luau`.
 
 ## Project initialization
 
-`lode init <name> --description <text> [--native] [--version <semver>]
-[--license <SPDX>] [project-root]` creates the canonical project files in an
-absent or empty directory. `name` and `description` are required; version and
-license default to `0.1.0` and `MIT`. The default template is pure Luau and
-creates `lode.json`, `init.luau`, `LICENSE`, and `README.md`. `--native` also
-creates a CMake project and a C++ module using `LODE_MODULE`, `CreateTable`,
-and `CreateFunction`, and initializes the host platform/architecture in both
-`libraries` and `releaseTargets`.
+`lode init <name> --description <text> [--version <semver>] [--license <SPDX>]
+[project-root]` creates the canonical project files in an absent or empty
+directory. `name` and `description` are required; version and license default
+to `0.1.0` and `MIT`. The template creates `package.luau`, `init.luau`,
+`LICENSE`, and `README.md`. A module that has a compiled implementation also
+gets its CMake project and source template.
 
-Host detection records an initial project declaration, not a cross-platform
-release promise. A non-empty directory is refused without overwriting files.
+Host detection may select an initial build target, but it does not create a
+cross-platform release promise. A non-empty directory is refused without
+overwriting files.
 
 ## Canonical manifest
 
-The initial package-manager contract is:
+The package manifest is a Luau table and must be statically representable. The
+package manager may parse it with Luau tooling, but must not execute arbitrary
+package code while resolving dependencies.
 
-```json
-{
-  "name": "signal",
-  "version": "1.0.0",
-  "description": "Lode signal module (observer pattern with Connect, Once, Wait)",
-  "author": "Lode Team",
-  "license": "MIT",
-  "dependencies": {
-    "task": "1.0.0"
-  }
+```luau
+return {
+    name = "signal",
+    version = "1.0.0",
+    description = "Lode signal module",
+    author = "Lode Team",
+    license = "MIT",
+
+    dependencies = {
+        task = "1.0.0"
+    }
 }
 ```
 
@@ -68,92 +70,91 @@ The fields have these meanings:
 | `repository` | Package manager and release metadata | Canonical source repository for external packages; runtime-owned stdlib modules omit it. |
 | `dependencies` | Package manager | Runtime Lode package requirements. |
 | `devDependencies` | Package manager/CI | Test and development requirements. |
-| `libraries` | Runtime and package manager | Native artifact map. Entries may describe buildable or locally usable targets. |
-| `releaseTargets` | CI and release tooling | Explicit native targets authorized for generated CI validation and publication. Every entry must match a `libraries` entry. |
+| `implementation` | Runtime, package manager, CMake integration, and CI | Optional compiled implementation contract for the root module. |
 
 Dependency keys are local aliases only. They are not package identities and do
 not select a version globally. Resolution and lockfile identity are defined by
-RFC 06; native artifact identity is extended with target and ABI information
-as defined by RFC 09.
+RFC 06; a compiled artifact extends that identity with target and ABI
+information as defined by RFC 09.
 
-A native package adds `libraries` to the same manifest:
+## Compiled implementation contract
 
-```json
-{
-  "name": "http",
-  "version": "0.1.0",
-  "description": "Lode HTTP client module (Async/LibUV)",
-  "author": "Lode Team",
-  "license": "MIT",
-  "libraries": {
-    "windows": {
-      "x64": "libs/windows/x64/http.dll",
-      "arm64": "libs/windows/arm64/http.dll",
-      "x86": "libs/windows/x86/http.dll"
-    },
-    "linux": {
-      "x64": "libs/linux/x64/http.so",
-      "arm64": "libs/linux/arm64/http.so"
-    },
-    "macos": {
-      "x64": "libs/macos/x64/http.dylib",
-      "arm64": "libs/macos/arm64/http.dylib"
+The optional `implementation` table does not create a second package type. It
+describes the implementation of the package's one root module:
+
+```luau
+implementation = {
+    artifact = "http",
+    required = true,
+    layout = "libs/{platform}/{architecture}/{configuration}/{artifact}{extension}",
+
+    targets = {
+        build = {
+            "windows/x64",
+            "linux/x64",
+            "macos/arm64"
+        },
+
+        release = {
+            "windows/x64"
+        }
     }
-  },
-  "releaseTargets": [
-    { "platform": "windows", "architecture": "x64" }
-  ]
 }
 ```
 
-`releaseTargets` is required for a native package and is absent for a pure Luau
-package. It is intentionally narrower than `libraries`: a library entry alone
-does not authorize a CI job or a published artifact.
-
-## Native library paths
-
-`libraries.<platform>.<architecture>` contains a relative base path inside the
-package. The runtime may insert its build configuration between the
-architecture directory and the file name, for example:
+`artifact` defaults to the package name. `layout` defaults to:
 
 ```text
-libs/windows/x64/Release/module.dll
-libs/windows/x64/Debug/module.dll
-libs/windows/x64/module.dll
+libs/<platform>/<architecture>/<configuration>/<artifact><extension>
 ```
 
-The package manager validates that declared paths remain inside the package and
-that the artifact exists when creating a native package. The manifest does not
-contain CMake link instructions.
+The allowed substitutions are `platform`, `architecture`, `configuration`,
+`artifact`, and `extension`. Paths must be relative to the package root and
+must resolve inside it. `required = true` means that a matching artifact must
+exist for the current runtime target; the runtime must not fall back to the
+type-only `init.luau`.
 
-Recognized platform and architecture identifiers follow the existing manifests:
+`targets.build` lists targets that the package can build and test.
+`targets.release` lists targets authorized for artifact publication. A release
+target is valid only after its implementation has been built, tested, and
+validated by CI.
+
+The package has no configurable `entry` field. `init.luau` is always the Luau
+entry and type interface, and child modules use the standard directory
+`init.luau` convention.
+
+## Recognized targets
+
+The recognized platform and architecture identifiers are:
 
 ```text
 Platforms: windows, linux, android, freebsd, macos, ios, solaris, haiku, wasm
 Architectures: x64, arm64, x86, wasm32, wasm64
 ```
 
-An identifier can be recognized by the manifest without being declared for
-publication. A target is declared for publication only when it appears in
-`releaseTargets`; it is effectively supported only after CI builds, tests, and
-publishes its artifact. The current implemented publication matrix is Windows
-x64. iOS is accepted as an identifier, but iOS deployment and static native
-loading are outside this scope and remain unvalidated.
+Recognition alone is not a support claim. Each target requires an available
+toolchain, a real build, runtime tests, and artifact validation. iOS remains
+outside the release contract until static loading, signing, and packaging are
+implemented and tested.
 
 ## Explicit non-goals
 
-The initial manifest does not contain `type`, `entry`, `buildDependencies`,
-`nativeDependencies`, or `systemDependencies`. `type` and `entry` duplicate
-established conventions. C++ libraries such as OpenSSL remain in CMake and the
-CI toolchain. A separate native Lode package dependency will only be added
-after such a package and its CMake integration actually exist.
+The package manifest does not contain `type`, `entry`, `modules`,
+`buildDependencies`, `nativeDependencies`, or `systemDependencies`. CMake and
+the CI toolchain own compiler flags, link instructions, OpenSSL, and system
+libraries. The `implementation` table describes runtime artifact selection,
+not compilation instructions.
 
-## Runtime behavior
+## Runtime and tooling ownership
 
-The current runtime consumes the existence of `lode.json`, the `libraries`
-map, and the package's `init.luau` convention. It does not currently consume
-metadata, versions, `dependencies`, or `devDependencies`.
+The runtime uses `package.luau` to determine whether the root module has a
+compiled implementation and to resolve its standard artifact path. It always
+uses `init.luau` as the Luau module interface and never executes that file when
+the required compiled artifact is selected.
 
-The package manager resolves dependencies and materializes aliases in
-`.config.luau`; the runtime continues to use the Luau configuration and
-aliases instead of deriving `require("@name")` from the manifest `name`.
+The package manager resolves metadata and dependencies and materializes aliases
+in `.config.luau`. The runtime and `luau-lsp` use those aliases; neither derives
+an alias from the package name without an explicit configuration entry.
+
+The package manifest is not a replacement for `.config.luau`. The latter
+remains the Luau compiler/LSP configuration and alias file.

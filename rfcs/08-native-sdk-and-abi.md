@@ -1,4 +1,4 @@
-# RFC: Lode Native SDK and ABI Compatibility
+# RFC: Lode Module SDK and ABI Compatibility
 
 ## Status
 
@@ -9,10 +9,11 @@ follow-up work.
 
 ## Scope
 
-The Lode SDK is the development kit used to compile a native package outside
+The Lode SDK is the development kit used to compile a module implementation outside
 the LodeRuntime source tree. It is not a runtime package, is not declared as a
-dependency in `lode.json`, and does not add an entrypoint or executable field
-to that manifest.
+dependency in `package.luau`, and does not add a configurable entrypoint to
+that manifest. Every module uses `init.luau` as its fixed Luau entry and type
+interface.
 
 The SDK is consumed through the standard CMake package mechanism:
 
@@ -27,13 +28,13 @@ Lode::Core
 Lode::Module
 ```
 
-`Lode::Module` is the target native packages link to. It carries the public
+`Lode::Module` is the target compiled module implementations link to. It carries the public
 Lode and Luau include paths, the matching `LodeCore` library, and the build
 configuration definition required by the loader.
 
 ## CMake contract
 
-Native packages use the SDK helper instead of copying platform and output
+Packages with compiled implementations use the SDK helper instead of copying platform and output
 directory detection into every repository:
 
 ```cmake
@@ -42,7 +43,7 @@ project(http LANGUAGES CXX)
 
 find_package(Lode CONFIG REQUIRED)
 
-lode_add_native_module(http
+lode_add_module(http
     SOURCES
         src/Main.cpp
         src/HttpManager.cpp
@@ -61,15 +62,17 @@ else()
 endif()
 ```
 
-`lode_add_native_module()` creates a shared library with no Unix `lib` prefix
-and writes it to:
+`lode_add_module()` creates the compiled implementation with no Unix `lib`
+prefix and writes it to:
 
 ```text
 libs/<platform>/<architecture>/<configuration>/<target>.<suffix>
 ```
 
 The helper does not install OpenSSL, choose system libraries, or execute
-package code. Those remain normal CMake and CI responsibilities.
+package code. Those remain normal CMake and CI responsibilities. The helper
+must produce the artifact described by the package's `implementation` table;
+it must not create an alternative module entrypoint.
 
 ## SDK contents
 
@@ -102,7 +105,7 @@ package CI validation. It does not turn standard modules into external
 packages; the end-user runtime archive and selective standard-module artifacts
 remain the distribution paths described by RFC 09.
 
-The exported Luau targets are included because a native module calls Luau's C
+The exported Luau targets are included because a compiled module calls Luau's C
 API in addition to using the Lode C++ wrappers. The SDK must therefore keep
 the LodeCore, Luau, compiler, and CRT/toolchain build compatible.
 
@@ -134,7 +137,7 @@ The current loader still allows a legacy module that has no
 an artifact. This preserves direct compatibility during the migration without
 making unmanaged binaries eligible for new package releases.
 
-The ABI identifier changes when the native module contract changes. A package
+The ABI identifier changes when the compiled module contract changes. A package
 artifact is compatible only when all of these match:
 
 ```text
@@ -163,9 +166,9 @@ the global `.lode` cache; no project-local `.lode` directory is used.
 > (`nightly.yml:138`, `cmake/lode-sdk.json.in`); the CMake package version
 > stays `1.0.0` with `SameMajorVersion` compatibility.
 
-The package manager never places SDK link instructions in `lode.json`.
+The package manager never places SDK link instructions in `package.luau`.
 
-## Native dependency ownership
+## Compiled implementation dependency ownership
 
 The following remain CMake/CI concerns:
 
@@ -179,7 +182,7 @@ The following remain CMake/CI concerns:
 There is no `lode-tcp-core` package and no `nativeDependencies` or
 `systemDependencies` field in the initial manifest contract.
 
-A separately published native dependency requires its own exported CMake
+A separately published compiled-module dependency requires its own exported CMake
 target, artifact layout, runtime policy, and ABI policy before it can be
 introduced.
 
@@ -188,10 +191,11 @@ introduced.
 OpenSSL is a CMake/CI build dependency, not a Lode package-manager
 dependency. Package CI may provision it for `find_package(OpenSSL REQUIRED)`;
 the package manager must not install OpenSSL into the user's system and
-`lode.json` must not gain a `systemDependencies` field for it.
+`package.luau` must not gain a `systemDependencies` field for it.
 
-When a native package uses OpenSSL, its published artifact must include the
-runtime libraries required by the supported target beside the native module.
+When a module implementation uses OpenSSL, its published artifact must include
+the runtime libraries required by the supported target beside the module
+artifact.
 Windows uses the package-local DLL directory. Unix-like targets must use a
 package-relative loader path such as `$ORIGIN` or `@loader_path` and include
 the corresponding shared libraries in the artifact. A target that cannot

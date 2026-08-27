@@ -1,120 +1,164 @@
-# RFC: Require and Path Resolution for Native Modules
+# RFC: Require and Path Resolution for Lode Modules
 
 ## Summary
-This RFC defines the path resolution and loading mechanism for Lode native modules (plugins created using the Lode API). It introduces a structured way to load platform-specific dynamic libraries, establishes how native modules resolve internal paths, and exposes type definitions to align with Luau's standard require semantics.
+
+This RFC defines the path resolution and loading mechanism for Lode modules.
+Every Lode module has a fixed Luau entry file named `init.luau`. A module may
+also have a compiled implementation loaded from a platform-specific dynamic
+library. Both implementations share one module identity and one `require` path.
 
 ## Motivation
-The primary motivation for this path resolution system is to align correctly with the Luau **require-by-string** RFCs. Native modules require a standard way to be loaded across different platforms (Windows, Linux, macOS) and architectures (x64, arm64, x86) without cluttering the require syntax. 
 
-Furthermore, we need a mechanism to provide type information for the Language Server Protocol (LSP) and to serve as an anchor point for path resolution when native modules themselves require other Luau modules from their C++ initialization code.
+The path-resolution system must follow the Luau require-by-string semantics.
+Compiled implementations must load across operating systems and architectures
+without changing the Luau require syntax. The same module directory must also
+provide an interface that the Luau language server can analyze.
 
 ## Design Details
 
-### 1. The `lode.json` Manifest
-To load a native module, the runtime searches the module's directory (or traverses upwards) for a `lode.json` file. This manifest uses the `libraries` field to specify the relative paths (from the directory containing `lode.json`) to the dynamic libraries (`.dll`, `.so`, `.dylib`). The runtime will automatically select and load the correct library based on the current operating system and architecture.
+### 1. The `package.luau` Manifest
 
-The path given in `libraries.<platform>.<arch>` is the *base* path. When the loading runtime knows its own build configuration, the loader first looks for the config-aware copy at `libs/<platform>/<arch>/<config>/<name>` (the same path with a `<config>` subdirectory inserted before the file name). It falls back to the base path when no config subdirectory exists, so third-party or prebuilt modules that ship flat library trees keep working unchanged. Loading a config-aware copy guarantees the runtime and the module were compiled with the same CRT/STL build (Debug vs Release), avoiding ABI mismatches across the DLL boundary.
+The package manager identifies a package through `package.luau`. This is a
+Lode-owned manifest written in Luau syntax; it is not a module entrypoint and
+must not be loaded by `require`. It contains package identity, dependency
+requirements, and an optional compiled implementation contract. It does not
+contain CMake flags or link instructions.
 
-**Example `lode.json`:**
-```json
-{
-  "name": "lib",
-  "version": "1.0.0",
-  "description": "Lode test lib module",
-  "author": "Lode Team",
-  "license": "MIT",
-  "libraries": {
-    "windows": {
-      "x64": "libs/windows/x64/lib.dll",
-      "arm64": "libs/windows/arm64/lib.dll",
-      "x86": "libs/windows/x86/lib.dll"
+The manifest never declares a configurable entrypoint. A package module is a
+directory containing `init.luau`.
+
+Example:
+
+```luau
+return {
+    name = "websocket",
+    version = "1.0.0",
+
+    dependencies = {
+        task = "1.0.0"
     },
-    "linux": {
-      "x64": "libs/linux/x64/lib.so",
-      "arm64": "libs/linux/arm64/lib.so"
-    },
-    "macos": {
-      "x64": "libs/macos/x64/lib.dylib",
-      "arm64": "libs/macos/arm64/lib.dylib"
+
+    implementation = {
+        artifact = "websocket",
+        required = true,
+        layout = "libs/{platform}/{architecture}/{configuration}/{artifact}{extension}"
     }
-  }
 }
 ```
 
-The standard entry point exported by the dynamic library must be `LodeModuleInit`.
+A package without `implementation` is a Luau-only module and still follows
+the same `init.luau` convention.
 
-Additionally, modules built through the Lode CMake may export `LodeModuleConfig`, a `const char*` C-linkage function returning the build configuration the module was compiled with (e.g. `"Debug"` or `"Release"`). When the loaded module exports it, the runtime compares the value with its own configuration before calling `LodeModuleInit`; a mismatch aborts the load with a named error instead of risking a cross-boundary CRT/STL ABI crash. Modules that omit `LodeModuleConfig` are treated as unverifiable and load as before.
+The default artifact layout is:
 
-### 2. The Role of `init.luau` in Native Modules
-Native modules must include an `init.luau` file alongside the `lode.json` or in the root of the module package. This file serves two critical purposes:
+```text
+libs/<platform>/<architecture>/<configuration>/<artifact><extension>
+```
 
-1. **Type Definitions:** It provides type exports and function signatures for the LSP, ensuring developers have autocompletion and type checking when consuming the native module.
-2. **Package Root Indicator:** It (along with `lode.json`) marks the root of the package for internal path resolution.
+The allowed substitutions are `platform`, `architecture`, `configuration`,
+`artifact`, and `extension`. Paths must be relative to the package root and
+must resolve inside it. The default artifact name is the package name unless
+`implementation.artifact` supplies another name.
 
-**Important Note:** For modules that contain a `lode.json` with a non-empty `libraries` field, the runtime **always ignores and does not execute** the `init.luau` file, even if the current platform/architecture has no entry in the map (`src/ModuleLoader.cpp:498`). It is strictly used for LSP tooling and as a spatial reference for path resolution; a missing native artifact is reported as a platform error rather than silently falling back to Luau.
+### 2. The Role of `init.luau`
 
-### 3. Registry Path Injection for Native Initialization
-When a native module is loaded and `LodeModuleInit` is called, the C++ code might need to call `require` to load helper Luau scripts distributed with the plugin. To ensure these `require` calls resolve correctly:
+Every Lode module must include `init.luau` in its module directory. It is the
+fixed module entry used by Luau and the Lode language tooling.
 
-1. Right before calling `LodeModuleInit`, the runtime injects the native module's directory path into the Lua registry under the key `_LODE_NATIVE_MODULE_PATH`.
-2. When a `require` call is made during initialization, the runtime checks for this registry key. If present, it treats the "caller" chunkname as `@<native_module_path>/init.luau`. 
-3. This effectively tricks the resolver into treating the native initialization code as if it were running inside the module's `init.luau`, ensuring relative paths (e.g., `./utils`) resolve correctly against the module's root directory.
-4. After `LodeModuleInit` returns, the runtime removes `_LODE_NATIVE_MODULE_PATH` from the registry to prevent it from leaking into unrelated `require` calls.
+For a compiled implementation, `init.luau` is an interface file. It provides
+types, documentation, and the exported API shape to the LSP. It may end with a
+direct typed return:
 
-### 4. Relative Path Resolution (`./`) vs Internal Resolution (`@self`)
+```luau
+export type Client = {
+    close: () -> ()
+}
 
-Lode strictly follows standard Luau package resolution semantics regarding `init.luau`. 
+export type WebSocket = {
+    connect: (url: string) -> Client
+}
 
-If a script is named `init.luau`, the runtime considers the directory *containing* the package folder as the base for relative (`./`) require paths, not the package folder itself. 
+return {} :: WebSocket
+```
 
-**Example Directory Structure:**
+The runtime does not execute this file when `implementation` is present. It
+first resolves and validates the required artifact. If the artifact is
+unavailable for the current target, loading fails instead of falling back to
+`init.luau`. A module without `implementation` executes `init.luau` normally.
+
+The Luau resolver and `luau-lsp` continue to see the module directory and its
+fixed `init.luau`. The compiled artifact is a Lode runtime concern and is not
+an alternative entry file.
+
+The standard entry point exported by a compiled implementation is
+`LodeModuleInit`.
+
+Modules built through the Lode CMake may export `LodeModuleConfig`, a
+`const char*` C-linkage function returning the build configuration (for
+example, `Debug` or `Release`). When present, the runtime compares it with its
+own configuration before calling `LodeModuleInit`; a mismatch aborts loading
+instead of risking a CRT/STL ABI failure. Modules that omit it are treated as
+unverifiable and remain loadable under the legacy compatibility rule.
+
+They may also export `LodeModuleABI()`. New package publication requires this
+symbol and the value must match the runtime ABI identifier.
+
+### 3. Compiled Initialization and Registry Path Injection
+
+When a compiled implementation is loaded and `LodeModuleInit` is called, C++
+code may require helper Luau scripts distributed with the package. Immediately
+before initialization, the runtime injects the module directory into the Lua
+registry under `_LODE_NATIVE_MODULE_PATH`.
+
+During initialization, the resolver treats the compiled code as if it were
+running from the module's `init.luau` for path-resolution purposes. This keeps
+`./` and `@self` behavior identical to Luau code. The registry value is removed
+after `LodeModuleInit` returns.
+
+### 4. Relative Path Resolution (`./`) and Internal Resolution (`@self`)
+
+Lode follows Luau's module-path semantics regarding `init.luau`.
+
+If a module is represented by `Utils/init.luau`, `./` resolves according to
+the abstract module represented by the directory, while `@self` resolves
+inside that module:
+
 ```text
 project/
 ├── Module/
 │   └── init.luau
-├── Utils/
-│   ├── init.luau
-│   ├── test/
-│   │   └── init.luau
-│   └── a.luau
-└── foo.luau
+└── Utils/
+    ├── init.luau
+    ├── a.luau
+    └── test/
+        └── init.luau
 ```
 
-**Relative Resolution (`./`)**
-If you are inside `Utils/init.luau` and you write `require("./Module")`, the runtime resolves this from the directory above `Utils/`. It will correctly find `project/Module/init.luau` because `Utils` and `Module` are siblings in the `project/` directory.
+From `Utils/init.luau`:
 
-**Internal Resolution (`@self`)**
-If `Utils/init.luau` needs to require a file *inside* its own package (like `test/init.luau` or `a.luau`), using a relative path like `./a` would fail (because it would look for `project/a.luau`). 
+```luau
+require("@self/test")
+require("@self/a")
+```
 
-To resolve files inside its own package directory, it must use the `@self` alias (or `self`):
-- `require("@self/test")` -> resolves to `Utils/test/init.luau`
-- `require("@self/a")` -> resolves to `Utils/a.luau` (the `.luau` extension is automatically appended by the resolver).
+When C++ code calls `vm.Require`, the same rules apply. In particular,
+`vm.Require("@self/utils")` resolves helper code inside the current module.
 
-#### Native Module Integration with `vm.Require()`
-When developing native plugins in C++, you can load other Luau scripts or modules using the `vm.Require()` API. Thanks to the Registry Path Injection mentioned earlier, the runtime treats the C++ dynamic library exactly as if it were an `init.luau` file belonging to the module.
+### 5. Module Results
 
-This guarantees that native C++ code uses the exact same resolution rules as standard Luau code. Crucially, if a module is not found, `vm.Require()` directly throws a Lua error—mimicking the exact behavior of a Luau `require()` call and eliminating the need for manual `Result` unwrapping in C++.
-
-**Practical Examples from C++:**
-- **`vm.Require("./sibling_module")`**: Resolves to one level *above* the native module's package folder. This is useful when your C++ code needs to load other modules that exist in the broader project workspace.
-- **`vm.Require("@self/utils")`**: Uses the internal resolution alias to correctly look *inside* the native module's own folder (the directory containing `lode.json`). This is the recommended way to load helper Luau scripts (`utils/init.luau` or `utils.luau`) that are distributed alongside your native `.dll`/`.so`.
-
-### 5. Multi-Return Support
-The Lode require implementation supports multiple return values from modules, storing the resulting tuples in a custom registry cache (`_LODE_MULTI_CACHE`). This allows `require` to properly forward all results from the executed module script.
+A module's public contract is one module result. A compiled implementation
+returns its API through `LodeModuleInit`; its `init.luau` only describes that
+API. Luau-only modules execute `init.luau` and should return one module value.
+Lode may preserve multiple VM return values internally for compatibility with
+the generic require boundary, but package modules must not use multiple return
+values as separate entrypoints.
 
 ### 6. Top-Level Yield and Load Timeout
-When a module's top-level code calls async/event-loop natives (e.g. `fs.WriteFile`, `fs.ReadFile`, network operations), the module coroutine **yields** during load. The loader handles this explicitly:
 
-1. **Event-loop pump (up to 5 seconds).** After the initial resume returns `LUA_YIELD`, the loader runs the libuv loop (`uv_run UV_RUN_ONCE`) until the module coroutine finishes, so pending async operations complete naturally.
-2. **Loud timeout.** If the module is still suspended after 5 seconds, loading fails with:
-   ```
-   Module timed out after 5 seconds during require — an async call at module top-level never completed
-   ```
-3. **No silent nil.** A module that finishes without producing a value also fails loudly:
-   ```
-   Module finished during require but produced no return value
-   ```
+When a Luau-only module's top-level code yields because of an asynchronous
+operation, the loader pumps the event loop for up to five seconds. A timeout
+or a module that finishes without a result fails loudly. Compiled
+implementations do not execute `init.luau`, so this rule applies only to the
+Luau implementation path.
 
-**Implementation notes:** while suspended, the module thread's return values are captured by the generic resume path into a thread-local sink (`ModuleLoadCapture.hpp`, keyed on the loading coroutine) and pushed onto the require boundary's stack when the pump completes. This keeps async-completing modules indistinguishable from synchronous ones for callers.
-
-**Authoring rule:** event-loop and fs/net natives belong inside functions called *after* load, never directly at module top-level. Top-level code should be synchronous setup; anything that must wait belongs in task/callback bodies.
+Top-level asynchronous work should remain inside functions called after load.

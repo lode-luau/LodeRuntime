@@ -96,7 +96,7 @@ lode add [--dev] owner/repository[@version] [package-root]
 ```
 
 The repository shorthand is canonicalized to `github:owner/repository` in
-`lode.json`. A local Git repository path and a full supported Git URL may also
+`package.luau`. A local Git repository path and a full supported Git URL may also
 be used when developing a package.
 
 When `@version` is omitted, Lode lists the repository's `v<SemVer>` tags and
@@ -132,7 +132,7 @@ The standard library has no external repository identity in this tuple. Its
 source kind is `stdlib`; the selected standard-module artifact is identified
 separately by its Lode release target and checksum as defined by RFC 09.
 
-A selected native artifact extends the logical identity with its target:
+A selected compiled implementation artifact extends the logical identity with its target:
 
 ```text
 logical package identity
@@ -183,7 +183,7 @@ The intended layout is:
 
 ```text
 project/
-├── lode.json
+├── package.luau
 ├── lode.lock
 ├── .config.luau
 └── lode_modules/
@@ -209,7 +209,7 @@ Archive files are addressed only by their verified lowercase SHA-256. Staging
 directories are operation-scoped and are never used as installed packages.
 The global module directory is addressed by a lowercase SHA-256 of the
 canonical resolved identity tuple defined above, encoded as deterministic JSON;
-the dependency alias is never included. When a native artifact is selected,
+the dependency alias is never included. When a compiled implementation artifact is selected,
 its platform, architecture, configuration when applicable, ABI, and artifact
 checksum are included in the identity material so incompatible artifacts
 cannot share an installation directory.
@@ -274,11 +274,12 @@ non-traversing components/paths.
 
 ## Lockfile
 
-`lode.lock` is separate from `lode.json`. It records the resolved graph rather
+`lode.lock` is separate from `package.luau`. It records the resolved graph rather
 than the requested ranges. A lock entry must include at least:
 
 ```text
 package identity
+package manifest content hash when applicable
 resolved version
 source kind
 Git source or official stdlib source
@@ -345,7 +346,7 @@ normalized and remains relative to the project/package context; it is never an
 absolute cache path. A Git record also requires its resolved `commit`. A
 `stdlib` record has no external repository reference.
 
-Native package records may include an `artifacts` array. Each artifact record
+Packages with compiled implementations may include an `artifacts` array. Each artifact record
 contains `platform`, `architecture`, optional `configuration`, `abi`, the exact
 GitHub Release `release` tag, the selected `asset` name, and its lowercase
 SHA-256 `sha256`. Artifact selection is part of installation, not runtime
@@ -357,7 +358,7 @@ The package manager writes `lode.lock` atomically as part of:
 lode install
 ```
 
-`lode install` resolves `lode.json`, reuses compatible locked records when
+`lode install` resolves `package.luau`, reuses compatible locked records when
 possible, updates the lockfile when the requested graph changes, installs the
 resolved runtime artifacts, and materializes project/package-local aliases. It
 also resolves the root `devDependencies` into the lockfile but does not install
@@ -387,8 +388,8 @@ The current installer commands are:
 The unlocked resolver validates the current source graph, supports stdlib and
 local path packages already present on disk, and resolves every Git dependency
 by selecting the highest matching `v<SemVer>` tag and checking out its commit.
-Pure Luau Git packages are copied from that checkout. A native Git package must
-use the GitHub Release artifact contract described by RFC 09; the selected
+Luau-only Git packages are copied from that checkout. A package with a compiled
+implementation must use the GitHub Release artifact contract described by RFC 09; the selected
 `v<version>` release is downloaded, checked, and copied into the global cache.
 For stdlib dependencies, a compatible module is reused from the installed
 catalog. An incompatible exact requirement downloads the one matching
@@ -399,7 +400,7 @@ directory and reflected in `.config.luau` and the deterministic `lode.lock`.
 
 `--locked` performs the same materialization only after validating the existing
 lockfile and never changes it. For Git packages it checks out the exact commit
-and verifies the exact locked native artifact, when present. Without --dev, root
+and verifies the exact locked compiled artifact, when present. Without --dev, root
 devDependencies and the runtime dependencies reachable only through those
 development roots are not materialized. With --dev, those root development
 packages and their runtime dependency subgraphs are materialized; a dependency
@@ -410,7 +411,7 @@ that exact release asset when it is absent from the cache and rejects any
 release, asset, ABI, or checksum mismatch. If the installed bundled module
 already satisfies the locked requirement, no separate artifact is required.
 
-CI artifact validation uses the same locked graph after the package's native
+CI artifact validation uses the same locked graph after the package's compiled
 artifacts are built. `lode ci validate --artifact --locked` validates the
 package's complete declared artifact matrix while accepting an exact locked
 stdlib or Git artifact that is not part of the SDK's bundled catalog. It may
@@ -419,7 +420,7 @@ the project configuration.
 
 The runtime contains the SHA-256 verifier, safe-ZIP staging, and GitHub Release
 download path for the current published target: Windows x64. A Git package with
-a `libraries` declaration must use the generated release contract (`v<version>`,
+an `implementation` declaration must use the generated release contract (`v<version>`,
 `lode-<name>-<version>-windows-x64.zip`, and its `.sha256` asset). The downloaded
 package is validated as an artifact before entering the global cache. GitHub is
 the source; there is no Lode registry or `gh` runtime dependency.
@@ -447,7 +448,7 @@ the `require` string.
 
 ## Current compatibility boundary
 
-The current runtime does not parse `dependencies` from `lode.json`. The
+The current runtime does not parse `dependencies` from `package.luau`. The
 runtime-owned stdlib fallback is independent of dependency resolution. Until
 the package manager generates project and package-local `.config.luau` files,
 existing relative requires and manually configured aliases remain the

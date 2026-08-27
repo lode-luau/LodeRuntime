@@ -2,9 +2,9 @@
 
 ## Status
 
-Accepted design. `lode ci init` generates the first Windows x64 native package
+Accepted design. `lode ci init` generates the first Windows x64 compiled-module
 workflow baseline, and `lode ci update` refreshes only its managed block. The
-native build contract it invokes is defined by RFC 08. Additional target
+compiled implementation contract it invokes is defined by RFC 08. Additional target
 matrices are not implemented yet.
 
 ## Commands
@@ -23,13 +23,15 @@ lode ci update
 that the generated workflow will download. It refuses to write a workflow when
 the pin is missing or malformed, and refuses to overwrite an existing file
 unless explicitly forced. It validates package metadata and file presence only;
-it does not execute package code. The initial generator accepts native Windows
-x64 packages and emits a pure-Luau test workflow. Other native targets are
+it does not execute package code. The initial generator accepts Windows x64
+compiled implementations and emits a Luau package test workflow. Other
+compiled targets are
 rejected until their runner and SDK matrix is implemented.
 
-`lode ci validate --source` validates the development tree: `lode.json`,
-`init.luau`, `LICENSE`, native library path declarations, and `CMakeLists.txt`
-for native packages. It does not require compiled native libraries.
+`lode ci validate --source` validates the development tree: `package.luau`,
+`init.luau`, `LICENSE`, implementation artifact declarations, and
+`CMakeLists.txt` when a compiled implementation is declared. It does not
+require built artifacts.
 
 `ci validate` checks package structure and artifacts; it does not install
 dependencies. With `--locked`, it additionally verifies that the existing
@@ -54,7 +56,7 @@ artifact into the global cache, but it does not materialize packages or change
 `.config.luau`.
 
 `lode ci validate --artifact` validates the publishable tree: the source
-contract plus the Debug/Release native libraries, required exports, ABI,
+contract plus the Debug/Release compiled artifacts, required exports, ABI,
 configuration metadata, package-local runtime libraries, and required
 third-party notices. The flagless `lode ci validate` form remains an alias for
 `--artifact`.
@@ -65,11 +67,12 @@ pin and updates only the generated baseline section. User-owned jobs and
 configuration must remain outside that section; missing or malformed markers
 or pins cause the command to fail instead of replacing the workflow silently.
 
-## Native workflow
+## Compiled implementation workflow
 
-The workflow identifies a native package from `lode.json.libraries` and derives
-its publication matrix exclusively from `lode.json.releaseTargets`. The first
-implemented native matrix is Windows x64; a declared target without an
+The workflow identifies a compiled implementation from
+`package.luau.implementation` and derives its publication matrix exclusively
+from `package.luau.implementation.targets.release`. The first implemented
+matrix is Windows x64; a declared target without an
 implemented runner and SDK matrix makes `lode ci init` or `lode ci update`
 fail explicitly rather than generate a workflow that claims support. Its
 baseline job performs these operations:
@@ -82,35 +85,35 @@ baseline job performs these operations:
 4. Provision build dependencies required by the package's CMake project, such
    as OpenSSL. This does not create a Lode manifest dependency.
 5. Configure CMake with `CMAKE_PREFIX_PATH` pointing to the SDK.
-6. Build Debug and Release for each `releaseTargets` target.
+6. Build Debug and Release for each `implementation.targets.release` target.
 7. Run CTest and the package tests through the matching SDK `lode` runtime.
 8. Verify `LodeModuleABI()` and `LodeModuleConfig()` before packaging.
-9. Validate every published `releaseTargets` library path with
+9. Validate every published `implementation.targets.release` artifact with
    `lode ci validate --artifact --locked`.
 10. Run `lode pack --output out/lode-<name>-<version>-windows-x64.zip .` and
     publish only the archive and checksum produced by successful jobs.
 
-The native package CMake must use:
+The compiled implementation CMake must use:
 
 ```cmake
 find_package(Lode CONFIG REQUIRED)
-lode_add_native_module(...)
+lode_add_module(...)
 ```
 
 The default package test command runs `tests/run.luau` through the matching
 SDK `lode` executable. A maintainer may replace that command in the editable
-workflow or package CTest configuration without changing `lode.json`.
+workflow or package CTest configuration without changing `package.luau`.
 
-The workflow must fail if a `releaseTargets` target was not built and tested.
-It must not claim support based only on a recognized identifier or a platform
-key written in `lode.json.libraries`. Static native targets and iOS runners,
+The workflow must fail if an `implementation.targets.release` target was not
+built and tested. It must not claim support based only on a recognized
+identifier or a target listed in `package.luau`. Static compiled targets and iOS runners,
 signing, and loading remain outside this implementation.
 
-## Pure Luau workflow
+## Luau-only workflow
 
-Pure Luau packages do not build native modules, but the current Windows
-baseline still downloads the pinned SDK because its `lode` executable is the
-runtime used for validation and tests. Their baseline runs
+Packages without `implementation` do not build compiled artifacts, but the
+current Windows baseline still downloads the pinned SDK because its `lode`
+executable is the runtime used for validation and tests. Their baseline runs
 `lode install --dev --locked` when dependencies are declared, checks the
 package root convention, and runs the package's declared Luau test entry
 through that runtime.
@@ -130,7 +133,7 @@ The initial required-check names are:
 ```text
 Lode CI / validate
 Lode CI / tests
-Lode CI / native-<platform>-<architecture>
+Lode CI / implementation-<platform>-<architecture>
 ```
 
 The repository's branch protection, not the CLI, enforces these checks.

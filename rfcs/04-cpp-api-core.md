@@ -77,7 +77,7 @@ exports.Set("greet", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs a
 Often, C++ modules distribute helper Luau scripts (`.luau`) inside their package. You can require and execute them directly from C++.
 
 ```cpp
-// 1. Require a Luau file distributed alongside your native module DLL
+// 1. Require a Luau file distributed alongside the module implementation
 // The `@self` prefix ensures it resolves relative to the module's root directory.
 Lode::Value factoryFn = vm.Require("@self/utils/formatter");
 
@@ -92,8 +92,10 @@ if (result.IsOk()) {
 }
 ```
 
-## Building the Module Entry Point
-Every dynamic native module must export a standard C-linkage initialization function (`LodeModuleInit`). Lode simplifies this with the `LODE_MODULE(vm)` macro.
+## Building the Compiled Module Implementation
+Every module with a dynamic compiled implementation must export a standard
+C-linkage initialization function (`LodeModuleInit`). Lode simplifies this
+with the `LODE_MODULE(vm)` macro.
 
 ```cpp
 #include "Lode/Module.hpp"
@@ -105,14 +107,17 @@ LODE_MODULE(vm)
     Lode::Table exports = vm.CreateTable();
     exports.Set("myConst", Lode::Value(100.0));
     
-    // The braced initialization allows returning multiple Values back to Luau.
+    // The implementation returns one module table to Luau.
     return { exports };
 }
 ```
 
 ## Putting it All Together: A Complete Example
 
-To build a robust native module, you must provide both the C++ implementation (`src/main.cpp`) and a Luau type definition file (`init.luau`) so that the Language Server Protocol (LSP) can provide autocompletion.
+To build a robust compiled module implementation, provide both the C++
+implementation (`src/main.cpp`) and the fixed Luau interface file
+(`init.luau`) so that the Language Server Protocol (LSP) can provide
+autocompletion.
 
 ### 1. The C++ Implementation (`src/main.cpp`)
 ```cpp
@@ -141,13 +146,16 @@ LODE_MODULE(vm)
 ```
 
 ### 2. The Type Definitions (`init.luau`)
-This file is placed at the root of your module folder (next to `lode.json`). When the runtime loads your native DLL, this file is ignored by the VM, but the Luau LSP uses it to type-check scripts that `require` your module.
+This file is placed at the root of the module folder (next to
+`package.luau`). When the runtime loads the compiled implementation, this file
+is not executed, but the Luau LSP uses it to type-check scripts that `require`
+the module.
 
 ```luau
 -- Type definitions for LSP and Autocomplete
 -- The runtime will load the DLL directly, but tools will read this file.
 
-export type NativeModule = {
+export type ModuleApi = {
     -- Returns a greeting string. If no name is provided, defaults to "World".
     greet: (name: string?) -> string,
     
@@ -156,5 +164,5 @@ export type NativeModule = {
 }
 
 -- Return an empty table casted to our type so the LSP understands the export shape
-return {} :: NativeModule
+return {} :: ModuleApi
 ```

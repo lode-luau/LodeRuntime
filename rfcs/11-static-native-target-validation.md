@@ -1,4 +1,4 @@
-# RFC: Static Native Modules and Target Validation Plan
+# RFC: Static Compiled Module Implementations and Target Validation Plan
 
 ## Status
 
@@ -8,11 +8,12 @@ Proposed implementation plan. This document does not claim platform support.
 
 The runtime has a static-module registry and `LODE_STATIC` module macros. The
 normal package loader also has a dynamic-library path. Windows x64 dynamic
-packages are the only currently validated and published native-package path.
+packages are the only currently validated and published compiled-module path.
 
-The repository recognizes `ios` as a manifest and CMake target identifier, but
-has not built, linked, run, or shipped a static native module on iOS. Dynamic
-third-party module loading must not be presented as an iOS deployment path.
+The repository recognizes `ios` as a package and CMake target identifier, but
+has not built, linked, run, or shipped a static compiled implementation on
+iOS. Dynamic third-party module loading must not be presented as an iOS
+deployment path.
 
 ## Implementation phases
 
