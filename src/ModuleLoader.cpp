@@ -100,7 +100,12 @@ static luarequire_NavigateResult reset(lua_State* L, void* ctx, const char* requ
         if (fs::is_regular_file(canonicalP))
         {
             nav->currentPath = canonicalP.parent_path();
-            nav->packagePath = canonicalP.parent_path();
+            // Keep runtime @self resolution aligned with the Luau resolver:
+            // nested files (for example src/Runner.luau) belong to the
+            // nearest package root, not to their immediate source directory.
+            nav->packagePath = FindPackageRoot(canonicalP);
+            if (nav->packagePath.empty())
+                nav->packagePath = canonicalP.parent_path();
         }
         else
         {
@@ -404,7 +409,13 @@ static std::string GetChunkname(const LodeNavigationContext& nav)
 
 static std::string GetCacheKey(const LodeNavigationContext& nav)
 {
-    return PathToUtf8(nav.currentPath);
+    std::string key = PathToUtf8(nav.currentPath);
+    for (char& character : key)
+    {
+        if (character == '\\')
+            character = '/';
+    }
+    return key;
 }
 
 static luarequire_WriteResult get_chunkname(lua_State* L, void* ctx, char* buffer, size_t buffer_size, size_t* size_out)
