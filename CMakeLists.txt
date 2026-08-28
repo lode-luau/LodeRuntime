@@ -314,6 +314,20 @@ target_link_libraries(lode PRIVATE
     Luau.Analysis
 )
 
+# Installed runtime binaries and their vcpkg shared dependencies are kept in
+# the same bin directory by the packaging script. Make that layout relocatable
+# on POSIX systems; Windows searches the executable directory by default.
+if(APPLE)
+    set(LODE_RUNTIME_RPATH "@loader_path")
+elseif(UNIX)
+    set(LODE_RUNTIME_RPATH "$ORIGIN")
+endif()
+if(DEFINED LODE_RUNTIME_RPATH)
+    set_target_properties(LodeCore lode PROPERTIES
+        INSTALL_RPATH "${LODE_RUNTIME_RPATH}"
+    )
+endif()
+
 # Benchmark harness (opt-in: -DLODE_BUILD_BENCH=ON keeps the nightly build unchanged)
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/bench/CMakeLists.txt")
     add_subdirectory(bench)

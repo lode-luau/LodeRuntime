@@ -35,6 +35,57 @@ $moduleExtension = switch ($Platform) {
 }
 $assetTarget = "$Platform-$Architecture"
 $releaseBinRoot = Join-Path $releaseBuildRoot "bin/$configuration"
+$vcpkgTriplet = switch ($Platform) {
+    "windows" { "x64-windows" }
+    "linux" { "x64-linux" }
+    "macos" { if ($Architecture -eq "arm64") { "arm64-osx" } else { "x64-osx" } }
+}
+
+function Copy-VcpkgRuntimeLibraries {
+    param(
+        [Parameter(Mandatory = $true)] [string]$BuildRoot,
+        [Parameter(Mandatory = $true)] [string]$Configuration,
+        [Parameter(Mandatory = $true)] [string]$Destination
+    )
+
+    $vcpkgRoot = Join-Path $BuildRoot "vcpkg_installed/$vcpkgTriplet"
+    if (-not (Test-Path -LiteralPath $vcpkgRoot)) {
+        throw "vcpkg installation was not found: $vcpkgRoot"
+    }
+
+    $patterns = switch ($Platform) {
+        "windows" { @("*.dll") }
+        "macos" { @("*.dylib") }
+        default { @("*.so*") }
+    }
+    $releaseRoots = @(
+        (Join-Path $vcpkgRoot "bin"),
+        (Join-Path $vcpkgRoot "lib")
+    )
+    $debugRoots = @(
+        (Join-Path $vcpkgRoot "debug/bin"),
+        (Join-Path $vcpkgRoot "debug/lib")
+    )
+    $sourceRoots = if ($Configuration -eq "Debug") {
+        $debugRoots + $releaseRoots
+    } else {
+        $releaseRoots
+    }
+    $copiedNames = @{}
+
+    New-Item -ItemType Directory -Force -Path $Destination | Out-Null
+    foreach ($sourceRoot in $sourceRoots) {
+        if (-not (Test-Path -LiteralPath $sourceRoot)) { continue }
+        foreach ($pattern in $patterns) {
+            Get-ChildItem -LiteralPath $sourceRoot -File -Filter $pattern | ForEach-Object {
+                if (-not $copiedNames.ContainsKey($_.Name)) {
+                    Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $Destination $_.Name) -Force
+                    $copiedNames[$_.Name] = $true
+                }
+            }
+        }
+    }
+}
 
 function Copy-LodeDirectoryContents {
     param(
@@ -88,6 +139,14 @@ New-Item -ItemType Directory -Force -Path $runtimeBinDist, $stdlibDist, $develop
 cmake --install $debugBuildRoot --config Debug --prefix $developmentDist --component Lode
 cmake --install $releaseBuildRoot --config Release --prefix $developmentDist --component Lode
 Copy-Item LICENSE, README.md $developmentDist
+
+# The installed LodeCore target may use dynamic vcpkg libraries (miniz is one
+# example). Keep the Debug and Release development binaries self-contained.
+Copy-VcpkgRuntimeLibraries -BuildRoot $debugBuildRoot -Configuration Debug `
+    -Destination (Join-Path $developmentDist "bin/Debug")
+Copy-VcpkgRuntimeLibraries -BuildRoot $releaseBuildRoot -Configuration Release `
+    -Destination (Join-Path $developmentDist "bin/Release")
+
 Set-Content -Path "$developmentDist/VERSION" -Value $ver
 $lodeMetadataPath = Join-Path $developmentDist "share/lode/lode-install.json"
 if (-not (Test-Path -LiteralPath $lodeMetadataPath)) {
@@ -119,6 +178,12 @@ foreach ($pattern in $runtimeLibraryPattern) {
     if (-not $runtimeLibrary) { throw "Runtime library matching '$pattern' was not found in $releaseBinRoot" }
     Copy-Item -LiteralPath $runtimeLibrary.FullName -Destination $runtimeBinDist
 }
+# Copy every dynamic vcpkg runtime library used by the selected triplet. This
+# includes miniz.dll on Windows and libminiz.so/libminiz.dylib on POSIX when the
+# triplet selects shared linkage. Static libraries are never copied.
+Copy-VcpkgRuntimeLibraries -BuildRoot $releaseBuildRoot -Configuration Release `
+    -Destination $runtimeBinDist
+
 Copy-Item LICENSE, README.md $distributionDist
 Set-Content -Path "$distributionDist/VERSION" -Value $ver
 
@@ -330,8 +395,7 @@ foreach ($record in ($moduleRecords.Values | Sort-Object RelativePath)) {
             # Keep it beside each module so the packaged artifact remains
             # relocatable and can be loaded without a system OpenSSL install.
             if ($Platform -ne "windows" -and $name -in @("crypto", "http", "tcp", "websocket")) {
-                $triplet = if ($Platform -eq "linux") { "x64-linux" } elseif ($Architecture -eq "arm64") { "arm64-osx" } else { "x64-osx" }
-                $vcpkgRoot = Join-Path $releaseBuildRoot "vcpkg_installed/$triplet"
+                $vcpkgRoot = Join-Path $releaseBuildRoot "vcpkg_installed/$vcpkgTriplet"
                 $opensslRoots = @((Join-Path $vcpkgRoot "lib"), (Join-Path $vcpkgRoot "bin"))
                 $opensslFiles = foreach ($opensslRoot in $opensslRoots) {
                     if (Test-Path -LiteralPath $opensslRoot) {
