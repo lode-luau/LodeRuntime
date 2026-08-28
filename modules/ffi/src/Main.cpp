@@ -204,7 +204,7 @@ bool ExtractStrictPointer(const Lode::StackValue& v, void** out, std::string* er
         if (closed.IsOk() && closed.GetValue().IsBoolean() && closed.GetValue().AsBoolean()) { *error="callback is closed"; return false; }
         const auto storage=table.Get("__ffiBuffer");
         if (storage.IsOk() && storage.GetValue().IsBuffer()) { const auto s=storage.GetValue().AsSpan(); *out=s.empty()?nullptr:s.data(); return true; }
-        const auto pointer=table.Get("pointer");
+        const auto pointer=table.Get("Pointer");
         if (pointer.IsOk() && pointer.GetValue().GetType()==Lode::ValueType::LightUserdata) { *out=pointer.GetValue().AsLightUserdata(); return true; }
     }
     *error="expected an opaque pointer, buffer, typed struct, or callback"; return false;
@@ -335,6 +335,17 @@ ArgClass ParseSingleType(const std::string& type, const TypeRegistry* registry =
     if (parsed.prototypes.size() != 1 || parsed.prototypes.front().args.size() != 1)
         BindError("ffi: expected one supported C type");
     return parsed.prototypes.front().args.front();
+}
+
+std::string TypeNameFrom(const Lode::StackValue& value, const char* api)
+{
+    if (value.IsString()) return value.AsString();
+    if (value.IsTable())
+    {
+        const auto name = value.AsTable().Get("__ffiType");
+        if (name.IsOk() && name.GetValue().IsString()) return name.GetValue().AsString();
+    }
+    BindError(std::string(api) + ": expected a C type name or descriptor");
 }
 
 TypeRegistry RegistryForState(lua_State* state)
@@ -628,13 +639,6 @@ bool ExtractPointerArg(const Lode::StackValue& v, void** out, std::string* err,
         case Lode::ValueType::LightUserdata:
             *out = v.AsLightUserdata();
             return true;
-        case Lode::ValueType::Integer:
-            *out = reinterpret_cast<void*>(static_cast<uintptr_t>(v.AsInteger()));
-            return true;
-        case Lode::ValueType::Number:
-            *out = reinterpret_cast<void*>(static_cast<uintptr_t>(
-                static_cast<int64_t>(v.AsNumber())));
-            return true;
         case Lode::ValueType::String:
         {
             *stringStorage = std::string(v.AsStringView());
@@ -662,7 +666,7 @@ bool ExtractPointerArg(const Lode::StackValue& v, void** out, std::string* err,
                 *err = "callback is closed";
                 return false;
             }
-            const auto pointer = v.AsTable().Get("pointer");
+            const auto pointer = v.AsTable().Get("Pointer");
             if (pointer.IsOk() && pointer.GetValue().GetType() == Lode::ValueType::LightUserdata)
             {
                 *out = pointer.GetValue().AsLightUserdata();
@@ -673,7 +677,7 @@ bool ExtractPointerArg(const Lode::StackValue& v, void** out, std::string* err,
         default:
             break;
     }
-    *err = "expected number, string, buffer, pointer or nil";
+    *err = "expected string, buffer, opaque pointer or nil";
     return false;
 }
 
@@ -898,6 +902,25 @@ void PushResult(lua_State* L, RetKind kind, uint64_t intValue, double floatValue
             lua_pushnumber(L, floatValue);
             break;
     }
+}
+
+// Configuration and object-construction functions still return a Lode::Value,
+// but are installed through the N closure path as well.  This keeps the cached
+// State wrapper and exception bridge used by the hot bound-symbol closures;
+// only their intentionally non-hot result materialization remains boxed.
+template <typename Fn>
+Lode::Value CreateFfiFunctionN(Lode::State& vm, Fn&& function)
+{
+    return vm.CreateFastFunctionN([fn = std::forward<Fn>(function)](Lode::State& state, Lode::StackArgs args) mutable -> int {
+        // FastFunctionN caches the module-registration State. Configuration
+        // APIs may allocate tables/buffers, so bind them to the currently
+        // executing coroutine state rather than that cached root stack.
+        Lode::State current(args.RawState());
+        Lode::Value result = fn(current, args);
+        if (result.IsNil()) return 0;
+        result.PushToLuaState(args.RawState());
+        return 1;
+    });
 }
 
 struct AsyncCall
@@ -1173,7 +1196,7 @@ Lode::Table BindLibrary(Lode::State& vm, std::shared_ptr<DynamicLibrary> lib,
         exports.Set(proto.name, vm.CreateFastFunctionN(closure));
     }
 
-    exports.Set("callAsync", vm.CreateFastFunction([lib, bindings](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("CallAsync", CreateFfiFunctionN(vm, [lib, bindings](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
         if (args.Size() < 1 || !args[0].IsString())
         {
             vm.RaiseError("ffi.callAsync: expected a bound function name as the first argument");
@@ -1224,11 +1247,10 @@ Lode::Table BindLibrary(Lode::State& vm, std::shared_ptr<DynamicLibrary> lib,
     // Optional explicit early release. Bound closures capture the shared_ptr,
     // so calling them afterwards is still memory-safe; the underlying handle
     // simply stays resident until the VM collects them.
-    auto close = vm.CreateFastFunction([lib](Lode::State&, Lode::StackArgs) -> Lode::Value {
+    auto close = CreateFfiFunctionN(vm, [lib](Lode::State&, Lode::StackArgs) -> Lode::Value {
         lib->Close();
         return Lode::Value();
     });
-    exports.Set("close", close);
     exports.Set("Close", close);
 
     return exports;
@@ -1249,15 +1271,15 @@ LODE_MODULE(vm)
         const Lode::Table table = args[2].AsTable();
         for (const std::string& key : table.GetKeys())
         {
-            if (key != "searchDllDirectory")
-                BindError("ffi.load: unknown option '" + key + "'");
+            if (key != "SearchDllDirectory")
+                BindError("FFI.Load: unknown option '" + key + "'");
         }
 
-        const auto value = table.Get("searchDllDirectory");
+        const auto value = table.Get("SearchDllDirectory");
         if (value.IsOk() && !value.GetValue().IsNil())
         {
             if (!value.GetValue().IsBoolean())
-                BindError("ffi.load: options.searchDllDirectory must be a boolean");
+                BindError("FFI.Load: options.SearchDllDirectory must be a boolean");
             options.searchDllDirectory = value.GetValue().AsBoolean();
         }
         return options;
@@ -1272,7 +1294,7 @@ LODE_MODULE(vm)
     //       int MessageBoxW(void* hwnd, const char* text, const char* caption, unsigned flags);
     //   ]])
     //   user32.MessageBoxW(nil, "hi", "t", 0)
-    exports.Set("load", vm.CreateFastFunction([parseLoadOptions](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("Load", CreateFfiFunctionN(vm, [parseLoadOptions](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
         if (args.Size() < 1 || !args[0].IsString())
             BindError("ffi.load: expected a library name string");
         if (args.Size() > 3)
@@ -1310,7 +1332,7 @@ LODE_MODULE(vm)
     // ffi.C(declarations) binds symbols visible from the current process.
     // It is intentionally a function rather than a permanent table: each
     // declaration block is parsed and resolved eagerly like ffi.load.
-    exports.Set("C", vm.CreateFastFunction([](Lode::State& callVm, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("C", CreateFfiFunctionN(vm, [](Lode::State& callVm, Lode::StackArgs args) -> Lode::Value {
         if (args.Size() != 1 || !args[0].IsString())
             BindError("ffi.C: declarations must be a string");
 
@@ -1321,13 +1343,13 @@ LODE_MODULE(vm)
         return Lode::Value(BindLibrary(callVm, lib, ParseForState(callVm.GetMainThread(), args[0].AsString())));
     }));
 
-    exports.Set("lastError", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("LastError", CreateFfiFunctionN(vm, [](Lode::State&, Lode::StackArgs args) -> Lode::Value {
         if (args.Size() != 0)
             BindError("ffi.lastError: expected no arguments");
         return Lode::Value(static_cast<double>(gLastError));
     }));
 
-    exports.Set("cdef", vm.CreateFastFunction([](Lode::State& callVm, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("CDef", CreateFfiFunctionN(vm, [](Lode::State& callVm, Lode::StackArgs args) -> Lode::Value {
         if (args.Size() != 1 || !args[0].IsString()) BindError("ffi.cdef: declarations must be a string");
         const std::string source = args[0].AsString();
         std::string functionTypeName;
@@ -1338,8 +1360,21 @@ LODE_MODULE(vm)
             const auto found = gTypeRegistries.find(callVm.GetMainThread());
             if (found != gTypeRegistries.end()) existing = found->second;
         }
-        const CdefParseResult parsed = ParseCdef(RegistryPreamble(existing) +
-            (normalizedFunction.empty() ? source : normalizedFunction));
+        const std::string declarations = normalizedFunction.empty() ? source : normalizedFunction;
+        // The preamble lets new declarations refer to types already registered
+        // for this State.  A compatible redefinition, however, cannot be
+        // parsed together with its existing declaration by the C parser.  In
+        // that case parse the submitted declaration independently and let the
+        // registry below perform the semantic compatibility check.
+        CdefParseResult parsed;
+        try
+        {
+            parsed = ParseCdef(RegistryPreamble(existing) + declarations);
+        }
+        catch (const std::runtime_error&)
+        {
+            parsed = ParseCdef(declarations);
+        }
         std::lock_guard lock(gTypeRegistryMutex);
         auto& registry = gTypeRegistries[callVm.GetMainThread()];
         for (const auto& layout : parsed.structs)
@@ -1369,15 +1404,58 @@ LODE_MODULE(vm)
         return Lode::Value();
     }));
 
+    exports.Set("TypeOf", CreateFfiFunctionN(vm, [](Lode::State& callVm, Lode::StackArgs args) -> Lode::Value {
+        if (args.Size() != 1 || !args[0].IsString()) BindError("FFI.TypeOf: expected a type name");
+        const std::string name = args[0].AsString();
+        const TypeRegistry registry = RegistryForState(callVm.GetMainThread());
+        Lode::Table descriptor = callVm.CreateTable();
+        descriptor.Set("Name", Lode::Value(name));
+        descriptor.Set("__ffiType", Lode::Value(name));
+        if (const auto found = registry.structs.find(name); found != registry.structs.end())
+        {
+            descriptor.Set("Size", Lode::Value(static_cast<double>(found->second.raw.size)));
+            descriptor.Set("Align", Lode::Value(static_cast<double>(found->second.raw.alignment)));
+            Lode::Table offsets = callVm.CreateTable();
+            for (const auto& [field, offset] : found->second.raw.offsets)
+                offsets.Set(field, Lode::Value(static_cast<double>(offset)));
+            descriptor.Set("Offset", offsets);
+        }
+        else if (registry.functionTypes.contains(name))
+        {
+            descriptor.Set("Size", Lode::Value(static_cast<double>(sizeof(void*))));
+            descriptor.Set("Align", Lode::Value(static_cast<double>(alignof(void*))));
+            descriptor.Set("Offset", callVm.CreateTable());
+            descriptor.Set("__ffiFunction", Lode::Value(true));
+        }
+        else
+        {
+            const ArgClass type = registry.aliases.contains(name) ? registry.aliases.at(name) : ParseSingleType(name, &registry);
+            descriptor.Set("Size", Lode::Value(static_cast<double>(SizeOf(type))));
+            descriptor.Set("Align", Lode::Value(static_cast<double>(AlignOf(type))));
+            descriptor.Set("Offset", callVm.CreateTable());
+        }
+        return Lode::Value(descriptor);
+    }));
+
+    exports.Set("AlignOf", CreateFfiFunctionN(vm, [](Lode::State& callVm, Lode::StackArgs args) -> Lode::Value {
+        if (args.Size() != 1) BindError("FFI.AlignOf: expected a type name or descriptor");
+        const std::string name = TypeNameFrom(args[0], "FFI.AlignOf");
+        const TypeRegistry registry = RegistryForState(callVm.GetMainThread());
+        if (const auto found = registry.structs.find(name); found != registry.structs.end())
+            return Lode::Value(static_cast<double>(found->second.raw.alignment));
+        const ArgClass type = registry.aliases.contains(name) ? registry.aliases.at(name) : ParseSingleType(name, &registry);
+        return Lode::Value(static_cast<double>(AlignOf(type)));
+    }));
+
     // ffi.new(bytes) / ffi.new("type") returns raw, zero-initialized
     // Luau-owned memory. The cdef author controls its layout and passes the
     // buffer to pointer parameters without wrapper ownership machinery.
-    exports.Set("new", vm.CreateFastFunction([](Lode::State& callVm, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("new", CreateFfiFunctionN(vm, [](Lode::State& callVm, Lode::StackArgs args) -> Lode::Value {
         if (args.Size() < 1 || args.Size() > 2)
             BindError("ffi.new: expected a byte size number or C type string");
-        if (args[0].IsString())
+        if (args[0].IsString() || args[0].IsTable())
         {
-            const std::string name = args[0].AsString();
+            const std::string name = TypeNameFrom(args[0], "FFI.new");
             RegisteredStruct registered;
             {
                 std::lock_guard lock(gTypeRegistryMutex);
@@ -1431,7 +1509,7 @@ LODE_MODULE(vm)
                     void* pointer = nullptr;
                     if (value.GetType() == Lode::ValueType::LightUserdata) pointer = value.AsLightUserdata();
                     else if (value.IsBuffer()) { auto span = value.AsSpan(); pointer = span.empty() ? nullptr : span.data(); }
-                    else if (value.IsTable()) { const auto v = value.AsTable().Get("pointer"); if (v.IsOk()) pointer = v.GetValue().AsLightUserdata(); }
+                    else if (value.IsTable()) { const auto v = value.AsTable().Get("Pointer"); if (v.IsOk()) pointer = v.GetValue().AsLightUserdata(); }
                     else if (!value.IsNil()) BindError("ffi struct: pointer field requires pointer, buffer, callback, or nil");
                     std::memcpy(p, &pointer, sizeof(pointer)); (*keepAlive)[key.AsString()] = value; return;
                 }
@@ -1466,11 +1544,11 @@ LODE_MODULE(vm)
         BindError("ffi.new: expected a byte size number or C type string");
     }));
 
-    exports.Set("sizeof", vm.CreateFastFunction([](Lode::State& callVm, Lode::StackArgs args) -> Lode::Value {
-        if (args.Size() != 1) BindError("ffi.sizeof: expected one C type string or typed value");
-        if (args[0].IsString())
+    exports.Set("SizeOf", CreateFfiFunctionN(vm, [](Lode::State& callVm, Lode::StackArgs args) -> Lode::Value {
+        if (args.Size() != 1) BindError("ffi.sizeof: expected one C type string, descriptor, or typed value");
+        if (args[0].IsString() || args[0].IsTable())
         {
-            const std::string name = args[0].AsString();
+            const std::string name = TypeNameFrom(args[0], "FFI.SizeOf");
             std::lock_guard lock(gTypeRegistryMutex);
             const auto state = gTypeRegistries.find(callVm.GetMainThread());
             if (state != gTypeRegistries.end())
@@ -1487,32 +1565,39 @@ LODE_MODULE(vm)
         BindError("ffi.sizeof: expected one C type string or typed value");
     }));
 
-    exports.Set("struct", vm.CreateFastFunction([](Lode::State& callVm, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("Struct", CreateFfiFunctionN(vm, [](Lode::State& callVm, Lode::StackArgs args) -> Lode::Value {
         if (args.Size() != 1 || !args[0].IsString())
             BindError("ffi.struct: expected C field declarations as a string");
         return callVm.CreateBuffer(ParseStructLayout(args[0].AsString()).size);
     }));
 
-    exports.Set("union", vm.CreateFastFunction([](Lode::State& callVm, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("Union", CreateFfiFunctionN(vm, [](Lode::State& callVm, Lode::StackArgs args) -> Lode::Value {
         if (args.Size() != 1 || !args[0].IsString())
             BindError("ffi.union: expected C field declarations as a string");
         return callVm.CreateBuffer(ParseUnionLayout(args[0].AsString()).size);
     }));
 
-    exports.Set("offsetof", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs args) -> Lode::Value {
-        if (args.Size() != 2 || !args[0].IsString() || !args[1].IsString())
-            BindError("ffi.offsetof: expected field declarations and a field name");
-        const RawStructLayout layout = ParseStructLayout(args[0].AsString());
-        const auto field = layout.offsets.find(args[1].AsString());
-        if (field == layout.offsets.end())
-            BindError("ffi.offsetof: unknown field '" + args[1].AsString() + "'");
+    exports.Set("OffsetOf", CreateFfiFunctionN(vm, [](Lode::State& callVm, Lode::StackArgs args) -> Lode::Value {
+        if (args.Size() != 2 || !args[1].IsString())
+            BindError("FFI.OffsetOf: expected aggregate type and field name");
+        const std::string name = TypeNameFrom(args[0], "FFI.OffsetOf");
+        const TypeRegistry registry = RegistryForState(callVm.GetMainThread());
+        const auto type = registry.structs.find(name);
+        if (type == registry.structs.end()) BindError("FFI.OffsetOf: type is not a registered aggregate");
+        const auto field = type->second.raw.offsets.find(args[1].AsString());
+        if (field == type->second.raw.offsets.end())
+            BindError("FFI.OffsetOf: unknown field '" + args[1].AsString() + "'");
         return Lode::Value(static_cast<double>(field->second));
     }));
 
+    // Address helpers moved to @address. Keep their implementation compiled
+    // during the transition, but never expose the legacy surface.
+    if (false)
+    {
     // Copies bytes out of caller-owned C memory. These helpers deliberately
     // do not track ownership or validate raw addresses: FFI pointers are a
     // low-level contract, while the returned string/buffer is Luau-owned.
-    exports.Set("string", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("string", CreateFfiFunctionN(vm, [](Lode::State&, Lode::StackArgs args) -> Lode::Value {
         if (args.Size() < 1 || args.Size() > 2)
             BindError("ffi.string: expected a pointer and optional byte count");
         void* pointer = nullptr;
@@ -1529,7 +1614,7 @@ LODE_MODULE(vm)
         return Lode::Value(std::string(static_cast<const char*>(pointer), bytes));
     }));
 
-    exports.Set("copy", vm.CreateFastFunction([](Lode::State& callVm, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("copy", CreateFfiFunctionN(vm, [](Lode::State& callVm, Lode::StackArgs args) -> Lode::Value {
         if (args.Size() != 2)
             BindError("ffi.copy: expected a pointer and byte count");
         void* pointer = nullptr;
@@ -1546,7 +1631,7 @@ LODE_MODULE(vm)
         return output;
     }));
 
-    exports.Set("wstring", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("wstring", CreateFfiFunctionN(vm, [](Lode::State&, Lode::StackArgs args) -> Lode::Value {
 #if defined(_WIN32)
         if (args.Size() < 1 || args.Size() > 2)
             BindError("ffi.wstring: expected a UTF-16 pointer and optional code-unit count");
@@ -1577,7 +1662,7 @@ LODE_MODULE(vm)
 #endif
     }));
 
-    exports.Set("wbuffer", vm.CreateFastFunction([](Lode::State& callVm, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("wbuffer", CreateFfiFunctionN(vm, [](Lode::State& callVm, Lode::StackArgs args) -> Lode::Value {
 #if defined(_WIN32)
         if (args.Size() != 1 || !args[0].IsString())
             BindError("ffi.wbuffer: expected one UTF-8 string");
@@ -1599,7 +1684,7 @@ LODE_MODULE(vm)
 
     // Forms a raw address without attaching lifetime or bounds metadata. It
     // is intentionally just byte-address arithmetic for low-level callers.
-    exports.Set("ptr", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("ptr", CreateFfiFunctionN(vm, [](Lode::State&, Lode::StackArgs args) -> Lode::Value {
         if (args.Size() < 1 || args.Size() > 2)
             BindError("ffi.ptr: expected a pointer-like value and optional byte offset");
         void* pointer = nullptr;
@@ -1618,7 +1703,7 @@ LODE_MODULE(vm)
         return address == 0 ? Lode::Value() : Lode::Value(reinterpret_cast<void*>(address));
     }));
 
-    exports.Set("addr", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("addr", CreateFfiFunctionN(vm, [](Lode::State&, Lode::StackArgs args) -> Lode::Value {
         if (args.Size() < 1 || args.Size() > 2) BindError("ffi.addr: expected a pointer-like value and optional byte offset");
         void* pointer=nullptr; std::string error;
         if (!ExtractStrictPointer(args[0], &pointer, &error)) BindError("ffi.addr: " + error);
@@ -1626,14 +1711,14 @@ LODE_MODULE(vm)
         StrictRange(args[0], offset, 1, "ffi.addr");
         return Lode::Value(StrictAddress(pointer, offset, 1, "ffi.addr"));
     }));
-    exports.Set("cast", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("cast", CreateFfiFunctionN(vm, [](Lode::State&, Lode::StackArgs args) -> Lode::Value {
         if (args.Size()!=2 || !args[0].IsString()) BindError("ffi.cast: expected a C type and opaque pointer");
         const TypeRegistry registry = RegistryForState(args.RawState());
         if (ParseSingleType(args[0].AsString(), &registry) != ArgClass::Ptr) BindError("ffi.cast: target type must be a pointer type");
         void* pointer=nullptr; std::string error; if(!ExtractStrictPointer(args[1], &pointer, &error)) BindError("ffi.cast: "+error);
         return Lode::Value(StrictAddress(pointer, 0, 1, "ffi.cast"));
     }));
-    exports.Set("read", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("read", CreateFfiFunctionN(vm, [](Lode::State&, Lode::StackArgs args) -> Lode::Value {
         if (args.Size()<2 || args.Size()>3 || !args[1].IsString()) BindError("ffi.read: expected pointer, C type, and optional offset");
         void* pointer=nullptr; std::string error; if(!ExtractStrictPointer(args[0], &pointer, &error) || !pointer) BindError("ffi.read: expected non-NULL pointer");
         const TypeRegistry registry = RegistryForState(args.RawState());
@@ -1644,7 +1729,7 @@ LODE_MODULE(vm)
         // Materialize through a bounded temporary to avoid pretending foreign memory has Luau buffer bounds.
         Lode::Value copy=Lode::State(args.RawState()).CreateBuffer(SizeOf(type)); std::memcpy(copy.AsSpan().data(), address, SizeOf(type)); return ReadScalar(copy,0,type);
     }));
-    exports.Set("write", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("write", CreateFfiFunctionN(vm, [](Lode::State&, Lode::StackArgs args) -> Lode::Value {
         if (args.Size()<3 || args.Size()>4 || !args[1].IsString()) BindError("ffi.write: expected pointer, C type, value, and optional offset");
         void* pointer=nullptr; std::string error; if(!ExtractStrictPointer(args[0], &pointer, &error) || !pointer) BindError("ffi.write: expected non-NULL pointer");
         const TypeRegistry registry = RegistryForState(args.RawState());
@@ -1653,7 +1738,7 @@ LODE_MODULE(vm)
         StrictRange(args[0], offset, SizeOf(type), "ffi.write");
         void* target=StrictAddress(pointer, offset, AlignOf(type), "ffi.write"); Lode::Value temp=Lode::State(args.RawState()).CreateBuffer(SizeOf(type)); WriteScalar(temp,0,type,args[2]); std::memcpy(target,temp.AsSpan().data(),SizeOf(type)); return Lode::Value(pointer);
     }));
-    exports.Set("readPointer", vm.CreateFastFunction([](Lode::State& state, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("readPointer", CreateFfiFunctionN(vm, [](Lode::State& state, Lode::StackArgs args) -> Lode::Value {
         if(args.Size()<1 || args.Size()>2) BindError("ffi.readPointer: expected pointer and optional offset");
         void* pointer=nullptr; std::string error; if(!ExtractStrictPointer(args[0],&pointer,&error)||!pointer) BindError("ffi.readPointer: expected non-NULL pointer");
         const size_t offset = args.Size()==2 ? StrictOffset(args[1], "ffi.readPointer") : 0;
@@ -1661,7 +1746,7 @@ LODE_MODULE(vm)
         void* address = StrictAddress(pointer, offset, alignof(void*), "ffi.readPointer");
         Lode::Value tmp=state.CreateBuffer(sizeof(void*)); std::memcpy(tmp.AsSpan().data(),address,sizeof(void*)); return ReadScalar(tmp,0,ArgClass::Ptr);
     }));
-    exports.Set("writePointer", vm.CreateFastFunction([](Lode::State& state, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("writePointer", CreateFfiFunctionN(vm, [](Lode::State& state, Lode::StackArgs args) -> Lode::Value {
         if(args.Size()!=3) BindError("ffi.writePointer: expected pointer, offset, and pointer value");
         void* pointer=nullptr; std::string error; if(!ExtractStrictPointer(args[0],&pointer,&error)||!pointer) BindError("ffi.writePointer: expected non-NULL pointer");
         const size_t offset = StrictOffset(args[1], "ffi.writePointer");
@@ -1670,7 +1755,7 @@ LODE_MODULE(vm)
         Lode::Value tmp=state.CreateBuffer(sizeof(void*)); WriteScalar(tmp,0,ArgClass::Ptr,args[2]); std::memcpy(address,tmp.AsSpan().data(),sizeof(void*)); return Lode::Value(pointer);
     }));
 
-    exports.Set("fill", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("fill", CreateFfiFunctionN(vm, [](Lode::State&, Lode::StackArgs args) -> Lode::Value {
         if (args.Size() != 3)
             BindError("ffi.fill: expected destination, byte value, and byte count");
         void* destination = nullptr;
@@ -1685,7 +1770,7 @@ LODE_MODULE(vm)
         return Lode::Value(destination);
     }));
 
-    exports.Set("move", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("move", CreateFfiFunctionN(vm, [](Lode::State&, Lode::StackArgs args) -> Lode::Value {
         if (args.Size() != 3)
             BindError("ffi.move: expected destination, source, and byte count");
         void* destination = nullptr;
@@ -1702,11 +1787,12 @@ LODE_MODULE(vm)
         std::memmove(destination, source, static_cast<size_t>(args[2].AsNumber()));
         return Lode::Value(destination);
     }));
+    }
 
-    exports.Set("callback", vm.CreateFastFunction([](Lode::State& callVm, Lode::StackArgs args) -> Lode::Value {
-        if ((args.Size() != 2 && args.Size() != 3) || !args[0].IsString() || !args[1].IsFunction())
+    exports.Set("Callback", CreateFfiFunctionN(vm, [](Lode::State& callVm, Lode::StackArgs args) -> Lode::Value {
+        if ((args.Size() != 2 && args.Size() != 3) || (!args[0].IsString() && !args[0].IsTable()) || !args[1].IsFunction())
             BindError("ffi.callback: expected declaration, function, and optional options");
-        std::string declaration = args[0].AsString();
+        std::string declaration = TypeNameFrom(args[0], "FFI.Callback");
         // Callback declarations may omit a C function name. Give this
         // standalone declaration an internal name before using the ordinary
         // function parser; named declarations are preserved unchanged.
@@ -1751,13 +1837,13 @@ LODE_MODULE(vm)
         if (args.Size() == 3 && !args[2].IsNil())
         {
             if (!args[2].IsTable()) BindError("ffi.callback: options must be a table");
-            const auto mode = args[2].AsTable().Get("foreignThread");
+            const auto mode = args[2].AsTable().Get("ForeignThread");
             for (const auto& key : args[2].AsTable().GetKeys())
-                if (key != "foreignThread") BindError("ffi.callback: unknown option '" + key + "'");
+                if (key != "ForeignThread") BindError("FFI.Callback: unknown option '" + key + "'");
             if (mode.IsOk() && !mode.GetValue().IsNil())
             {
                 if (!mode.GetValue().IsString() || mode.GetValue().AsString() != "post")
-                    BindError("ffi.callback: options.foreignThread must be 'post'");
+                    BindError("FFI.Callback: options.ForeignThread must be 'post'");
                 callback->postForeignCalls = true;
             }
         }
@@ -1776,18 +1862,17 @@ LODE_MODULE(vm)
             BindError("ffi.callback: failed to prepare closure");
 
         Lode::Table handle = callVm.CreateTable();
-        handle.Set("pointer", Lode::Value(callback->code));
-        const Lode::Value close = callVm.CreateFastFunction([callback, handle](Lode::State&, Lode::StackArgs) mutable -> Lode::Value {
+        handle.Set("Pointer", Lode::Value(callback->code));
+        const Lode::Value close = CreateFfiFunctionN(callVm, [callback, handle](Lode::State&, Lode::StackArgs) mutable -> Lode::Value {
             callback->Close();
             handle.Set("__ffiClosed", Lode::Value(true));
             return Lode::Value();
         });
-        handle.Set("close", close);
         handle.Set("Close", close);
-        handle.Set("foreignCalls", callVm.CreateFastFunction([callback](Lode::State&, Lode::StackArgs) -> Lode::Value {
+        handle.Set("ForeignCalls", CreateFfiFunctionN(callVm, [callback](Lode::State&, Lode::StackArgs) -> Lode::Value {
             return Lode::Value(static_cast<double>(callback->foreignCalls.load()));
         }));
-        handle.Set("state", callVm.CreateFastFunction([callback](Lode::State& state, Lode::StackArgs args) -> Lode::Value {
+        handle.Set("State", CreateFfiFunctionN(callVm, [callback](Lode::State& state, Lode::StackArgs args) -> Lode::Value {
             if (args.Size() != 0) BindError("ffi callback state: expected no arguments");
             Lode::Table snapshot = state.CreateTable();
             snapshot.Set("closed", Lode::Value(callback->IsClosed()));
@@ -1799,7 +1884,7 @@ LODE_MODULE(vm)
         return Lode::Value(handle);
     }));
 
-    exports.Set("post", vm.CreateFastFunction([](Lode::State& callVm, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("Post", CreateFfiFunctionN(vm, [](Lode::State& callVm, Lode::StackArgs args) -> Lode::Value {
         if (args.Size() != 1 || !args[0].IsFunction()) BindError("ffi.post: expected one function");
         const Lode::Value fn = args[0].ToValue();
         if (!callVm.GetEventLoop().Post([state = callVm.GetMainThread(), fn] {
