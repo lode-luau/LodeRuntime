@@ -769,7 +769,12 @@ ValidationReport Validate(const fs::path& packageRoot,
         Error(report, "Packages must contain a root init.luau file.");
 
     if (!fs::is_regular_file(root / "LICENSE"))
-        Error(report, "Packages must contain a root LICENSE file.");
+    {
+        if (mode == ValidationMode::InstallSource || mode == ValidationMode::InstallArtifact)
+            Warning(report, "Package has no LICENSE file; run `lode init --license <SPDX>` to add one.");
+        else
+            Error(report, "Packages must contain a root LICENSE file.");
+    }
 
     for (const char* legacyField : { "libraries", "releaseTargets" })
     {

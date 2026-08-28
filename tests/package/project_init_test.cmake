@@ -9,7 +9,7 @@ file(MAKE_DIRECTORY "${test_root}")
 
 set(pure_root "${test_root}/pure")
 execute_process(
-    COMMAND "${LODE_EXECUTABLE}" init example_project --description "A generated Luau package" "${pure_root}"
+    COMMAND "${LODE_EXECUTABLE}" init example_project --description "A generated Luau package" --license MIT "${pure_root}"
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
 if(NOT result EQUAL 0)
     message(FATAL_ERROR "lode init failed for a pure Luau project:\n${output}\n${error}")
@@ -60,7 +60,7 @@ endif()
 
 set(native_root "${test_root}/native")
 execute_process(
-    COMMAND "${LODE_EXECUTABLE}" init native_project --native --description "A generated native package" "${native_root}"
+    COMMAND "${LODE_EXECUTABLE}" init native_project --native --description "A generated native package" --license MIT "${native_root}"
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
 if(NOT result EQUAL 0)
     message(FATAL_ERROR "lode init failed for a native project:\n${output}\n${error}")
@@ -134,18 +134,30 @@ if(NOT preserved_content MATCHES "do not overwrite")
     message(FATAL_ERROR "lode init modified existing file in non-empty directory")
 endif()
 
+# Test: lode init with no arguments auto-derives name from directory
+set(auto_root "${test_root}/auto-project")
+file(MAKE_DIRECTORY "${auto_root}")
 execute_process(
-    COMMAND "${LODE_EXECUTABLE}" init missing_description "${test_root}/missing-description"
+    COMMAND "${LODE_EXECUTABLE}" init
+    WORKING_DIRECTORY "${auto_root}"
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
-if(result EQUAL 0 OR EXISTS "${test_root}/missing-description/package.luau")
-    message(FATAL_ERROR "lode init accepted a missing description")
+if(NOT result EQUAL 0)
+    message(FATAL_ERROR "lode init with no arguments failed:\n${output}\n${error}")
+endif()
+if(NOT EXISTS "${auto_root}/package.luau")
+    message(FATAL_ERROR "lode init with no arguments did not create package.luau")
+endif()
+file(READ "${auto_root}/package.luau" auto_manifest)
+string(FIND "${auto_manifest}" "name = \"auto-project\"" position)
+if(position LESS 0)
+    message(FATAL_ERROR "lode init with no arguments did not derive name from directory")
 endif()
 
 execute_process(
-    COMMAND "${LODE_EXECUTABLE}" init --description "Missing project name"
+    COMMAND "${LODE_EXECUTABLE}" init "bad/name" "${test_root}/bad-name"
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
-if(result EQUAL 0)
-    message(FATAL_ERROR "lode init accepted a missing project name")
+if(result EQUAL 0 OR EXISTS "${test_root}/bad-name/package.luau")
+    message(FATAL_ERROR "lode init accepted an unsafe project name")
 endif()
 
 file(REMOVE_RECURSE "${test_root}")

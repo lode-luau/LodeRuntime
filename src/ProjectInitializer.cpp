@@ -114,17 +114,10 @@ std::string LuauString(std::string_view value)
 ProjectInitResult InitializeProject(const fs::path& projectRoot, const ProjectInitOptions& options)
 {
     ProjectInitResult result;
-    if (!IsSafeName(options.name))
-        Error(result, "Project name must contain only letters, digits, '.', '_' or '-'.");
-    if (options.description.empty())
-        Error(result, "Project description must not be empty.");
-    if (!IsSemVer(options.version))
-        Error(result, "Project version must be a valid SemVer string.");
-    if (options.license.empty())
-        Error(result, "Project license must not be empty.");
-    if (!result.IsValid())
-        return result;
 
+    // Auto-fill defaults: derive name from directory if empty, use sensible
+    // defaults for description and version.
+    ProjectInitOptions resolved = options;
     std::error_code ec;
     const fs::path root = fs::absolute(projectRoot, ec);
     if (ec)
@@ -132,6 +125,19 @@ ProjectInitResult InitializeProject(const fs::path& projectRoot, const ProjectIn
         Error(result, "Cannot resolve project directory: " + ec.message());
         return result;
     }
+    if (resolved.name.empty())
+        resolved.name = root.filename().string();
+    if (resolved.description.empty())
+        resolved.description = "A Lode project";
+
+    if (!IsSafeName(resolved.name))
+        Error(result, "Project name must contain only letters, digits, '.', '_' or '-'.");
+    if (!IsSemVer(resolved.version))
+        Error(result, "Project version must be a valid SemVer string.");
+    if (!resolved.license.empty() && !IsSafeName(resolved.license))
+        Error(result, "Project license must be a valid SPDX identifier.");
+    if (!result.IsValid())
+        return result;
     if (fs::exists(root, ec) && !fs::is_directory(root, ec))
     {
         Error(result, "Project path is not a directory: " + PathToUtf8(root));
@@ -149,12 +155,13 @@ ProjectInitResult InitializeProject(const fs::path& projectRoot, const ProjectIn
     }
 
     std::string manifest = "return {\n"
-        "    name = " + LuauString(options.name) + ",\n"
-        "    version = " + LuauString(options.version) + ",\n"
-        "    description = " + LuauString(options.description) + ",\n"
-        "    license = " + LuauString(options.license);
+        "    name = " + LuauString(resolved.name) + ",\n"
+        "    version = " + LuauString(resolved.version) + ",\n"
+        "    description = " + LuauString(resolved.description);
+    if (!resolved.license.empty())
+        manifest += ",\n    license = " + LuauString(resolved.license);
     std::string nativeSource;
-    if (options.native)
+    if (resolved.native)
     {
         const std::string platform = std::string(Platform::GetOSName());
         const std::string architecture = std::string(Platform::GetArchitectureName());
@@ -165,7 +172,7 @@ ProjectInitResult InitializeProject(const fs::path& projectRoot, const ProjectIn
         }
         manifest += ",\n"
             "    implementation = {\n"
-            "        artifact = " + LuauString(options.name) + ",\n"
+            "        artifact = " + LuauString(resolved.name) + ",\n"
             "        required = true,\n"
             "        targets = {\n"
             "            build = { " + LuauString(platform + "/" + architecture) + " },\n"
@@ -193,14 +200,16 @@ ProjectInitResult InitializeProject(const fs::path& projectRoot, const ProjectIn
     manifest += "\n}\n";
 
     if (!WriteTextFileIfNotExists(root / "package.luau", manifest, result) ||
-        !WriteTextFileIfNotExists(root / "init.luau", options.native
+        !WriteTextFileIfNotExists(root / "init.luau", resolved.native
             ? "--!strict\n\nexport type NativeModule = {\n    add: (left: number, right: number) -> number,\n    identity: (value: unknown) -> unknown,\n}\n\nreturn {} :: NativeModule\n"
             : "--!strict\n\nreturn {}\n", result) ||
-        !WriteTextFileIfNotExists(root / "LICENSE", LicenseText(options), result) ||
-        !WriteTextFileIfNotExists(root / "README.md", "# " + options.name + "\n\n" + options.description + "\n", result))
+        !WriteTextFileIfNotExists(root / "README.md", "# " + resolved.name + "\n\n" + resolved.description + "\n", result))
         return result;
 
-    if (options.native)
+    if (!resolved.license.empty())
+        WriteTextFileIfNotExists(root / "LICENSE", LicenseText(resolved), result);
+
+    if (resolved.native)
     {
         fs::create_directories(root / "src", ec);
         if (ec)
@@ -209,9 +218,9 @@ ProjectInitResult InitializeProject(const fs::path& projectRoot, const ProjectIn
             return result;
         }
         const std::string cmake = "cmake_minimum_required(VERSION 3.20)\n"
-            "project(" + options.name + " LANGUAGES CXX)\n\n"
+            "project(" + resolved.name + " LANGUAGES CXX)\n\n"
             "find_package(Lode CONFIG REQUIRED)\n\n"
-            "lode_add_module(" + options.name + "\n"
+            "lode_add_module(" + resolved.name + "\n"
             "    SOURCES src/main.cpp\n"
             ")\n";
         WriteTextFileIfNotExists(root / "CMakeLists.txt", cmake, result);

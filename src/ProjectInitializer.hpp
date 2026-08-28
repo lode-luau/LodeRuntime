@@ -16,7 +16,7 @@ struct ProjectInitOptions
     std::string name;
     std::string description;
     std::string version = "0.1.0";
-    std::string license = "MIT";
+    std::string license;
     bool native = false;
 };
 

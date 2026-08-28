@@ -316,21 +316,35 @@ std::vector<std::string> AddDependencyToManifest(
     try
     {
         std::ifstream file(manifestPath);
-        if (!file.is_open())
+        if (file.is_open())
         {
-            errors.push_back("Cannot open package manifest: " + PathToUtf8(manifestPath));
-            return errors;
+            originalManifest.assign(std::istreambuf_iterator<char>(file),
+                                    std::istreambuf_iterator<char>());
+            const Lode::Package::PackageManifestResult manifestResult =
+                Lode::Package::ReadPackageManifest(manifestPath);
+            if (!manifestResult.IsValid())
+            {
+                errors.insert(errors.end(), manifestResult.errors.begin(), manifestResult.errors.end());
+                return errors;
+            }
+            manifest = manifestResult.document;
         }
-        originalManifest.assign(std::istreambuf_iterator<char>(file),
-                                std::istreambuf_iterator<char>());
-        const Lode::Package::PackageManifestResult manifestResult =
-            Lode::Package::ReadPackageManifest(manifestPath);
-        if (!manifestResult.IsValid())
+        else
         {
-            errors.insert(errors.end(), manifestResult.errors.begin(), manifestResult.errors.end());
-            return errors;
+            // No manifest exists yet: bootstrap a minimal one so that
+            // `lode add` works from a bare directory.
+            manifest = nlohmann::json::object();
+            manifest["name"] = packageRoot.filename().string();
+            manifest["version"] = "0.1.0";
+
+            // Ensure init.luau exists so that InstallLocal passes validation.
+            const fs::path initPath = packageRoot / "init.luau";
+            if (!fs::is_regular_file(initPath))
+            {
+                std::ofstream initFile(initPath, std::ios::binary | std::ios::trunc);
+                initFile << "return {}\n";
+            }
         }
-        manifest = manifestResult.document;
     }
     catch (const std::exception& exception)
     {
