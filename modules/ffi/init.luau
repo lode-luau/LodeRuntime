@@ -179,7 +179,7 @@ export type FFIModule = {
     --- @param bytes Byte size, scalar/pointer type, or registered type name.
     --- @param initializer Optional scalar/pointer field values for a typed struct.
     --- @return Raw storage or a field-accessible typed struct.
-    new: (bytes: number | string, initializer: StructInitializer?) -> buffer | TypedStruct,
+    new: (bytes: number | string, initializer: StructInitializer?) -> buffer,
 
     --- Returns the ABI size of a scalar/pointer type, a registered aggregate
     --- name, or a typed struct value.
@@ -251,7 +251,7 @@ export type FFIModule = {
     --- By default, calls from a foreign thread are rejected and return zero.
     --- With `foreignThread = "post"`, arguments are copied and the function
     --- runs later on the runtime thread; its return value is not sent to C.
-    callback: (declaration: Cdef, fn: (...unknown) -> FFIResult, options: CallbackOptions?) -> Callback,
+    callback: (declaration: Cdef, fn: (...never) -> FFIResult, options: CallbackOptions?) -> Callback,
 
     --- Defers a Luau function to the owning runtime event-loop thread.
     --- This is safe to invoke from native integrations through the FFI's

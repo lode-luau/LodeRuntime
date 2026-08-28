@@ -78,10 +78,10 @@ check(fixture.ffi_fixture_pair_sum(pair) == 42, "struct pointer result mismatch"
 check(fixture.ffi_fixture_pair_sum_value(pair) == 42, "struct value result mismatch")
 check(fixture.callAsync("ffi_fixture_pair_sum_value", pair) == 42,
     "async struct value result mismatch")
-local madePair = fixture.ffi_fixture_pair_make(39, 3)
+local madePair = fixture.ffi_fixture_pair_make(39, 3) :: buffer
 check(buffer.readi32(madePair, 0) == 39 and buffer.readu16(madePair, 4) == 3,
     "struct return value mismatch")
-local asyncPair = fixture.callAsync("ffi_fixture_pair_make", 38, 4)
+local asyncPair = fixture.callAsync("ffi_fixture_pair_make", 38, 4) :: buffer
 check(buffer.readi32(asyncPair, 0) == 38 and buffer.readu16(asyncPair, 4) == 4,
     "async struct return value mismatch")
 local arrayFields = "uint16_t values[3]; int32_t tail;"
@@ -165,15 +165,15 @@ check(ffi.lastError() == 1234, "ffi.lastError did not capture the native error c
 fixture.callAsync("ffi_fixture_set_last_error", 4321)
 check(ffi.lastError() == 4321, "ffi.lastError did not receive the async native error code")
 
-local largeUnsigned = fixture.ffi_fixture_large_u64()
-local largeSigned = fixture.ffi_fixture_large_i64()
+local largeUnsigned = fixture.ffi_fixture_large_u64() :: buffer
+local largeSigned = fixture.ffi_fixture_large_i64() :: buffer
 check(type(largeUnsigned) == "buffer" and buffer.len(largeUnsigned) == 8,
     "unsafe uint64 result must return an 8-byte buffer")
 check(type(largeSigned) == "buffer" and buffer.len(largeSigned) == 8,
     "unsafe int64 result must return an 8-byte buffer")
 check(buffer.readu32(largeUnsigned, 0) == 1 and buffer.readu32(largeUnsigned, 4) == 0x200000,
     "unsafe uint64 buffer contents mismatch")
-check(buffer.readu32(fixture.ffi_fixture_identity_u64(largeUnsigned), 0) == 1,
+check(buffer.readu32(fixture.ffi_fixture_identity_u64(largeUnsigned) :: buffer, 0) == 1,
     "64-bit buffer argument mismatch")
 
 print("ffi_module: all checks passed")
