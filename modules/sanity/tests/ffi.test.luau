@@ -137,6 +137,77 @@ describe("ffi", function()
         end)
     end)
 
+    describe("typed storage", function()
+        it("registers named structs and keeps pointer fields opaque", function()
+            ffi.cdef([[typedef struct { int32_t x; uint32_t y; void* pointer; } FfiTypedPoint;]])
+            local point = ffi.new("FfiTypedPoint")
+            point.x = -7
+            point.y = 42
+            local backing = ffi.new(8)
+            point.pointer = ffi.addr(backing)
+            expect(point.x).toBe(-7)
+            expect(point.y).toBe(42)
+            expect(point.pointer ~= nil).toBe(true)
+        end)
+
+        it("keeps aliases, unions, sizes, and compatible declarations per State", function()
+            ffi.cdef([[typedef uint32_t FfiDword;]])
+            ffi.cdef([[typedef union { uint32_t value; uint8_t bytes[4]; } FfiTypedUnion;]])
+            ffi.cdef([[typedef union { uint32_t value; uint8_t bytes[4]; } FfiTypedUnion;]])
+            expect(ffi.sizeof("FfiDword")).toBe(4)
+            expect(ffi.sizeof("FfiTypedUnion")).toBe(4)
+            local value = ffi.new("FfiDword")
+            expect(buffer.len(value)).toBe(4)
+            local union = ffi.new("FfiTypedUnion", { value = 0x12345678 })
+            expect(union.value).toBe(0x12345678)
+            expect(pcall(ffi.cdef, [[typedef union { uint64_t value; } FfiTypedUnion;]])).toBe(false)
+        end)
+
+        it("reads and writes through strict opaque pointers", function()
+            local bytes = ffi.new(16)
+            local p = ffi.addr(bytes)
+            ffi.write(p, "uint32_t", 0x12345678)
+            expect(ffi.read(p, "uint32_t")).toBe(0x12345678)
+            ffi.writePointer(p, 8, p)
+            expect(ffi.readPointer(p, 8) ~= nil).toBe(true)
+            expect(pcall(ffi.addr, 123)).toBe(false)
+            expect(pcall(ffi.read, bytes, "uint32_t", -1)).toBe(false)
+            expect(pcall(ffi.read, bytes, "uint32_t", 1)).toBe(false)
+            expect(pcall(ffi.write, bytes, "uint64_t", 1, 12)).toBe(false)
+            expect(pcall(ffi.writePointer, bytes, -1, p)).toBe(false)
+        end)
+
+        it("posts work on the event loop", function()
+            local ran = false
+            ffi.post(function()
+                ran = true
+            end)
+            task.wait(0)
+            task.wait(0)
+            expect(ran).toBe(true)
+        end)
+    end)
+
+    it("accepts anonymous callback declarations", function()
+        local callback = ffi.callback("int32_t(int32_t)", function(value)
+            return value
+        end)
+        expect(callback.pointer ~= nil).toBe(true)
+        expect(callback.state().closed).toBe(false)
+        callback.close()
+        expect(callback.state().closed).toBe(true)
+        expect(pcall(ffi.addr, callback)).toBe(false)
+    end)
+
+    it("registers and resolves named function-pointer types", function()
+        ffi.cdef("typedef int32_t (*FfiUnaryCallback)(int32_t);")
+        local callback = ffi.callback("FfiUnaryCallback", function(value)
+            return value + 1
+        end)
+        expect(callback.pointer ~= nil).toBe(true)
+        callback.close()
+    end)
+
     if isWindows then
         describe("windows calls", function()
                 local k32 = ffi.load("kernel32", [[
@@ -149,6 +220,9 @@ describe("ffi", function()
                 unsigned long GetModuleFileNameW(void* module, wchar_t* filename, unsigned long size);
                 void SetLastError(unsigned long error);
                 void Sleep(unsigned long milliseconds);
+                void* CreateThread(void* attributes, size_t stackSize, uint32_t (*start)(void*), void* parameter, uint32_t flags, uint32_t* threadId);
+                uint32_t WaitForSingleObject(void* handle, uint32_t milliseconds);
+                int CloseHandle(void* handle);
             ]])
                 local ucrt = ffi.load("ucrtbase", [[
                 double pow(double x, double y);
@@ -219,6 +293,43 @@ describe("ffi", function()
 
             it("returns values from asynchronous calls", function()
                 expect(ucrt.callAsync("pow", 2, 10)).toBe(1024)
+            end)
+
+            it("posts foreign-thread callbacks onto the runtime event loop", function()
+                local called = false
+                local callback = ffi.callback("uint32_t(void*)", function()
+                    called = true
+                    return 7
+                end, { foreignThread = "post" })
+                local thread = k32.CreateThread(nil, 0, callback, nil, 0, nil)
+                expect(thread ~= nil).toBe(true)
+                expect(k32.WaitForSingleObject(thread, 1000)).toBe(0)
+                task.wait(0)
+                task.wait(0)
+                expect(called).toBe(true)
+                expect(callback.foreignCalls()).toBe(1)
+                expect(callback.state().postedForeignCalls).toBe(1)
+                expect(callback.state().rejectedForeignCalls).toBe(0)
+                expect(k32.CloseHandle(thread) ~= 0).toBe(true)
+                callback.close()
+            end)
+
+            it("rejects foreign-thread callbacks without entering Luau", function()
+                local called = false
+                local callback = ffi.callback("uint32_t(void*)", function()
+                    called = true
+                    return 7
+                end)
+                local thread = k32.CreateThread(nil, 0, callback, nil, 0, nil)
+                expect(thread ~= nil).toBe(true)
+                expect(k32.WaitForSingleObject(thread, 1000)).toBe(0)
+                task.wait(0)
+                expect(called).toBe(false)
+                expect(callback.state().foreignCalls).toBe(1)
+                expect(callback.state().postedForeignCalls).toBe(0)
+                expect(callback.state().rejectedForeignCalls).toBe(1)
+                expect(k32.CloseHandle(thread) ~= 0).toBe(true)
+                callback.close()
             end)
 
             it("validates asynchronous function names and arity", function()

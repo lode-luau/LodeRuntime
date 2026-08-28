@@ -14,12 +14,51 @@
 --- are deliberately unsupported.
 export type Cdef = string
 
+--- An opaque native address. Luau cannot inspect or perform arithmetic on it;
+--- use `ffi.cast`, `ffi.addr`, `ffi.read`, and `ffi.write` instead.
+export type Pointer = unknown
+
+--- A registered C struct value. Field names and exact field types are known
+--- only from the `ffi.cdef` declaration at runtime.
+export type TypedStruct = {[string]: unknown}
+
+--- A diagnostic snapshot for one callback handle.
+export type CallbackState = {
+    closed: boolean,
+    foreignCalls: number,
+    postedForeignCalls: number,
+    rejectedForeignCalls: number,
+}
+
+export type Callback = {
+    pointer: Pointer,
+    close: () -> (),
+    Close: () -> (),
+    foreignCalls: () -> number,
+    state: () -> CallbackState,
+}
+
+export type CallbackOptions = {
+    --- Posts foreign-thread calls to the event loop and returns zero to C.
+    foreignThread: "post"?,
+}
+
+export type StructInitializer = {[string]: number | boolean | string | buffer | Pointer?}
+
+--- Input accepted by legacy raw-pointer helpers. Prefer the strict `Pointer`
+--- APIs for new code; this alias remains broad for backward compatibility.
+export type LegacyPointerInput = unknown
+
+--- Result of a dynamically declared C call. Refine it at the call site using
+--- the declaration's C return type.
+export type FFIResult = unknown
+
 --- A function produced from one declaration in a `Cdef` block.
 ---
 --- The exact Luau signature is only known at runtime, so calls are typed as
---- `any`. Arity and the supported runtime argument categories are checked by
+--- `unknown`. Arity and the supported runtime argument categories are checked by
 --- the native module before every call.
-export type FFIFunction = (...any) -> any
+export type FFIFunction = (...unknown) -> FFIResult
 
 --- Options controlling one `ffi.load` operation.
 export type LoadOptions = {
@@ -53,7 +92,7 @@ export type FFILibrary = {
     --- Strings and buffers are copied before the worker starts. Raw pointer
     --- addresses remain caller-owned and must stay valid until completion.
     --- `name` must be a symbol declared in this library handle.
-    callAsync: (name: string, ...any) -> any,
+    callAsync: (name: string, ...unknown) -> FFIResult,
 }
 
 --[=[
@@ -112,6 +151,14 @@ export type FFIModule = {
     --- @return A handle containing the resolved process-export symbols.
     C: (declarations: Cdef) -> FFILibrary,
 
+    --- Registers typedef aliases, named structs/unions, and named function
+    --- pointer types for this State. Compatible redeclarations are accepted;
+    --- incompatible layouts or aliases fail. Registered aggregates can be
+    --- constructed with `ffi.new("Type", initializer?)` and expose scalar
+    --- and pointer fields. Type registrations never cross States.
+    --- @param declarations Declarations to register for this State.
+    cdef: (declarations: Cdef) -> (),
+
     --- Returns the OS thread error code captured immediately after the most
     --- recent completed FFI call. It is `GetLastError()` on Windows and errno
     --- on POSIX. Read it before making another FFI call on the same runtime
@@ -127,11 +174,16 @@ export type FFIModule = {
     --- as `"int32_t"` or `"void*"`.
     --- @param bytes Number of bytes to allocate, or a C type string.
     --- @return A mutable, zero-initialized buffer.
-    new: (bytes: number | string) -> buffer,
+    --- When `bytes` is a registered aggregate name, returns a `TypedStruct`.
+    --- Otherwise returns the backward-compatible raw `buffer` allocation.
+    --- @param bytes Byte size, scalar/pointer type, or registered type name.
+    --- @param initializer Optional scalar/pointer field values for a typed struct.
+    --- @return Raw storage or a field-accessible typed struct.
+    new: (bytes: number | string, initializer: StructInitializer?) -> buffer | TypedStruct,
 
-    --- Returns the ABI size of one supported scalar or pointer C type.
-    --- The type is parsed with the same rules as a function declaration.
-    sizeof: (type: string) -> number,
+    --- Returns the ABI size of a scalar/pointer type, a registered aggregate
+    --- name, or a typed struct value.
+    sizeof: (type: string | TypedStruct) -> number,
 
     --- Allocates a zero-initialized C-ABI struct layout as a Luau buffer.
     --- Each field must be a supported scalar or pointer declaration, for
@@ -148,14 +200,14 @@ export type FFIModule = {
 
     --- Copies a NUL-terminated C string, or exactly `bytes` bytes, into a
     --- Luau string. The pointer must remain readable for the operation.
-    string: (pointer: any, bytes: number?) -> string,
+    string: (pointer: LegacyPointerInput, bytes: number?) -> string,
 
     --- Copies exactly `bytes` from a C pointer into a Luau-owned buffer.
     --- No ownership is transferred and no bounds are inferred.
-    copy: (pointer: any, bytes: number) -> buffer,
+    copy: (pointer: LegacyPointerInput, bytes: number) -> buffer,
 
     --- Windows only. Copies a UTF-16 C string into UTF-8 Luau text.
-    wstring: (pointer: any, codeUnits: number?) -> string,
+    wstring: (pointer: LegacyPointerInput, codeUnits: number?) -> string,
 
     --- Windows only. Encodes UTF-8 Luau text as a NUL-terminated UTF-16
     --- buffer suitable for `wchar_t*` APIs.
@@ -164,24 +216,47 @@ export type FFIModule = {
     --- Converts a buffer, string, callback handle, or raw pointer to a raw
     --- C address and optionally applies a signed byte offset. The caller
     --- owns all lifetime and bounds guarantees.
-    ptr: (value: any, byteOffset: number?) -> any,
+    ptr: (value: LegacyPointerInput, byteOffset: number?) -> Pointer,
+
+    --- Strict pointer helpers. Unlike `ptr`, these never coerce a Luau
+    --- number into an address. Foreign-memory reads and writes cannot infer
+    --- C allocation bounds; callers retain lifetime and bounds ownership.
+    --- Returns the address of a Luau buffer, typed struct, callback, or pointer.
+    --- @param value A value that owns or already represents a native address.
+    --- @param byteOffset Signed byte offset from that address.
+    addr: (value: buffer | TypedStruct | Callback | Pointer, byteOffset: number?) -> Pointer,
+    --- Validates that `type` is a pointer declaration and preserves its address.
+    cast: (type: string, pointer: Pointer) -> Pointer,
+    --- Reads one scalar/pointer C value. Foreign-memory bounds are caller-owned.
+    read: (pointer: Pointer, type: string, byteOffset: number?) -> unknown,
+    --- Writes one scalar or pointer C value. Foreign-memory bounds are caller-owned.
+    write: (pointer: Pointer, type: string, value: number | boolean | Pointer, byteOffset: number?) -> Pointer,
+    --- Reads a pointer-sized field without converting it to a Luau number.
+    readPointer: (pointer: Pointer, byteOffset: number?) -> Pointer,
+    --- Writes an opaque pointer-sized field at a byte offset.
+    writePointer: (pointer: Pointer, byteOffset: number, value: Pointer) -> Pointer,
 
     --- Writes `count` bytes to a raw destination with the low byte of value.
-    fill: (destination: any, value: number, count: number) -> any,
+    fill: (destination: LegacyPointerInput, value: number, count: number) -> Pointer,
 
     --- Copies `count` bytes between raw addresses; overlapping memory is
     --- supported. Bounds and lifetime are the caller's responsibility.
-    move: (destination: any, source: any, count: number) -> any,
+    move: (destination: LegacyPointerInput, source: LegacyPointerInput, count: number) -> Pointer,
 
     --- Creates a C-callable pointer from a declaration and a Luau function.
     --- It may only be invoked synchronously from the runtime thread. Pointer
     --- results accept nil, lightuserdata, or a buffer. Keep the returned
     --- handle and any returned buffer alive while C retains their pointers.
-    callback: (declaration: Cdef, fn: (...any) -> any) -> {
-        pointer: any,
-        close: () -> (),
-        Close: () -> (),
-    },
+    --- `callback.state()` exposes close and foreign-thread diagnostics.
+    --- By default, calls from a foreign thread are rejected and return zero.
+    --- With `foreignThread = "post"`, arguments are copied and the function
+    --- runs later on the runtime thread; its return value is not sent to C.
+    callback: (declaration: Cdef, fn: (...unknown) -> FFIResult, options: CallbackOptions?) -> Callback,
+
+    --- Defers a Luau function to the owning runtime event-loop thread.
+    --- This is safe to invoke from native integrations through the FFI's
+    --- thread-safe dispatcher; it does not make foreign callbacks synchronous.
+    post: (fn: () -> ()) -> (),
 
 }
 

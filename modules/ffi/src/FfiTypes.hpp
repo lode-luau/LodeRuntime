@@ -49,6 +49,13 @@ enum class RetKind : uint8_t
     Struct, // named typedef struct/union: returned as a Luau buffer
 };
 
+enum class CallingConvention : uint8_t
+{
+    Default,
+    Cdecl,
+    Stdcall,
+};
+
 struct Prototype
 {
     std::string name;
@@ -58,6 +65,7 @@ struct Prototype
     std::vector<std::string> argStructNames;
     RetKind ret = RetKind::Void;
     std::string retStructName;
+    CallingConvention convention = CallingConvention::Default;
 
     // Human-readable reconstruction used in error messages, e.g.
     // "int MessageBoxW(ptr, cstring, cstring, unsigned)".
@@ -73,6 +81,8 @@ struct StructLayout
     std::vector<ArgClass> fields;
     // Mirrors fields: identifies the nested layout for an ArgClass::Struct.
     std::vector<std::string> fieldStructNames;
+    std::vector<std::string> fieldNames;
+    std::vector<size_t> fieldCounts;
     bool isUnion = false;
 
     // Stable identity used by bound call plans. A struct layout is resolved

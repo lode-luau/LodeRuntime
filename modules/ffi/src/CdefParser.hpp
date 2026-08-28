@@ -4,6 +4,7 @@
 
 #include "FfiTypes.hpp"
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace lodeffi
@@ -26,6 +27,9 @@ struct CdefParseResult
 {
     std::vector<Prototype> prototypes;
     std::vector<StructLayout> structs;
+    // Resolved typedefs declared in this block. The runtime stores these per
+    // State so a later ffi.cdef/ffi.new/ffi.sizeof call can use the name.
+    std::unordered_map<std::string, ArgClass> aliases;
 };
 
 [[nodiscard]] CdefParseResult ParseCdef(const std::string& source);

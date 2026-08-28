@@ -115,8 +115,7 @@ bool Contains(const std::string& value, const char* needle)
 
 bool IsCallingConvention(const std::string& token)
 {
-    return token == "__cdecl" || token == "__stdcall" || token == "__fastcall" ||
-           token == "__vectorcall" || token == "WINAPI" || token == "APIENTRY" ||
+    return token == "__cdecl" || token == "__stdcall" || token == "WINAPI" || token == "APIENTRY" ||
            token == "CALLBACK";
 }
 
@@ -310,7 +309,9 @@ ArgClass ParseType(Cursor& cur, RetKind& retOut, bool allowVoid,
     }
 
     if (base.empty()) Fail(cur.Eof() ? cur.LastLine() : cur.Peek().line, "expected a type");
-    if (sawVoid && !allowVoid)
+    // `void` is invalid as a value type, but `void*` is a valid pointer
+    // field/parameter and reaches the pointer branch below.
+    if (sawVoid && !allowVoid && stars == 0)
         Fail(cur.Eof() ? cur.LastLine() : cur.Peek().line, "'void' is only valid as the sole return type");
 
     if (stars > 0)
@@ -388,6 +389,7 @@ StructLayout ParseAggregateLayout(Cursor& cur)
         if (cur.Eof() || cur.Peek().text == ";")
             Fail(cur.Eof() ? cur.LastLine() : cur.Peek().line, "expected struct field name");
         cur.Next(); // field name; layout offsets are positional in v1
+        const std::string fieldName = (*cur.toks)[cur.pos - 1].text;
         size_t count = 1;
         if (!cur.Eof() && cur.Peek().text == "[")
         {
@@ -406,6 +408,8 @@ StructLayout ParseAggregateLayout(Cursor& cur)
             Fail(cur.LastLine(), "expected ';' after struct field");
         layout.fields.insert(layout.fields.end(), count, field);
         layout.fieldStructNames.insert(layout.fieldStructNames.end(), count, fieldStructName);
+        layout.fieldNames.push_back(fieldName);
+        layout.fieldCounts.push_back(count);
     }
     if (cur.Eof())
         Fail(cur.LastLine(), "unterminated struct definition");
@@ -531,9 +535,19 @@ CdefParseResult ParseCdef(const std::string& source)
         if (!cur.Eof() && IsCallingConvention(cur.Peek().text))
         {
             const Token convention = cur.Next();
-            if (!kDefaultAbiMatchesWindowsConvention)
+            if (convention.text == "__stdcall" || convention.text == "WINAPI" ||
+                convention.text == "APIENTRY" || convention.text == "CALLBACK")
+                p.convention = CallingConvention::Stdcall;
+            else
+                p.convention = CallingConvention::Cdecl;
+            // stdcall has a concrete libffi ABI on 32-bit Windows and is
+            // equivalent to the default Microsoft x64 ABI. Elsewhere it is
+            // a Windows declaration marker with no safe ABI mapping.
+#if !defined(_WIN32)
+            if (p.convention == CallingConvention::Stdcall)
                 Fail(convention.line, "calling convention '" + convention.text +
-                                      "' is not supported on this architecture");
+                                       "' is not supported on this architecture");
+#endif
         }
 
         // Function name.
@@ -634,7 +648,7 @@ CdefParseResult ParseCdef(const std::string& source)
         protos.push_back(std::move(p));
     }
 
-    return {std::move(protos), std::move(structs)};
+    return {std::move(protos), std::move(structs), std::move(aliases)};
 }
 
 } // namespace lodeffi
