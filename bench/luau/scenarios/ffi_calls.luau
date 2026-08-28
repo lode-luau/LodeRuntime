@@ -7,8 +7,8 @@ return function(bench: any)
         return
     end
 
-    local ffi = require("../../../modules/ffi")
-    local kernel32 = ffi.load("kernel32", [[
+    local FFI = require("../../../modules/ffi")
+    local kernel32 = FFI.Load("kernel32", [[
         unsigned long GetCurrentProcessId(void);
         int lstrlenA(const char* text);
     ]])

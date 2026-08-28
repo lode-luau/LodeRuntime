@@ -76,6 +76,7 @@ local scenarios = {
     require("./scenarios/native_calls"),
     require("./scenarios/marshal_calls"),
     require("./scenarios/ffi_calls"),
+    require("./scenarios/address_memory"),
     require("./scenarios/class_methods"),
     require("./scenarios/coroutines"),
     require("./scenarios/runtime_modules"),
