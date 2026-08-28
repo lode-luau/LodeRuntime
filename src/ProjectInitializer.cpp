@@ -57,6 +57,14 @@ bool WriteTextFile(const fs::path& path, const std::string& content, ProjectInit
     return true;
 }
 
+bool WriteTextFileIfNotExists(const fs::path& path, const std::string& content, ProjectInitResult& result)
+{
+    std::error_code ec;
+    if (fs::is_regular_file(path, ec))
+        return true;
+    return WriteTextFile(path, content, result);
+}
+
 std::string LicenseText(const ProjectInitOptions& options)
 {
     if (options.license != "MIT")
@@ -129,11 +137,6 @@ ProjectInitResult InitializeProject(const fs::path& projectRoot, const ProjectIn
         Error(result, "Project path is not a directory: " + PathToUtf8(root));
         return result;
     }
-    if (fs::is_directory(root, ec) && fs::directory_iterator(root, ec) != fs::directory_iterator())
-    {
-        Error(result, "Project directory is not empty: " + PathToUtf8(root));
-        return result;
-    }
     if (!fs::exists(root, ec) && !fs::create_directories(root, ec))
     {
         Error(result, "Cannot create project directory: " + ec.message());
@@ -189,12 +192,12 @@ ProjectInitResult InitializeProject(const fs::path& projectRoot, const ProjectIn
     }
     manifest += "\n}\n";
 
-    if (!WriteTextFile(root / "package.luau", manifest, result) ||
-        !WriteTextFile(root / "init.luau", options.native
+    if (!WriteTextFileIfNotExists(root / "package.luau", manifest, result) ||
+        !WriteTextFileIfNotExists(root / "init.luau", options.native
             ? "--!strict\n\nexport type NativeModule = {\n    add: (left: number, right: number) -> number,\n    identity: (value: unknown) -> unknown,\n}\n\nreturn {} :: NativeModule\n"
             : "--!strict\n\nreturn {}\n", result) ||
-        !WriteTextFile(root / "LICENSE", LicenseText(options), result) ||
-        !WriteTextFile(root / "README.md", "# " + options.name + "\n\n" + options.description + "\n", result))
+        !WriteTextFileIfNotExists(root / "LICENSE", LicenseText(options), result) ||
+        !WriteTextFileIfNotExists(root / "README.md", "# " + options.name + "\n\n" + options.description + "\n", result))
         return result;
 
     if (options.native)
@@ -211,8 +214,8 @@ ProjectInitResult InitializeProject(const fs::path& projectRoot, const ProjectIn
             "lode_add_module(" + options.name + "\n"
             "    SOURCES src/main.cpp\n"
             ")\n";
-        WriteTextFile(root / "CMakeLists.txt", cmake, result);
-        WriteTextFile(root / "src" / "main.cpp", nativeSource, result);
+        WriteTextFileIfNotExists(root / "CMakeLists.txt", cmake, result);
+        WriteTextFileIfNotExists(root / "src" / "main.cpp", nativeSource, result);
     }
     return result;
 }

@@ -118,10 +118,20 @@ set(nonempty_root "${test_root}/nonempty")
 file(MAKE_DIRECTORY "${nonempty_root}")
 file(WRITE "${nonempty_root}/preserve.txt" "do not overwrite\n")
 execute_process(
-    COMMAND "${LODE_EXECUTABLE}" init rejected --description "Must fail" "${nonempty_root}"
+    COMMAND "${LODE_EXECUTABLE}" init nonempty_project --description "Should succeed" "${nonempty_root}"
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
-if(result EQUAL 0 OR EXISTS "${nonempty_root}/package.luau" OR NOT EXISTS "${nonempty_root}/preserve.txt")
-    message(FATAL_ERROR "lode init changed a non-empty project directory")
+if(NOT result EQUAL 0)
+    message(FATAL_ERROR "lode init failed for a non-empty project directory:\n${output}\n${error}")
+endif()
+if(NOT EXISTS "${nonempty_root}/package.luau")
+    message(FATAL_ERROR "lode init did not create package.luau in non-empty directory")
+endif()
+if(NOT EXISTS "${nonempty_root}/preserve.txt")
+    message(FATAL_ERROR "lode init deleted existing file in non-empty directory")
+endif()
+file(READ "${nonempty_root}/preserve.txt" preserved_content)
+if(NOT preserved_content MATCHES "do not overwrite")
+    message(FATAL_ERROR "lode init modified existing file in non-empty directory")
 endif()
 
 execute_process(

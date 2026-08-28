@@ -315,14 +315,30 @@ bool ReplaceFileAtomically(const fs::path& temporaryPath,
                            std::string& error)
 {
 #if defined(_WIN32)
-    if (!MoveFileExW(temporaryPath.c_str(), destinationPath.c_str(),
-                     MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+    if (MoveFileExW(temporaryPath.c_str(), destinationPath.c_str(),
+                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+        return true;
+
+    // MoveFileExW can fail with ERROR_ACCESS_DENIED (5) when the target file
+    // has the readonly or hidden attribute set, or when the calling process
+    // lacks DELETE permission on the target.  Clear conflicting attributes and
+    // retry; if the target is still inaccessible, delete it and move.
+    const DWORD lastError = GetLastError();
+    if (lastError == ERROR_ACCESS_DENIED)
     {
-        error = "atomic replacement failed with Windows error " +
-            std::to_string(GetLastError());
-        return false;
+        SetFileAttributesW(destinationPath.c_str(), FILE_ATTRIBUTE_NORMAL);
+        if (MoveFileExW(temporaryPath.c_str(), destinationPath.c_str(),
+                        MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+            return true;
+        std::error_code ec;
+        fs::remove(destinationPath, ec);
+        if (MoveFileW(temporaryPath.c_str(), destinationPath.c_str()))
+            return true;
     }
-    return true;
+
+    error = "atomic replacement failed with Windows error " +
+        std::to_string(GetLastError());
+    return false;
 #else
     std::error_code ec;
     fs::rename(temporaryPath, destinationPath, ec);
