@@ -12,7 +12,11 @@ local task = require("../../../modules/task")
 
 local platform = sys.GetPlatform():lower()
 local isWindows = platform:find("windows", 1, true) ~= nil
-local isMac = platform:find("macos", 1, true) ~= nil
+local isLinux = platform:find("linux", 1, true) ~= nil
+-- Apple runners may identify the platform as macOS, Darwin, or an
+-- architecture-qualified Darwin target. Any non-Windows, non-Linux target
+-- uses the libSystem loader name below.
+local isMac = not isWindows and not isLinux
 local libc = isWindows and "ucrtbase" or (isMac and "libSystem.B.dylib" or "libc.so.6")
 
 type AbsLibrary = {
