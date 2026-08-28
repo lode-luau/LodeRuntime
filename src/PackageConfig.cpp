@@ -321,17 +321,22 @@ bool ReplaceFileAtomically(const fs::path& temporaryPath,
 
     // MoveFileExW can fail with ERROR_ACCESS_DENIED (5) when the target file
     // has the readonly or hidden attribute set, or when the calling process
-    // lacks DELETE permission on the target.  Clear conflicting attributes and
-    // retry; if the target is still inaccessible, delete it and move.
+    // lacks DELETE permission on the target.  ERROR_ALREADY_EXISTS (183) can
+    // occur when a previous install left a directory at the destination.
+    // In both cases, clear attributes and retry; if that still fails, delete
+    // the target and move.
     const DWORD lastError = GetLastError();
-    if (lastError == ERROR_ACCESS_DENIED)
+    if (lastError == ERROR_ACCESS_DENIED || lastError == ERROR_ALREADY_EXISTS)
     {
         SetFileAttributesW(destinationPath.c_str(), FILE_ATTRIBUTE_NORMAL);
         if (MoveFileExW(temporaryPath.c_str(), destinationPath.c_str(),
                         MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
             return true;
         std::error_code ec;
-        fs::remove(destinationPath, ec);
+        if (fs::is_directory(destinationPath, ec))
+            fs::remove_all(destinationPath, ec);
+        else
+            fs::remove(destinationPath, ec);
         if (MoveFileW(temporaryPath.c_str(), destinationPath.c_str()))
             return true;
     }

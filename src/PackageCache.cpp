@@ -434,12 +434,16 @@ CachePopulationResult PopulatePackageCache(const PackageCacheLayout& layout,
     {
         if (ContainsSymlink(destination) || !DirectoriesEqual(source, destination, ec))
         {
-            result.installationDirectory.clear();
-            AddError(result, "Cannot populate package cache: existing identity differs from the source package.");
+            // The cached copy is stale or corrupted. Remove it and re-populate
+            // instead of failing, since the caller already validated the source.
+            fs::remove_all(destination, ec);
+            // Fall through to the population logic below.
+        }
+        else
+        {
+            result.reused = true;
             return result;
         }
-        result.reused = true;
-        return result;
     }
     if (fs::exists(destination, ec))
     {

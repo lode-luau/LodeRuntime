@@ -266,7 +266,10 @@ bool ReplaceTextFileAtomically(const fs::path& destination,
 
         // MoveFileExW can fail with ERROR_ACCESS_DENIED (5) when the target
         // has readonly/hidden attributes or the process lacks DELETE permission.
-        if (!moved && GetLastError() == ERROR_ACCESS_DENIED)
+        // ERROR_ALREADY_EXISTS (183) can occur when a directory exists at the
+        // destination path.
+        const DWORD lastError = GetLastError();
+        if (!moved && (lastError == ERROR_ACCESS_DENIED || lastError == ERROR_ALREADY_EXISTS))
         {
             SetFileAttributesW(absolute.c_str(), FILE_ATTRIBUTE_NORMAL);
             moved = MoveFileExW(temporary.c_str(), absolute.c_str(),
@@ -274,7 +277,10 @@ bool ReplaceTextFileAtomically(const fs::path& destination,
             if (!moved)
             {
                 std::error_code removeEc;
-                fs::remove(absolute, removeEc);
+                if (fs::is_directory(absolute, removeEc))
+                    fs::remove_all(absolute, removeEc);
+                else
+                    fs::remove(absolute, removeEc);
                 moved = MoveFileW(temporary.c_str(), absolute.c_str()) != 0;
             }
         }
@@ -389,41 +395,53 @@ std::vector<std::string> AddDependencyToManifest(
     // Stdlib modules use a plain version string in the manifest instead of a
     // { git = ..., version = ... } table.
     const fs::path effectiveStdlibPath = ResolveEffectiveStdlibPath(standardLibraryPath, packageRoot);
-    if (IsStdlibModuleName(parsed.alias) && !effectiveStdlibPath.empty())
+    if (IsStdlibModuleName(parsed.alias))
     {
-        const std::string resolvedVersion = FindStdlibModuleVersion(
-            effectiveStdlibPath, parsed.alias);
-        if (!resolvedVersion.empty())
+        if (effectiveStdlibPath.empty())
         {
-            const std::string requirement = parsed.requirement.empty()
-                ? resolvedVersion : parsed.requirement;
-            manifest[fieldName][parsed.alias] = requirement;
-
-            std::string replacementError;
-            const std::string content = Lode::Package::SerializePackageManifest(manifest);
-            if (content.empty())
-            {
-                errors.push_back("Cannot serialize package manifest.");
-                return errors;
-            }
-            if (!ReplaceTextFileAtomically(manifestPath, content, replacementError))
-            {
-                errors.push_back("Cannot update package manifest: " + replacementError);
-                return errors;
-            }
-
-            const Lode::Package::InstallResult installation = Lode::Package::InstallLocal(
-                packageRoot, effectiveStdlibPath, development);
-            if (!installation.IsValid())
-            {
-                errors.insert(errors.end(), installation.errors.begin(), installation.errors.end());
-                std::string restoreError;
-                if (!ReplaceTextFileAtomically(manifestPath, originalManifest, restoreError))
-                    errors.push_back("Cannot restore package manifest after installation failure: " + restoreError);
-                return errors;
-            }
+            errors.push_back("Standard library module '" + parsed.alias +
+                "' requires a stdlib catalog. Run `lode init` from a project inside the Lode source tree.");
             return errors;
         }
+
+        const std::string resolvedVersion = FindStdlibModuleVersion(
+            effectiveStdlibPath, parsed.alias);
+        if (resolvedVersion.empty())
+        {
+            errors.push_back("Standard library module '" + parsed.alias +
+                "' was not found in the stdlib catalog at " +
+                PathToUtf8(effectiveStdlibPath) + ".");
+            return errors;
+        }
+
+        const std::string requirement = parsed.requirement.empty()
+            ? resolvedVersion : parsed.requirement;
+        manifest[fieldName][parsed.alias] = requirement;
+
+        std::string replacementError;
+        const std::string content = Lode::Package::SerializePackageManifest(manifest);
+        if (content.empty())
+        {
+            errors.push_back("Cannot serialize package manifest.");
+            return errors;
+        }
+        if (!ReplaceTextFileAtomically(manifestPath, content, replacementError))
+        {
+            errors.push_back("Cannot update package manifest: " + replacementError);
+            return errors;
+        }
+
+        const Lode::Package::InstallResult installation = Lode::Package::InstallLocal(
+            packageRoot, effectiveStdlibPath, development);
+        if (!installation.IsValid())
+        {
+            errors.insert(errors.end(), installation.errors.begin(), installation.errors.end());
+            std::string restoreError;
+            if (!ReplaceTextFileAtomically(manifestPath, originalManifest, restoreError))
+                errors.push_back("Cannot restore package manifest after installation failure: " + restoreError);
+            return errors;
+        }
+        return errors;
     }
 
     // Git dependency path: resolve the remote tag before writing the manifest.
@@ -684,9 +702,9 @@ void PrintCommandHelp(std::string_view command)
     }
     else if (command == "add")
     {
-        Lode::Logger::Info("Usage: lode add [--dev] owner/repository[@version] [package-root]");
-        Lode::Logger::Info("       lode add [--dev] <stdlib-module>[@version] [package-root]");
-        Lode::Logger::Info("Adds a Git or standard library dependency and installs it.");
+        Lode::Logger::Info("Usage: lode add [--dev] <module|owner/repo>[@version] ... [package-root]");
+        Lode::Logger::Info("       lode add [--dev] task http json");
+        Lode::Logger::Info("Adds Git or standard library dependencies and installs them.");
     }
     else if (command == "install")
     {
@@ -1035,7 +1053,7 @@ int main(int argc, char* argv[])
         }
         bool development = false;
         fs::path packageRoot = fs::current_path();
-        std::string specification;
+        std::vector<std::string> specifications;
         bool hasPackageRoot = false;
         for (int argumentIndex = 2; argumentIndex < argc; ++argumentIndex)
         {
@@ -1046,42 +1064,49 @@ int main(int argc, char* argv[])
             }
             else if (argument.rfind("--", 0) == 0)
             {
-                Lode::Logger::Error("Usage: lode add [--dev] owner/repository[@version] | <module>[@version] [package-root]");
+                Lode::Logger::Error("Usage: lode add [--dev] <module|owner/repo>[@version] ... [package-root]");
                 PrintCommandHelp("add");
                 return 1;
-            }
-            else if (specification.empty())
-            {
-                specification = argument;
-            }
-            else if (!hasPackageRoot)
-            {
-                packageRoot = fs::path(argument);
-                hasPackageRoot = true;
             }
             else
             {
-                Lode::Logger::Error("Usage: lode add [--dev] owner/repository[@version] | <module>[@version] [package-root]");
-                PrintCommandHelp("add");
-                return 1;
+                // Collect all remaining non-flag arguments.  The last one is
+                // the package root only if it looks like an existing directory
+                // and there are other specifications before it.
+                if (!hasPackageRoot && !specifications.empty() &&
+                    fs::is_directory(fs::path(argument)))
+                {
+                    packageRoot = fs::path(argument);
+                    hasPackageRoot = true;
+                }
+                else
+                {
+                    specifications.push_back(argument);
+                }
             }
         }
 
-        if (specification.empty())
+        if (specifications.empty())
         {
-            Lode::Logger::Error("Usage: lode add [--dev] owner/repository[@version] | <module>[@version] [package-root]");
+            Lode::Logger::Error("Usage: lode add [--dev] <module|owner/repo>[@version] ... [package-root]");
             PrintCommandHelp("add");
             return 1;
         }
 
-        const std::vector<std::string> errors = AddDependencyToManifest(
-            packageRoot, specification, development, standardLibraryPath);
-        for (const std::string& error : errors)
-            Lode::Logger::Error(error);
-        if (!errors.empty())
+        bool anyFailed = false;
+        for (const std::string& specification : specifications)
+        {
+            const std::vector<std::string> errors = AddDependencyToManifest(
+                packageRoot, specification, development, standardLibraryPath);
+            for (const std::string& error : errors)
+                Lode::Logger::Error(error);
+            if (!errors.empty())
+                anyFailed = true;
+            else
+                Lode::Logger::Success("Added and installed dependency: " + specification + ".");
+        }
+        if (anyFailed)
             return 1;
-
-        Lode::Logger::Success("Added and installed dependency from " + specification + ".");
         return 0;
     }
 
