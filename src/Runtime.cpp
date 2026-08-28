@@ -395,7 +395,10 @@ std::vector<std::string> AddDependencyToManifest(
     // Stdlib modules use a plain version string in the manifest instead of a
     // { git = ..., version = ... } table.
     const fs::path effectiveStdlibPath = ResolveEffectiveStdlibPath(standardLibraryPath, packageRoot);
-    if (IsStdlibModuleName(parsed.alias))
+    // A local path or Git URL can have a simple basename (for example,
+    // `tests/package/lode-git-add-source`).  Only a bare specification should
+    // be interpreted as an official standard-library module.
+    if (IsStdlibModuleName(parsed.alias) && parsed.repository == parsed.alias)
     {
         if (effectiveStdlibPath.empty())
         {
