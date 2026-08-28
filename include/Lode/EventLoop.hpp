@@ -5,10 +5,13 @@
 #include "Lode/Export.hpp"
 
 #include <functional>
+#include <mutex>
+#include <deque>
 #include <vector>
 
 struct uv_loop_s;
 typedef struct uv_loop_s uv_loop_t;
+struct uv_async_s;
 
 namespace Lode
 {
@@ -70,6 +73,9 @@ public:
      */
     void AddCloseHook(std::function<void()> hook);
 
+    /** Queues work from any native thread onto this loop's owner thread. */
+    bool Post(std::function<void()> work);
+
     /** @brief Retrieves the underlying raw libuv loop pointer. */
     [[nodiscard]] uv_loop_t* GetUVLoop() const { return loop_; }
 
@@ -79,6 +85,9 @@ private:
     bool gcHookActive_ = false; ///< True while a Run() owns the GC prepare hook.
     std::vector<std::function<void()>> closeHooks_;
     bool closing_ = false;
+    ::uv_async_s* postAsync_ = nullptr;
+    std::mutex postMutex_;
+    std::deque<std::function<void()>> posted_;
 };
 
 } // namespace Lode

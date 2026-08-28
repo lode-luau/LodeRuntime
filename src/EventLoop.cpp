@@ -88,6 +88,33 @@ EventLoop::EventLoop()
         loop_ = nullptr;
         throw std::runtime_error(std::string("Failed to initialize event loop: ") + uv_strerror(status));
     }
+
+    postAsync_ = new uv_async_t{};
+    const int postStatus = uv_async_init(loop_, postAsync_, [](uv_async_t* handle) {
+        auto* self = static_cast<EventLoop*>(handle->data);
+        std::deque<std::function<void()>> work;
+        {
+            std::lock_guard lock(self->postMutex_);
+            work.swap(self->posted_);
+        }
+        for (auto& fn : work)
+        {
+            try { fn(); }
+            catch (const std::exception& error) { Logger::Error(std::string("event-loop posted work failed: ") + error.what()); }
+            catch (...) { Logger::Error("event-loop posted work failed"); }
+        }
+    });
+    if (postStatus != 0)
+    {
+        delete postAsync_;
+        postAsync_ = nullptr;
+        uv_loop_close(loop_);
+        delete loop_;
+        loop_ = nullptr;
+        throw std::runtime_error(std::string("Failed to initialize event-loop post queue: ") + uv_strerror(postStatus));
+    }
+    postAsync_->data = this;
+    uv_unref(reinterpret_cast<uv_handle_t*>(postAsync_));
 }
 
 EventLoop::~EventLoop()
@@ -175,6 +202,15 @@ void EventLoop::AddCloseHook(std::function<void()> hook)
     closeHooks_.push_back(std::move(hook));
 }
 
+bool EventLoop::Post(std::function<void()> work)
+{
+    if (!work) return true;
+    std::lock_guard lock(postMutex_);
+    if (closing_ || !postAsync_) return false;
+    posted_.push_back(std::move(work));
+    return uv_async_send(postAsync_) == 0;
+}
+
 void EventLoop::Close()
 {
     if (!loop_)
@@ -200,6 +236,13 @@ void EventLoop::Close()
     }
 
     uv_stop(loop_);
+    if (postAsync_)
+    {
+        uv_close(reinterpret_cast<uv_handle_t*>(postAsync_), [](uv_handle_t* handle) {
+            delete reinterpret_cast<uv_async_t*>(handle);
+        });
+        postAsync_ = nullptr;
+    }
     uv_walk(loop_, CloseHandle, nullptr);
     while (uv_loop_alive(loop_))
     {
