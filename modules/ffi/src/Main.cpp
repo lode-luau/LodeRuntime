@@ -1298,7 +1298,16 @@ Lode::Table BindLibrary(Lode::State& vm, std::shared_ptr<DynamicLibrary> lib,
     exports.Set("CallAsync", CreateFfiFunctionN(vm, [lib, bindings](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
         const auto& execution = Lode::Detail::CurrentCFunctionCallContext();
         if (execution.inForeignCallback && !execution.callbackMayYield)
-            BindError("ffi.callAsync cannot be used from a synchronous foreign callback");
+        {
+            // Raise this as a Lua error at the native entry point.  Throwing a
+            // C++ binding exception here crosses a nested lua_pcall while the
+            // call is re-entered from a libffi callback; on some ABIs (notably
+            // macOS arm64) that path is reported as an unknown C++ exception.
+            // luaL_error keeps the failure in the Lua error channel and makes
+            // Callback.State().lastError deterministic across platforms.
+            vm.RaiseError("ffi.callAsync cannot be used from a synchronous foreign callback");
+            return Lode::Value();
+        }
         if (args.Size() < 1 || !args[0].IsString())
         {
             vm.RaiseError("ffi.callAsync: expected a bound function name as the first argument");
