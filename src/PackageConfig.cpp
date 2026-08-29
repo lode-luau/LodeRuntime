@@ -521,15 +521,17 @@ ConfigAliasUpdateResult WriteConfigAliases(
     const std::vector<std::pair<std::string, std::string>>& aliases)
 {
     ConfigAliasUpdateResult result;
-    std::ifstream file(configPath, std::ios::binary);
-    if (!file.is_open())
     {
-        AddError(result, "Cannot open .config.luau: " + PathToUtf8(configPath));
-        return result;
-    }
+        std::ifstream file(configPath, std::ios::binary);
+        if (!file.is_open())
+        {
+            AddError(result, "Cannot open .config.luau: " + PathToUtf8(configPath));
+            return result;
+        }
 
-    const std::string content(std::istreambuf_iterator<char>(file), {});
-    result = UpdateConfigAliases(content, aliases);
+        const std::string content(std::istreambuf_iterator<char>(file), {});
+        result = UpdateConfigAliases(content, aliases);
+    }
     if (!result.IsValid() || !result.changed)
         return result;
 

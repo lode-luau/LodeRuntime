@@ -115,6 +115,42 @@ if(signal_alias LESS 0 OR task_alias LESS 0)
     message(FATAL_ERROR "stdlib locked install did not generate both aliases")
 endif()
 
+# Regression: adding dependencies must update an existing .config.luau on
+# Windows. The reader must be closed before the atomic replacement; otherwise
+# MoveFileEx/MoveFile reports ERROR_ALREADY_EXISTS (183) on the next add.
+execute_process(
+    COMMAND "${CMAKE_COMMAND}" -E env "HOME=${cache_home}" "USERPROFILE=${cache_home}"
+        "${LODE_EXECUTABLE}" add memory "${test_root}"
+    RESULT_VARIABLE result
+    OUTPUT_VARIABLE output
+    ERROR_VARIABLE error
+)
+if(NOT result EQUAL 0)
+    file(REMOVE_RECURSE "${test_root}" "${unlocked_test_root}" "${dev_test_root}" "${cache_home}")
+    message(FATAL_ERROR "adding a dependency failed to update an existing .config.luau:\n${output}\n${error}")
+endif()
+
+execute_process(
+    COMMAND "${CMAKE_COMMAND}" -E env "HOME=${cache_home}" "USERPROFILE=${cache_home}"
+        "${LODE_EXECUTABLE}" add ffi "${test_root}"
+    RESULT_VARIABLE result
+    OUTPUT_VARIABLE output
+    ERROR_VARIABLE error
+)
+if(NOT result EQUAL 0)
+    file(REMOVE_RECURSE "${test_root}" "${unlocked_test_root}" "${dev_test_root}" "${cache_home}")
+    message(FATAL_ERROR "adding a second dependency failed after updating .config.luau:\n${output}\n${error}")
+endif()
+
+file(READ "${test_root}/.config.luau" config_content)
+foreach(alias IN ITEMS memory ffi)
+    string(FIND "${config_content}" "lode_modules/${alias}" alias_position)
+    if(alias_position LESS 0)
+        file(REMOVE_RECURSE "${test_root}" "${unlocked_test_root}" "${dev_test_root}" "${cache_home}")
+        message(FATAL_ERROR "repeated lode add did not preserve alias '${alias}':\n${config_content}")
+    endif()
+endforeach()
+
 execute_process(
     COMMAND "${CMAKE_COMMAND}" -E env "HOME=${cache_home}" "USERPROFILE=${cache_home}"
         "${LODE_EXECUTABLE}" "${test_root}/init.luau"
