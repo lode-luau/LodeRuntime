@@ -45,6 +45,8 @@ export type CallResult = {
 export type NativeModule = {
     greet: (name: string?) -> string,
     square: (x: number) -> number,
+    fastNoYield: (x: number) -> number,
+    yieldFromNoYield: () -> (),
     processBuffer: (buf: buffer, str: string) -> number,
     roundTripReference: (value: any) -> any,
     roundTripString: (value: string) -> string,

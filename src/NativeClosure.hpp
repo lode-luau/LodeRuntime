@@ -32,7 +32,7 @@ Value CreateClosure(lua_State* L, const char* name, Fn&& fn)
             return 0;
         }
 
-        State vm(L);
+        State vm(L, true);
         try
         {
             Value res = data->func(vm, L);
@@ -89,7 +89,7 @@ Value CreateClosureN(lua_State* L, const char* name, Fn&& fn)
     auto* data = static_cast<ClosureData*>(lua_newuserdatadtor(L, sizeof(ClosureData), [](void* ptr) {
         static_cast<ClosureData*>(ptr)->~ClosureData();
     }));
-    new (data) ClosureData{ std::forward<Fn>(fn), State(L) };
+    new (data) ClosureData{ std::forward<Fn>(fn), State(L, true) };
 
     auto cfunc = [](lua_State* L) -> int {
         auto* data = static_cast<ClosureData*>(lua_touserdata(L, lua_upvalueindex(1)));
@@ -121,6 +121,105 @@ Value CreateClosureN(lua_State* L, const char* name, Fn&& fn)
                 return lua_yield(L, 0);
             }
             return nresults;
+        }
+        catch (const std::exception& e)
+        {
+            luaL_error(L, "C++ callback exception: %s", e.what());
+            return 0;
+        }
+        catch (...)
+        {
+            luaL_error(L, "C++ callback threw an unknown exception");
+            return 0;
+        }
+    };
+
+    lua_pushcclosure(L, cfunc, name, 1);
+    Value val = Value::FromLuaState(L, -1);
+    lua_pop(L, 1);
+    return val;
+}
+
+// Direct-stack closure for synchronous native functions.  Deliberately does
+// not inspect lua_status or the TLS call context on the hot path.
+template <typename Fn>
+Value CreateClosureNNoYield(lua_State* L, const char* name, Fn&& fn)
+{
+    struct ClosureData
+    {
+        Fn func;
+    };
+    auto* data = static_cast<ClosureData*>(lua_newuserdatadtor(L, sizeof(ClosureData), [](void* ptr) {
+        static_cast<ClosureData*>(ptr)->~ClosureData();
+    }));
+    new (data) ClosureData{ std::forward<Fn>(fn) };
+
+    auto cfunc = [](lua_State* L) -> int {
+        auto* data = static_cast<ClosureData*>(lua_touserdata(L, lua_upvalueindex(1)));
+        if (!data)
+        {
+            luaL_error(L, "C++ callback data is unavailable");
+            return 0;
+        }
+        try
+        {
+            // The view is allocation-free (the VM publishes its shared
+            // implementation in the registry), while binding it to the
+            // active coroutine keeps State helpers correct for re-entrant
+            // calls. No status/TLS/scheduler checks are performed here.
+            State vm(L, false);
+            return data->func(vm, L);
+        }
+        catch (const std::exception& e)
+        {
+            luaL_error(L, "C++ callback exception: %s", e.what());
+            return 0;
+        }
+        catch (...)
+        {
+            luaL_error(L, "C++ callback threw an unknown exception");
+            return 0;
+        }
+    };
+
+    lua_pushcclosure(L, cfunc, name, 1);
+    Value val = Value::FromLuaState(L, -1);
+    lua_pop(L, 1);
+    return val;
+}
+
+// Value-returning counterpart of CreateClosureNNoYield. It keeps the
+// current Lua state because Value callbacks can allocate on scheduler
+// coroutines; it still avoids status/TLS checks and scheduler interaction.
+template <typename Fn>
+Value CreateClosureNoYield(lua_State* L, const char* name, Fn&& fn)
+{
+    struct ClosureData
+    {
+        Fn func;
+    };
+    auto* data = static_cast<ClosureData*>(lua_newuserdatadtor(L, sizeof(ClosureData), [](void* ptr) {
+        static_cast<ClosureData*>(ptr)->~ClosureData();
+    }));
+    new (data) ClosureData{ std::forward<Fn>(fn) };
+
+    auto cfunc = [](lua_State* L) -> int {
+        auto* data = static_cast<ClosureData*>(lua_touserdata(L, lua_upvalueindex(1)));
+        if (!data)
+        {
+            luaL_error(L, "C++ callback data is unavailable");
+            return 0;
+        }
+        try
+        {
+            // Value-returning callbacks may allocate tables/buffers and can
+            // execute from a scheduler coroutine. Keep the current Lua state
+            // here; the lightweight view construction does not allocate and
+            // keeps Value-producing callbacks correct on scheduler threads.
+            State vm(L, false);
+            Value result = data->func(vm, L);
+            result.PushToLuaState(L);
+            return 1;
         }
         catch (const std::exception& e)
         {

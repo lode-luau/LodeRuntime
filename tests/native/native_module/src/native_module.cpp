@@ -64,7 +64,7 @@ LODE_MODULE(vm)
     auto sibling = vm.Require("./sibling_module").AsTable();
 
     // 1. High-level functions (Optimized with Zero-Copy StackArgs)
-    exports.Set("greet", vm.CreateFastFunction([utils](Lode::State& vm, Lode::StackArgs args) mutable -> Lode::Value {
+    exports.Set("greet", vm.CreateFastFunctionNoYield([utils](Lode::State& vm, Lode::StackArgs args) mutable -> Lode::Value {
         std::string_view name = (args.Size() > 0 && args[0].IsString()) ? args[0].AsStringView() : "Lode User";
 
         // Delegate to utils.formatGreeting loaded from @self/utils.
@@ -78,13 +78,24 @@ LODE_MODULE(vm)
         return Lode::Value();
     }));
 
-    exports.Set("square", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("square", vm.CreateFastFunctionNoYield([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
         double x = (args.Size() > 0 && args[0].IsNumber()) ? args[0].AsNumber() : 0.0;
         return Lode::Value(x * x);
     }));
 
+    // Explicit no-yield path used by the runtime regression suite.  The
+    // second export verifies that accidental suspension is a normal Luau
+    // error instead of entering the scheduler from a synchronous closure.
+    exports.Set("fastNoYield", vm.CreateFastFunctionNNoYield([](Lode::State&, Lode::StackArgs args) -> int {
+        lua_pushnumber(args.RawState(), args.Size() > 0 && args[0].IsNumber() ? args[0].AsNumber() : 0.0);
+        return 1;
+    }));
+    exports.Set("yieldFromNoYield", vm.CreateFastFunctionNNoYield([](Lode::State& state, Lode::StackArgs) -> int {
+        return state.YieldThread();
+    }));
+
     // --- Test 4: Zero-Copy Buffer Manipulation ---
-    exports.Set("processBuffer", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("processBuffer", vm.CreateFastFunctionNoYield([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
         if (args.Size() < 2 || !args[0].IsBuffer() || !args[1].IsString()) {
             vm.RaiseError("Expected (buffer, string) as arguments");
             return Lode::Value();
@@ -120,19 +131,19 @@ LODE_MODULE(vm)
         return result.GetValue().empty() ? Lode::Value() : result.GetValue()[0];
     }));
 
-    exports.Set("roundTripString", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("roundTripString", vm.CreateFastFunctionNoYield([](Lode::State&, Lode::StackArgs args) -> Lode::Value {
         return args.Size() > 0 ? args[0].ToValue() : Lode::Value();
     }));
 
-    exports.Set("roundTripInteger", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("roundTripInteger", vm.CreateFastFunctionNoYield([](Lode::State&, Lode::StackArgs args) -> Lode::Value {
         return args.Size() > 0 && args[0].IsInteger() ? args[0].ToValue() : Lode::Value();
     }));
 
-    exports.Set("makeLargeInteger", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs) -> Lode::Value {
+    exports.Set("makeLargeInteger", vm.CreateFastFunctionNoYield([](Lode::State&, Lode::StackArgs) -> Lode::Value {
         return Lode::Value(static_cast<int64_t>(0x123456789abcdefLL));
     }));
 
-    exports.Set("makeVector", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs) -> Lode::Value {
+    exports.Set("makeVector", vm.CreateFastFunctionNoYield([](Lode::State&, Lode::StackArgs) -> Lode::Value {
         Lode::Vector vector;
         vector.components[0] = 1.25f;
         vector.components[1] = -2.5f;
@@ -140,7 +151,7 @@ LODE_MODULE(vm)
         return Lode::Value(vector);
     }));
 
-    exports.Set("roundTripVector", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("roundTripVector", vm.CreateFastFunctionNoYield([](Lode::State&, Lode::StackArgs args) -> Lode::Value {
         return args.Size() > 0 && args[0].IsVector() ? args[0].ToValue() : Lode::Value();
     }));
 
@@ -162,7 +173,7 @@ LODE_MODULE(vm)
     modernObject.SetMetatable(modernMetatable);
     exports.Set("modernObject", Lode::Value(modernObject));
 
-    exports.Set("bufferEndianProbe", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs) -> Lode::Value {
+    exports.Set("bufferEndianProbe", vm.CreateFastFunctionNoYield([](Lode::State& vm, Lode::StackArgs) -> Lode::Value {
         Lode::Buffer written = vm.CreateBuffer(8).AsBufferObj();
         written.WriteUInt32(0, 0x01020304u);
         written.WriteFloat32(4, 1.0f);
@@ -177,13 +188,13 @@ LODE_MODULE(vm)
         return Lode::Value(result);
     }));
 
-    exports.Set("bufferBoundsProbe", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("bufferBoundsProbe", vm.CreateFastFunctionNoYield([](Lode::State&, Lode::StackArgs args) -> Lode::Value {
         if (args.Size() == 0 || !args[0].IsBuffer()) return Lode::Value();
         Lode::Buffer buffer = args[0].ToValue().AsBufferObj();
         return Lode::Value(static_cast<double>(buffer.ReadUInt32(std::numeric_limits<size_t>::max())));
     }));
 
-    exports.Set("bufferOverlapProbe", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs) -> Lode::Value {
+    exports.Set("bufferOverlapProbe", vm.CreateFastFunctionNoYield([](Lode::State& vm, Lode::StackArgs) -> Lode::Value {
         Lode::Buffer buffer = vm.CreateBuffer(4).AsBufferObj();
         buffer.WriteString(0, "ABCD");
         buffer.CopyFrom(1, buffer, 0, 3);
@@ -218,11 +229,11 @@ LODE_MODULE(vm)
         return Lode::Value(out);
     }));
 
-    exports.Set("throwCpp", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs) -> Lode::Value {
+    exports.Set("throwCpp", vm.CreateFastFunctionNoYield([](Lode::State&, Lode::StackArgs) -> Lode::Value {
         throw std::runtime_error("native callback failure");
     }));
 
-    exports.Set("getSystemInfo", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs) -> Lode::Value {
+    exports.Set("getSystemInfo", vm.CreateFastFunctionNoYield([](Lode::State& vm, Lode::StackArgs) -> Lode::Value {
         Lode::Table info = vm.CreateTable();
 #if defined(_WIN32)
         info.Set("platform", Lode::Value("Windows"));

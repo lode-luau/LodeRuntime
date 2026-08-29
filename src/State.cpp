@@ -102,7 +102,11 @@ State::State() : L_(luaL_newstate()), ownsState_(true), impl_(std::make_unique<I
     }
 }
 
-State::State(lua_State* L) : L_(L), ownsState_(false)
+State::State(lua_State* L) : State(L, true)
+{
+}
+
+State::State(lua_State* L, bool nativeYieldAllowed) : L_(L), ownsState_(false), nativeYieldAllowed_(nativeYieldAllowed)
 {
     if (!L_)
         return;
@@ -180,7 +184,7 @@ State::~State()
 }
 
 State::State(State&& other) noexcept
-    : L_(other.L_), ownsState_(other.ownsState_), impl_(std::move(other.impl_))
+    : L_(other.L_), ownsState_(other.ownsState_), nativeYieldAllowed_(other.nativeYieldAllowed_), impl_(std::move(other.impl_))
 {
     other.L_ = nullptr;
     other.ownsState_ = false;
@@ -198,6 +202,7 @@ State& State::operator=(State&& other) noexcept
         }
         L_ = other.L_;
         ownsState_ = other.ownsState_;
+        nativeYieldAllowed_ = other.nativeYieldAllowed_;
         impl_ = std::move(other.impl_);
         other.L_ = nullptr;
         other.ownsState_ = false;
@@ -464,12 +469,38 @@ Value State::CreateFastFunction(const std::function<Value(State& vm, StackArgs a
     });
 }
 
+Value State::CreateFastFunctionNoYield(const std::function<Value(State& vm, StackArgs args)>& fn)
+{
+    if (!L_) return Value();
+    return Detail::CreateClosureNoYield(L_, "CFunctionFastNoYield", [fn](State& vm, lua_State* L) -> Value {
+        return fn(vm, StackArgs(L));
+    });
+}
+
 Value State::CreateFastFunctionN(const std::function<int(State& vm, StackArgs args)>& fn)
 {
     if (!L_) return Value();
     return Detail::CreateClosureN(L_, "CFunctionFastN", [fn](State& vm, lua_State* L) -> int {
         return fn(vm, StackArgs(L));
     });
+}
+
+Value State::CreateFastFunctionNNoYield(const std::function<int(State& vm, StackArgs args)>& fn)
+{
+    if (!L_) return Value();
+    return Detail::CreateClosureNNoYield(L_, "CFunctionFastNNoYield", [fn](State& vm, lua_State* L) -> int {
+        return fn(vm, StackArgs(L));
+    });
+}
+
+Value State::CreateFastFunctionYieldable(const std::function<Value(State& vm, StackArgs args)>& fn)
+{
+    return CreateFastFunction(fn);
+}
+
+Value State::CreateFastFunctionNYieldable(const std::function<int(State& vm, StackArgs args)>& fn)
+{
+    return CreateFastFunctionN(fn);
 }
 
 Coroutine State::CreateCoroutine(const Value& fn)
@@ -527,13 +558,18 @@ void State::SetUserdataGC(const Table& metatable, void(*destructor)(void* ptr))
 int State::YieldThread()
 {
     if (!L_) return 0;
-    const auto& execution = Detail::CurrentCFunctionCallContext();
+    if (!nativeYieldAllowed_)
+    {
+        luaL_error(L_, "cannot yield from a non-yieldable native function");
+        return 0;
+    }
+    auto& execution = Detail::CurrentCFunctionCallContext();
     if (execution.inForeignCallback && !execution.callbackMayYield)
     {
         luaL_error(L_, "cannot yield from a synchronous foreign callback");
         return 0;
     }
-    Detail::CurrentCFunctionCallContext().explicitYieldRequested = true;
+    execution.explicitYieldRequested = true;
     return lua_yield(L_, 0);
 }
 

@@ -75,6 +75,12 @@ describe("runtime lifecycle and error handling", function()
         expect(typeof(err)).toBe("string")
     end)
 
+    it("uses the direct no-yield native path and rejects accidental yields", function()
+        expect(native.fastNoYield(9)).toBe(9)
+        local ok = pcall(native.yieldFromNoYield)
+        expect(ok).toBe(false)
+    end)
+
     it("contains exceptions from raw exports and metamethod callbacks", function()
         local okExport, exportError = pcall(function() native.throwRaw() end)
         expect(okExport).toBe(false)

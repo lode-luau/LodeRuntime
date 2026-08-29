@@ -30,6 +30,18 @@ void Exports::Function(const std::string& name, const std::function<Value(State&
     exportsTable_.Set(name, vm.CreateFastFunction(fn));
 }
 
+void Exports::FunctionN(const std::string& name, const std::function<int(State& vm, StackArgs args)>& fn)
+{
+    State vm(L_);
+    exportsTable_.Set(name, vm.CreateFastFunctionNNoYield(fn));
+}
+
+void Exports::FunctionNYieldable(const std::string& name, const std::function<int(State& vm, StackArgs args)>& fn)
+{
+    State vm(L_);
+    exportsTable_.Set(name, vm.CreateFastFunctionNYieldable(fn));
+}
+
 void Exports::Function(const std::string& name, const std::function<Value()>& fn)
 {
     Function(name, [fn](State&, const std::vector<Value>&) -> Value {

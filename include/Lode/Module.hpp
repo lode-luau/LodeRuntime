@@ -56,6 +56,10 @@ public:
     void Function(const std::string& name, const std::function<Value(State& vm, const std::vector<Value>& args)>& fn);
     /** @brief Binds a zero-marshaling C++ lambda (StackArgs reads) as a Luau function. */
     void Function(const std::string& name, const std::function<Value(State& vm, StackArgs args)>& fn);
+    /** @brief Binds a direct-stack, non-yieldable native lambda. */
+    void FunctionN(const std::string& name, const std::function<int(State& vm, StackArgs args)>& fn);
+    /** @brief Binds a direct-stack lambda that may explicitly yield. */
+    void FunctionNYieldable(const std::string& name, const std::function<int(State& vm, StackArgs args)>& fn);
     /** @brief Binds a no-arg C++ lambda as a Luau function. */
     void Function(const std::string& name, const std::function<Value()>& fn);
     /** @brief Binds a string-to-string C++ lambda as a Luau function. */

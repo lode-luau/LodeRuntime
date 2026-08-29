@@ -48,6 +48,7 @@ class LODE_API State
 public:
     State();
     explicit State(lua_State* L);
+    State(lua_State* L, bool nativeYieldAllowed);
     ~State();
 
     State(const State&) = delete;
@@ -141,6 +142,15 @@ public:
     [[nodiscard]] Value CreateFastFunction(const std::function<Value(State& vm, StackArgs args)>& fn);
 
     /**
+     * @brief Creates a fast native function that is explicitly non-yieldable.
+     *
+     * This is the lowest-overhead Value-returning native wrapper. It does not
+     * inspect Lua status or the scheduler; calling YieldThread from it is an
+     * error. C++ exceptions are still converted to Lua errors.
+     */
+    [[nodiscard]] Value CreateFastFunctionNoYield(const std::function<Value(State& vm, StackArgs args)>& fn);
+
+    /**
      * @brief Creates a fast, zero-allocation Luau function with zero-marshaling results.
      *
      * The bound callable reads its arguments through StackArgs (no Lode::Value
@@ -153,6 +163,30 @@ public:
      * @return The created Function Value.
      */
     [[nodiscard]] Value CreateFastFunctionN(const std::function<int(State& vm, StackArgs args)>& fn);
+
+    /**
+     * @brief Creates a direct-stack native function with no yield checks.
+     *
+     * The callable receives a lightweight State view bound to the active
+     * coroutine and must not call YieldThread, Task::Wait, or another
+     * yieldable operation. It pushes results directly to the raw Lua stack
+     * and returns their count. Contract errors and C++ exceptions remain
+     * capturable through pcall; native memory faults remain native faults.
+     */
+    [[nodiscard]] Value CreateFastFunctionNNoYield(const std::function<int(State& vm, StackArgs args)>& fn);
+
+    /**
+     * @brief Creates an explicitly yieldable Value-returning native function.
+     * @note YieldThread is the only operation that may suspend the coroutine.
+     */
+    [[nodiscard]] Value CreateFastFunctionYieldable(const std::function<Value(State& vm, StackArgs args)>& fn);
+
+    /**
+     * @brief Creates an explicitly yieldable direct-stack native function.
+     * @note The callable must return the number of values it pushed after
+     *       resumption; ordinary synchronous functions should use NNoYield.
+     */
+    [[nodiscard]] Value CreateFastFunctionNYieldable(const std::function<int(State& vm, StackArgs args)>& fn);
 
     /**
      * @brief Creates a new coroutine (thread) from a function.
@@ -283,6 +317,7 @@ private:
     struct Impl;
     lua_State* L_ = nullptr;
     bool ownsState_ = true;
+    bool nativeYieldAllowed_ = true;
     std::shared_ptr<Impl> impl_;
 };
 
