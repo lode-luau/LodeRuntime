@@ -18,7 +18,9 @@ namespace lodeffi
 // strings/buffers where applicable at call time. An opaque aggregate typedef
 // (for example `typedef struct Handle Handle`) must likewise be used with
 // `Handle*`. A defined `typedef struct { ... } Name` may be passed by value
-// as a Luau buffer or returned as one; function pointers are unsupported.
+// as a Luau buffer or returned as one; named and anonymous function pointers
+// are represented as pointer ABI classes with their full signatures retained
+// in the result.
 // On 64-bit Windows-compatible ABIs, common convention markers such as
 // `WINAPI` and `__stdcall` are accepted as aliases of the default ABI.
 //
@@ -30,6 +32,9 @@ struct CdefParseResult
     // Resolved typedefs declared in this block. The runtime stores these per
     // State so a later ffi.cdef/ffi.new/ffi.sizeof call can use the name.
     std::unordered_map<std::string, ArgClass> aliases;
+    // Named function-pointer typedefs. The prototype name is the typedef
+    // name; it is not a symbol to resolve from a dynamic library.
+    std::unordered_map<std::string, Prototype> functionTypes;
 };
 
 [[nodiscard]] CdefParseResult ParseCdef(const std::string& source);

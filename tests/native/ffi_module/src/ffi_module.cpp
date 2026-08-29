@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <atomic>
+#include <thread>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -91,6 +92,17 @@ FFI_FIXTURE_EXPORT std::int32_t ffi_fixture_invoke_callback(
     std::int32_t (*callback)(std::int32_t), std::int32_t value)
 {
     return callback == nullptr ? 0 : callback(value);
+}
+
+FFI_FIXTURE_EXPORT std::int32_t ffi_fixture_invoke_callback_foreign(
+    std::int32_t (*callback)(std::int32_t), std::int32_t value)
+{
+    std::atomic<std::int32_t> result{0};
+    std::thread worker([&] {
+        result.store(callback == nullptr ? 0 : callback(value), std::memory_order_relaxed);
+    });
+    worker.join();
+    return result.load(std::memory_order_relaxed);
 }
 
 FFI_FIXTURE_EXPORT double ffi_fixture_invoke_double_callback(

@@ -8,6 +8,7 @@
 #include "lua.h"
 #include "Lode/Logger.hpp"
 #include "Lode/Numeric.hpp"
+#include "Lode/CFunctionCallContext.hpp"
 #include <unordered_map>
 #include <vector>
 #include <exception>
@@ -274,6 +275,12 @@ void Task::RegisterShutdownHook(State& vm, std::function<void()> hook)
 
 int Task::Wait(State& vm, double seconds)
 {
+    const auto& execution = Detail::CurrentCFunctionCallContext();
+    if (execution.inForeignCallback && !execution.callbackMayYield)
+    {
+        vm.RaiseError("task.wait cannot be used from a synchronous foreign callback");
+        return 0;
+    }
     TaskContext* ctx = GetOrCreateContext(vm.GetMainThread());
     if (!ctx) return 0;
 
@@ -350,6 +357,12 @@ void Task::ClearInterval(State& vm, int timerId)
 
 Coroutine Task::Spawn(State& vm, const Value& fnOrCo, const std::vector<Value>& args)
 {
+    const auto& execution = Detail::CurrentCFunctionCallContext();
+    if (execution.inForeignCallback && !execution.callbackMayYield)
+    {
+        vm.RaiseError("task.spawn cannot be used from a synchronous foreign callback");
+        return Coroutine();
+    }
     Coroutine co = MakeTaskCoroutine(vm, fnOrCo);
     auto res = co.Resume(args);
     if (res.IsError())
@@ -364,6 +377,12 @@ Coroutine Task::Spawn(State& vm, const Value& fnOrCo, const std::vector<Value>& 
 
 Coroutine Task::Defer(State& vm, const Value& fnOrCo, const std::vector<Value>& args)
 {
+    const auto& execution = Detail::CurrentCFunctionCallContext();
+    if (execution.inForeignCallback && !execution.callbackMayYield)
+    {
+        vm.RaiseError("task.defer cannot be used from a synchronous foreign callback");
+        return Coroutine();
+    }
     TaskContext* ctx = GetOrCreateContext(vm.GetMainThread());
     if (!ctx) return Coroutine();
 
@@ -385,6 +404,12 @@ Coroutine Task::Defer(State& vm, const Value& fnOrCo, const std::vector<Value>& 
 
 Coroutine Task::Delay(State& vm, double seconds, const Value& fnOrCo, const std::vector<Value>& args)
 {
+    const auto& execution = Detail::CurrentCFunctionCallContext();
+    if (execution.inForeignCallback && !execution.callbackMayYield)
+    {
+        vm.RaiseError("task.delay cannot be used from a synchronous foreign callback");
+        return Coroutine();
+    }
     TaskContext* ctx = GetOrCreateContext(vm.GetMainThread());
     if (!ctx) return Coroutine();
 

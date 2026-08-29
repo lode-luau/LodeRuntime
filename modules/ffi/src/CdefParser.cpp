@@ -119,12 +119,31 @@ bool IsCallingConvention(const std::string& token)
            token == "CALLBACK";
 }
 
-constexpr bool kDefaultAbiMatchesWindowsConvention =
-#if defined(_M_X64) || defined(__x86_64__) || defined(_M_ARM64) || defined(__aarch64__)
-    true;
-#else
-    false;
+bool IsUnsupportedCallingConvention(const std::string& token)
+{
+    return token == "__vectorcall";
+}
+
+CallingConvention ParseConvention(const Token& token)
+{
+    if (token.text == "__cdecl")
+        return CallingConvention::Cdecl;
+    return CallingConvention::Stdcall;
+}
+
+void ValidateConvention(const Token& token)
+{
+    if (IsUnsupportedCallingConvention(token.text))
+        Fail(token.line, "calling convention '" + token.text + "' is not supported");
+
+    // stdcall has a concrete libffi ABI on 32-bit Windows and is equivalent
+    // to the default Microsoft x64 ABI. Elsewhere it must not be accepted as
+    // a decorative marker because that could bind the wrong ABI silently.
+#if !defined(_WIN32)
+    if (ParseConvention(token) == CallingConvention::Stdcall)
+        Fail(token.line, "calling convention '" + token.text + "' is not supported on this architecture");
 #endif
+}
 
 struct Cursor
 {
@@ -367,6 +386,8 @@ ArgClass ParseType(Cursor& cur, RetKind& retOut, bool allowVoid,
     return isUnsigned ? ArgClass::U32 : ArgClass::I32;
 }
 
+void ParseFunctionParameters(Cursor& cur, Prototype& prototype);
+
 StructLayout ParseAggregateLayout(Cursor& cur)
 {
     const Token aggregate = cur.Next(); // struct or union
@@ -383,13 +404,40 @@ StructLayout ParseAggregateLayout(Cursor& cur)
     {
         RetKind ignored = RetKind::Void;
         std::string fieldStructName;
-        const ArgClass field = ParseType(cur, ignored, /*allowVoid=*/false, &fieldStructName);
+        ArgClass field = ParseType(cur, ignored, /*allowVoid=*/false, &fieldStructName);
         if (field == ArgClass::I32 && ignored == RetKind::Void)
             Fail(cur.LastLine(), "struct fields cannot have type void");
+        if (!cur.Eof() && (IsCallingConvention(cur.Peek().text) ||
+                           IsUnsupportedCallingConvention(cur.Peek().text)))
+        {
+            const Token convention = cur.Next();
+            ValidateConvention(convention);
+        }
         if (cur.Eof() || cur.Peek().text == ";")
             Fail(cur.Eof() ? cur.LastLine() : cur.Peek().line, "expected struct field name");
-        cur.Next(); // field name; layout offsets are positional in v1
-        const std::string fieldName = (*cur.toks)[cur.pos - 1].text;
+        std::string fieldName;
+        if (cur.Peek().text == "(")
+        {
+            // Function-pointer field declarator: `R (*field)(Args)`. The
+            // field occupies pointer storage; parsing the nested signature
+            // still validates its syntax and calling convention.
+            const size_t callbackLine = cur.Next().line;
+            if (cur.Eof() || cur.Next().text != "*")
+                Fail(callbackLine, "expected '*' in function-pointer field");
+            if (cur.Eof() || cur.Peek().text == ")")
+                Fail(callbackLine, "expected function-pointer field name");
+            fieldName = cur.Next().text;
+            if (cur.Eof() || cur.Next().text != ")" || cur.Eof() || cur.Next().text != "(")
+                Fail(callbackLine, "malformed function-pointer field");
+            Prototype nested;
+            ParseFunctionParameters(cur, nested);
+            field = ArgClass::Ptr;
+        }
+        else
+        {
+            cur.Next(); // field name; layout offsets are positional in v1
+            fieldName = (*cur.toks)[cur.pos - 1].text;
+        }
         size_t count = 1;
         if (!cur.Eof() && cur.Peek().text == "[")
         {
@@ -415,6 +463,138 @@ StructLayout ParseAggregateLayout(Cursor& cur)
         Fail(cur.LastLine(), "unterminated struct definition");
     cur.Next(); // }
     return layout;
+}
+
+// Parses the parameter list of a function declarator.  Keeping this logic in
+// one place is important for typedefs: a named function pointer and an
+// ordinary prototype must produce identical ABI descriptors.
+void ParseFunctionParameters(Cursor& cur, Prototype& prototype)
+{
+    bool first = true;
+    const bool isVoidParameterList =
+        !cur.Eof() && cur.Peek().text == "void" &&
+        cur.pos + 1 < cur.toks->size() && (*cur.toks)[cur.pos + 1].text == ")";
+    if (isVoidParameterList)
+    {
+        cur.Next();
+        cur.Next();
+        return;
+    }
+
+    if (cur.Eof() || cur.Peek().text == ")")
+    {
+        if (!cur.Eof()) cur.Next();
+        return;
+    }
+
+    while (true)
+    {
+        RetKind unused = RetKind::I32;
+        std::string structName;
+        ArgClass cls = ParseType(cur, unused, /*allowVoid=*/first, &structName);
+        if (cls == ArgClass::I32 && unused == RetKind::Void)
+            Fail(cur.Eof() ? cur.LastLine() : cur.Peek().line, "'void' is not a valid parameter type");
+
+        // A parameter name is optional.  For an anonymous function-pointer
+        // declarator consume its complete `( *name )( ... )` shape and retain
+        // only the pointer ABI class in this v1 descriptor.
+        if (!cur.Eof() && cur.Peek().text == "(")
+        {
+            const size_t callbackLine = cur.Next().line;
+            if (cur.Eof() || cur.Next().text != "*")
+                Fail(callbackLine, "expected '*' in function pointer parameter");
+            if (!cur.Eof() && cur.Peek().text != ")") cur.Next();
+            if (cur.Eof() || cur.Next().text != ")" || cur.Eof() || cur.Next().text != "(")
+                Fail(callbackLine, "malformed function pointer parameter");
+            size_t depth = 1;
+            while (!cur.Eof() && depth != 0)
+            {
+                const Token token = cur.Next();
+                if (token.text == "(") ++depth;
+                if (token.text == ")") --depth;
+            }
+            if (depth != 0)
+                Fail(callbackLine, "unterminated function pointer parameter");
+            cls = ArgClass::Ptr;
+        }
+        else if (!cur.Eof() && cur.Peek().text != "," && cur.Peek().text != ")" &&
+                 cur.Peek().text != "*" && !IsBaseTypeWord(cur.Peek().text))
+        {
+            cur.Next();
+        }
+
+        if (!cur.Eof() && cur.Peek().text == "[")
+        {
+            const size_t arrayLine = cur.Next().line;
+            if (cur.Eof() || cur.Peek().text == "]")
+                Fail(arrayLine, "array parameter requires a fixed size");
+            const Token extent = cur.Next();
+            if (extent.text.empty() || !std::isdigit(static_cast<unsigned char>(extent.text.front())))
+                Fail(extent.line, "array parameter size must be an integer literal");
+            if (cur.Eof() || cur.Next().text != "]")
+                Fail(extent.line, "expected ']' after array parameter size");
+            cls = ArgClass::Ptr;
+        }
+
+        prototype.args.push_back(cls);
+        prototype.argStructNames.push_back(std::move(structName));
+        first = false;
+        if (cur.Eof()) Fail(cur.LastLine(), "expected ')' in parameter list");
+        const Token separator = cur.Next();
+        if (separator.text == ")") break;
+        if (separator.text != ",")
+            Fail(separator.line, "expected ',' or ')' in parameter list");
+    }
+
+    if (prototype.args.size() > kMaxArity)
+        Fail(cur.LastLine(), "too many parameters (" + std::to_string(prototype.args.size()) +
+             "); maximum supported arity is " + std::to_string(kMaxArity));
+}
+
+// Parses `typedef R (*Name)(Args);` and its calling-convention variants. The
+// cursor is positioned immediately after `typedef` and the return type is
+// parsed using the same rules as ordinary function declarations.
+bool TryParseFunctionTypedef(Cursor& cur, Prototype* out, std::string* name)
+{
+    const size_t saved = cur.pos;
+    RetKind ret = RetKind::I32;
+    std::string retStructName;
+    ArgClass retClass = ParseType(cur, ret, /*allowVoid=*/true, &retStructName);
+    if (cur.Eof() || cur.Peek().text != "(")
+    {
+        cur.pos = saved;
+        return false;
+    }
+    cur.Next(); // opening declarator parenthesis
+
+    CallingConvention convention = CallingConvention::Default;
+    if (!cur.Eof() && IsCallingConvention(cur.Peek().text))
+    {
+        const Token marker = cur.Next();
+        ValidateConvention(marker);
+        convention = ParseConvention(marker);
+    }
+    if (cur.Eof() || cur.Next().text != "*")
+        Fail(cur.LastLine(), "expected '*' in function-pointer typedef");
+    if (cur.Eof() || !std::isalpha(static_cast<unsigned char>(cur.Peek().text.front())) &&
+        cur.Peek().text.front() != '_')
+        Fail(cur.Eof() ? cur.LastLine() : cur.Peek().line, "expected function-pointer typedef name");
+    const Token typedefName = cur.Next();
+    if (cur.Eof() || cur.Next().text != ")")
+        Fail(cur.LastLine(), "expected ')' after function-pointer typedef name");
+    if (cur.Eof() || cur.Next().text != "(")
+        Fail(cur.LastLine(), "expected '(' after function-pointer typedef name");
+
+    Prototype prototype;
+    prototype.name = typedefName.text;
+    prototype.ret = retClass == ArgClass::Struct ? RetKind::Struct : ret;
+    prototype.retStructName = std::move(retStructName);
+    prototype.convention = convention;
+    ParseFunctionParameters(cur, prototype);
+    if (!cur.Eof() && cur.Peek().text == ";") cur.Next();
+    *name = typedefName.text;
+    *out = std::move(prototype);
+    return true;
 }
 
 } // namespace
@@ -456,6 +636,7 @@ CdefParseResult ParseCdef(const std::string& source)
 {
     std::vector<Token> tokens = Tokenize(source);
     std::unordered_map<std::string, ArgClass> aliases;
+    std::unordered_map<std::string, Prototype> functionTypes;
     std::unordered_set<std::string> opaqueAggregateAliases;
     std::unordered_set<std::string> definedAggregateAliases;
     Cursor cur{ &tokens, &aliases, &opaqueAggregateAliases, &definedAggregateAliases };
@@ -466,7 +647,7 @@ CdefParseResult ParseCdef(const std::string& source)
     {
         if (cur.Peek().text == "typedef")
         {
-            const Token keyword = cur.Next();
+            cur.Next();
             if (!cur.Eof() && (cur.Peek().text == "struct" || cur.Peek().text == "union"))
             {
                 StructLayout layout = ParseAggregateLayout(cur);
@@ -488,6 +669,19 @@ CdefParseResult ParseCdef(const std::string& source)
                 }
                 continue;
             }
+
+            // Function-pointer typedefs have a declarator parenthesis after
+            // the return type. Parse them before the scalar-alias path so the
+            // `(*Name)(...)` tokens are not mistaken for a typedef name.
+            Prototype functionType;
+            std::string functionTypeName;
+            if (TryParseFunctionTypedef(cur, &functionType, &functionTypeName))
+            {
+                aliases[functionTypeName] = ArgClass::Ptr;
+                functionTypes[functionTypeName] = std::move(functionType);
+                continue;
+            }
+
             if (!cur.Eof() && cur.Peek().text == "enum")
             {
                 SkipEnumDefinition(cur);
@@ -532,22 +726,12 @@ CdefParseResult ParseCdef(const std::string& source)
         // the return type and function name. On 64-bit ABIs those macros map
         // to the platform default convention used by libffi. Do not silently
         // accept them where that is not true.
-        if (!cur.Eof() && IsCallingConvention(cur.Peek().text))
+        if (!cur.Eof() && (IsCallingConvention(cur.Peek().text) ||
+                           IsUnsupportedCallingConvention(cur.Peek().text)))
         {
             const Token convention = cur.Next();
-            if (convention.text == "__stdcall" || convention.text == "WINAPI" ||
-                convention.text == "APIENTRY" || convention.text == "CALLBACK")
-                p.convention = CallingConvention::Stdcall;
-            else
-                p.convention = CallingConvention::Cdecl;
-            // stdcall has a concrete libffi ABI on 32-bit Windows and is
-            // equivalent to the default Microsoft x64 ABI. Elsewhere it is
-            // a Windows declaration marker with no safe ABI mapping.
-#if !defined(_WIN32)
-            if (p.convention == CallingConvention::Stdcall)
-                Fail(convention.line, "calling convention '" + convention.text +
-                                       "' is not supported on this architecture");
-#endif
+            ValidateConvention(convention);
+            p.convention = ParseConvention(convention);
         }
 
         // Function name.
@@ -648,7 +832,7 @@ CdefParseResult ParseCdef(const std::string& source)
         protos.push_back(std::move(p));
     }
 
-    return {std::move(protos), std::move(structs), std::move(aliases)};
+    return {std::move(protos), std::move(structs), std::move(aliases), std::move(functionTypes)};
 }
 
 } // namespace lodeffi

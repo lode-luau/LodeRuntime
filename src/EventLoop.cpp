@@ -216,7 +216,14 @@ void EventLoop::Close()
     if (!loop_)
         return;
 
-    closing_ = true;
+    // Publish the closing state under the same mutex used by Post().  This
+    // prevents a producer from racing the async handle teardown and makes
+    // pending work deterministic: anything not yet drained is discarded.
+    {
+        std::lock_guard lock(postMutex_);
+        closing_ = true;
+        posted_.clear();
+    }
     auto hooks = std::move(closeHooks_);
     closeHooks_.clear();
     for (auto& hook : hooks)
@@ -236,12 +243,17 @@ void EventLoop::Close()
     }
 
     uv_stop(loop_);
-    if (postAsync_)
+    uv_async_t* postAsync = nullptr;
     {
-        uv_close(reinterpret_cast<uv_handle_t*>(postAsync_), [](uv_handle_t* handle) {
+        std::lock_guard lock(postMutex_);
+        postAsync = postAsync_;
+        postAsync_ = nullptr;
+    }
+    if (postAsync)
+    {
+        uv_close(reinterpret_cast<uv_handle_t*>(postAsync), [](uv_handle_t* handle) {
             delete reinterpret_cast<uv_async_t*>(handle);
         });
-        postAsync_ = nullptr;
     }
     uv_walk(loop_, CloseHandle, nullptr);
     while (uv_loop_alive(loop_))

@@ -9,6 +9,7 @@ end
 
 local FFI = require("@ffi")
 local sys = require("@sys")
+local task = require("@task")
 local fixturePath = sys.Args()[1]
 local isWindows = sys.GetPlatform():lower():find("windows", 1, true) ~= nil
 
@@ -26,6 +27,7 @@ local fixture = FFI.Load(fixturePath, [[
     typedef union { int32_t integer; float decimal; } FixtureUnion;
     int32_t ffi_fixture_union_integer(const FixtureUnion* value);
     int32_t ffi_fixture_invoke_callback(int32_t (*callback)(int32_t), int32_t value);
+    int32_t ffi_fixture_invoke_callback_foreign(int32_t (*callback)(int32_t), int32_t value);
     double ffi_fixture_invoke_double_callback(double (*callback)(double, double), double left, double right);
     int8_t ffi_fixture_negate_i8(int8_t value);
     uint8_t ffi_fixture_increment_u8(uint8_t value);
@@ -76,6 +78,70 @@ local callback = FFI.Callback("int32_t increment(int32_t value);", function(valu
 end)
 check(fixture.ffi_fixture_invoke_callback(callback, 41) == 42, "callback result mismatch")
 callback.Close()
+
+FFI.CDef([[
+    typedef int32_t
+        ( *FixtureUnary )
+        ( int32_t value );
+]])
+local fixtureUnary = FFI.TypeOf("FixtureUnary")
+local reentrant = FFI.Callback(fixtureUnary, function(value: number): number
+    return fixture.ffi_fixture_add_i32(value, 1)
+end)
+check(fixture.ffi_fixture_invoke_callback(reentrant, 41) == 42, "reentrant callback result mismatch")
+reentrant.Close()
+
+local rejected = FFI.Callback(fixtureUnary, function(value: number): number
+    return value + 1
+end)
+check(fixture.ffi_fixture_invoke_callback_foreign(rejected, 41) == 0,
+    "foreign callback must return zero")
+local rejectedState = rejected.State()
+check(rejectedState.foreignCalls == 1 and rejectedState.rejectedForeignCalls == 1,
+    "foreign callback rejection state mismatch")
+rejected.Close()
+
+local postedCount = 0
+local posted = FFI.Callback(fixtureUnary, function(value: number): number
+    postedCount += value
+    return value + 1
+end, { ForeignThread = "post" })
+check(fixture.ffi_fixture_invoke_callback_foreign(posted, 41) == 0,
+    "posted foreign callback must return zero")
+task.wait(0.01)
+check(postedCount == 41, "posted callback was not dispatched on the runtime thread")
+posted.Close()
+
+local fault = FFI.Callback(fixtureUnary, function(): number
+    error("fixture callback failure")
+end)
+check(fixture.ffi_fixture_invoke_callback(fault, 1) == 0, "faulted callback must return zero")
+check(fixture.ffi_fixture_invoke_callback(fault, 1) == 0, "faulted callback must stay disabled")
+local faultState = fault.State()
+check(faultState.faulted and faultState.lastError ~= "", "faulted callback state mismatch")
+fault.Close()
+
+local yieldFault = FFI.Callback(fixtureUnary, function(): number
+    task.wait(0)
+    return 1
+end)
+check(fixture.ffi_fixture_invoke_callback(yieldFault, 1) == 0,
+    "scheduler use from callback must return zero")
+local yieldState = yieldFault.State()
+check(yieldState.faulted and yieldState.lastError:find("task.wait", 1, true) ~= nil,
+    "scheduler rejection state mismatch")
+yieldFault.Close()
+
+local asyncFault = FFI.Callback(fixtureUnary, function(): number
+    fixture.CallAsync("ffi_fixture_add_i32", 1, 1)
+    return 1
+end)
+check(fixture.ffi_fixture_invoke_callback(asyncFault, 1) == 0,
+    "CallAsync from callback must return zero")
+local asyncState = asyncFault.State()
+check(asyncState.faulted and asyncState.lastError:find("callAsync", 1, true) ~= nil,
+    "CallAsync rejection state mismatch")
+asyncFault.Close()
 
 local scale = FFI.Callback("double scale(double left, double right);", function(left: number, right: number): number
     return left * right

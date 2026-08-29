@@ -23,9 +23,13 @@ export type FFIResult = any
 --- Represents counters and closure state for one callback.
 export type CallbackState = {
     closed: boolean,
+    --- True after the first Luau exception; subsequent calls return ABI zero.
+    faulted: boolean,
     foreignCalls: number,
     postedForeignCalls: number,
     rejectedForeignCalls: number,
+    --- The first callback exception, or an empty string when none occurred.
+    lastError: string,
 }
 
 --- Represents a C-callable callback closure.

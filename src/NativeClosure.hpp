@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Lode/State.hpp"
+#include "Lode/CFunctionCallContext.hpp"
 #include "lua.h"
 #include "lualib.h"
 #include <utility>
@@ -36,7 +37,14 @@ Value CreateClosure(lua_State* L, const char* name, Fn&& fn)
         {
             Value res = data->func(vm, L);
             if (lua_status(L) == LUA_YIELD)
+            {
+                auto& context = CurrentCFunctionCallContext();
+                const bool requested = context.explicitYieldRequested;
+                context.explicitYieldRequested = false;
+                if (!requested)
+                    return 0;
                 return lua_yield(L, 0);
+            }
             res.PushToLuaState(L);
             return 1;
         }
@@ -95,7 +103,23 @@ Value CreateClosureN(lua_State* L, const char* name, Fn&& fn)
         {
             const int nresults = data->func(data->cachedVm, L);
             if (lua_status(L) == LUA_YIELD)
+            {
+                // A synchronous callback is explicitly non-yieldable.  Do
+                // not attempt a second lua_yield after a native operation has
+                // already reported that status.
+                if (CurrentCFunctionCallContext().inForeignCallback &&
+                    !CurrentCFunctionCallContext().callbackMayYield)
+                {
+                    luaL_error(L, "cannot yield from a synchronous foreign callback");
+                    return 0;
+                }
+                auto& context = CurrentCFunctionCallContext();
+                const bool requested = context.explicitYieldRequested;
+                context.explicitYieldRequested = false;
+                if (!requested)
+                    return nresults;
                 return lua_yield(L, 0);
+            }
             return nresults;
         }
         catch (const std::exception& e)

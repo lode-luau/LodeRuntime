@@ -23,6 +23,7 @@
 #include "Lode/EventLoop.hpp"
 #include "Lode/Logger.hpp"
 #include "Lode/Metatable.hpp"
+#include "Lode/CFunctionCallContext.hpp"
 #include "Lode/State.hpp"
 #include "Lode/Task.hpp"
 #include "Lode/Table.hpp"
@@ -60,7 +61,6 @@
 #include <string>
 #include <thread>
 #include <mutex>
-#include <regex>
 #include <unordered_map>
 #include <vector>
 
@@ -138,10 +138,23 @@ RawStructLayout ParseStructLayout(const std::string& fields)
             const auto parsed = ParseCdef("void __ffi_struct_field(" + field + ");");
             if (parsed.prototypes.size() != 1 || parsed.prototypes.front().args.size() != 1)
                 BindError("ffi.struct: each field must have one supported C type");
-            const size_t nameBegin = field.find_last_of(" \t");
-            if (nameBegin == std::string::npos || nameBegin + 1 >= field.size())
-                BindError("ffi.struct: each field requires a name");
-            const std::string name = field.substr(nameBegin + 1);
+            std::string name;
+            const size_t functionOpen = field.find("(*");
+            if (functionOpen != std::string::npos)
+            {
+                const size_t nameBegin = functionOpen + 2;
+                const size_t nameEnd = field.find(')', nameBegin);
+                if (nameEnd == std::string::npos || nameEnd == nameBegin)
+                    BindError("ffi.struct: malformed function-pointer field");
+                name = field.substr(nameBegin, nameEnd - nameBegin);
+            }
+            else
+            {
+                const size_t nameBegin = field.find_last_of(" \t");
+                if (nameBegin == std::string::npos || nameBegin + 1 >= field.size())
+                    BindError("ffi.struct: each field requires a name");
+                name = field.substr(nameBegin + 1);
+            }
             const ArgClass type = parsed.prototypes.front().args.front();
             const size_t alignment = AlignOf(type);
             offset = (offset + alignment - 1) / alignment * alignment;
@@ -325,6 +338,47 @@ std::string RegistryPreamble(const TypeRegistry& registry)
         if (canonical != nullptr)
             declarations += "typedef " + std::string(canonical) + " " + name + ";\n";
     }
+    for (const auto& [name, prototype] : registry.functionTypes)
+    {
+        auto retName = [](RetKind ret) -> const char* {
+            switch (ret)
+            {
+                case RetKind::Void: return "void";
+                case RetKind::Bool: return "bool";
+                case RetKind::I8: return "int8_t";
+                case RetKind::U8: return "uint8_t";
+                case RetKind::I16: return "int16_t";
+                case RetKind::U16: return "uint16_t";
+                case RetKind::I32: return "int32_t";
+                case RetKind::U32: return "uint32_t";
+                case RetKind::I64: return "int64_t";
+                case RetKind::U64: return "uint64_t";
+                case RetKind::Ptr: return "void*";
+                case RetKind::F32: return "float";
+                case RetKind::F64: return "double";
+                case RetKind::Struct: return nullptr;
+            }
+            return nullptr;
+        };
+        const char* ret = retName(prototype.ret);
+        if (ret == nullptr) continue;
+        declarations += "typedef " + std::string(ret) + " (";
+        if (prototype.convention == CallingConvention::Stdcall)
+            declarations += "__stdcall ";
+        declarations += "*" + name + ")( ";
+        if (prototype.args.empty())
+            declarations += "void";
+        else
+        {
+            for (size_t i = 0; i < prototype.args.size(); ++i)
+            {
+                if (i != 0) declarations += ", ";
+                const char* arg = CanonicalTypeName(prototype.args[i]);
+                declarations += arg != nullptr ? arg : "void*";
+            }
+        }
+        declarations += ");\n";
+    }
     return declarations;
 }
 
@@ -363,17 +417,6 @@ CdefParseResult ParseForState(lua_State* state, const std::string& declarations)
     return ParseCdef(RegistryPreamble(registry) + declarations);
 }
 
-std::string NormalizeFunctionTypedef(const std::string& declaration, std::string* typeName)
-{
-    static const std::regex pattern(
-        R"(^\s*typedef\s+(.+?)\s*\(\s*((?:__stdcall|__cdecl|WINAPI|APIENTRY|CALLBACK)\s*)?\*\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*\((.*)\)\s*;?\s*$)",
-        std::regex::ECMAScript);
-    std::smatch match;
-    if (!std::regex_match(declaration, match, pattern)) return {};
-    *typeName = match[3].str();
-    return match[1].str() + " " + match[2].str() + *typeName + "(" + match[4].str() + ");";
-}
-
 bool SameLayout(const StructLayout& left, const StructLayout& right)
 {
     return left.isUnion == right.isUnion && left.fields == right.fields &&
@@ -396,17 +439,17 @@ Lode::Value ReadScalar(const Lode::Value& storage, size_t offset, ArgClass type)
     switch (type)
     {
         case ArgClass::Bool: return Lode::Value(static_cast<double>(*p != 0));
-        case ArgClass::I8: return Lode::Value(static_cast<double>(*reinterpret_cast<const int8_t*>(p)));
+        case ArgClass::I8: { int8_t v; std::memcpy(&v, p, sizeof(v)); return Lode::Value(static_cast<double>(v)); }
         case ArgClass::U8: return Lode::Value(static_cast<double>(*p));
-        case ArgClass::I16: return Lode::Value(static_cast<double>(*reinterpret_cast<const int16_t*>(p)));
-        case ArgClass::U16: return Lode::Value(static_cast<double>(*reinterpret_cast<const uint16_t*>(p)));
-        case ArgClass::I32: return Lode::Value(static_cast<double>(*reinterpret_cast<const int32_t*>(p)));
-        case ArgClass::U32: return Lode::Value(static_cast<double>(*reinterpret_cast<const uint32_t*>(p)));
-        case ArgClass::I64: return Lode::Value(static_cast<double>(*reinterpret_cast<const int64_t*>(p)));
-        case ArgClass::U64: return Lode::Value(static_cast<double>(*reinterpret_cast<const uint64_t*>(p)));
-        case ArgClass::F32: return Lode::Value(static_cast<double>(*reinterpret_cast<const float*>(p)));
-        case ArgClass::F64: return Lode::Value(*reinterpret_cast<const double*>(p));
-        case ArgClass::Ptr: { void* v = *reinterpret_cast<void* const*>(p); return v ? Lode::Value(v) : Lode::Value(); }
+        case ArgClass::I16: { int16_t v; std::memcpy(&v, p, sizeof(v)); return Lode::Value(static_cast<double>(v)); }
+        case ArgClass::U16: { uint16_t v; std::memcpy(&v, p, sizeof(v)); return Lode::Value(static_cast<double>(v)); }
+        case ArgClass::I32: { int32_t v; std::memcpy(&v, p, sizeof(v)); return Lode::Value(static_cast<double>(v)); }
+        case ArgClass::U32: { uint32_t v; std::memcpy(&v, p, sizeof(v)); return Lode::Value(static_cast<double>(v)); }
+        case ArgClass::I64: { int64_t v; std::memcpy(&v, p, sizeof(v)); return Lode::Value(static_cast<double>(v)); }
+        case ArgClass::U64: { uint64_t v; std::memcpy(&v, p, sizeof(v)); return Lode::Value(static_cast<double>(v)); }
+        case ArgClass::F32: { float v; std::memcpy(&v, p, sizeof(v)); return Lode::Value(static_cast<double>(v)); }
+        case ArgClass::F64: { double v; std::memcpy(&v, p, sizeof(v)); return Lode::Value(v); }
+        case ArgClass::Ptr: { void* v = nullptr; std::memcpy(&v, p, sizeof(v)); return v ? Lode::Value(v) : Lode::Value(); }
         default: return Lode::Value();
     }
 }
@@ -426,12 +469,18 @@ void WriteScalar(const Lode::Value& storage, size_t offset, ArgClass type, const
     const double n = value.AsNumber();
     switch (type)
     {
-        case ArgClass::Bool: *p = n != 0; break; case ArgClass::I8: *reinterpret_cast<int8_t*>(p)=static_cast<int8_t>(n); break;
-        case ArgClass::U8: *p=static_cast<uint8_t>(n); break; case ArgClass::I16: *reinterpret_cast<int16_t*>(p)=static_cast<int16_t>(n); break;
-        case ArgClass::U16: *reinterpret_cast<uint16_t*>(p)=static_cast<uint16_t>(n); break; case ArgClass::I32: *reinterpret_cast<int32_t*>(p)=static_cast<int32_t>(n); break;
-        case ArgClass::U32: *reinterpret_cast<uint32_t*>(p)=static_cast<uint32_t>(n); break; case ArgClass::I64: *reinterpret_cast<int64_t*>(p)=static_cast<int64_t>(n); break;
-        case ArgClass::U64: *reinterpret_cast<uint64_t*>(p)=static_cast<uint64_t>(n); break; case ArgClass::F32: *reinterpret_cast<float*>(p)=static_cast<float>(n); break;
-        case ArgClass::F64: *reinterpret_cast<double*>(p)=n; break; default: break;
+        case ArgClass::Bool: { const uint8_t v = n != 0; std::memcpy(p, &v, sizeof(v)); break; }
+        case ArgClass::I8: { const int8_t v = static_cast<int8_t>(n); std::memcpy(p, &v, sizeof(v)); break; }
+        case ArgClass::U8: { const uint8_t v = static_cast<uint8_t>(n); std::memcpy(p, &v, sizeof(v)); break; }
+        case ArgClass::I16: { const int16_t v = static_cast<int16_t>(n); std::memcpy(p, &v, sizeof(v)); break; }
+        case ArgClass::U16: { const uint16_t v = static_cast<uint16_t>(n); std::memcpy(p, &v, sizeof(v)); break; }
+        case ArgClass::I32: { const int32_t v = static_cast<int32_t>(n); std::memcpy(p, &v, sizeof(v)); break; }
+        case ArgClass::U32: { const uint32_t v = static_cast<uint32_t>(n); std::memcpy(p, &v, sizeof(v)); break; }
+        case ArgClass::I64: { const int64_t v = static_cast<int64_t>(n); std::memcpy(p, &v, sizeof(v)); break; }
+        case ArgClass::U64: { const uint64_t v = static_cast<uint64_t>(n); std::memcpy(p, &v, sizeof(v)); break; }
+        case ArgClass::F32: { const float v = static_cast<float>(n); std::memcpy(p, &v, sizeof(v)); break; }
+        case ArgClass::F64: { const double v = n; std::memcpy(p, &v, sizeof(v)); break; }
+        default: break;
     }
 }
 
@@ -696,6 +745,9 @@ struct CallbackState
     std::condition_variable idle;
     size_t activeCalls = 0;
     bool closed = false;
+    bool faulted = false;
+    bool pendingFree = false;
+    std::string lastError;
     std::atomic<uint64_t> foreignCalls{0};
     std::atomic<uint64_t> postedForeignCalls{0};
     std::atomic<uint64_t> rejectedForeignCalls{0};
@@ -705,27 +757,64 @@ struct CallbackState
     bool BeginCall()
     {
         std::lock_guard lock(mutex);
-        if (closed) return false;
+        if (closed || faulted) return false;
         ++activeCalls;
         return true;
     }
     void EndCall()
     {
         std::lock_guard lock(mutex);
-        if (--activeCalls == 0) idle.notify_all();
+        if (--activeCalls == 0)
+        {
+            if (pendingFree && closure != nullptr)
+            {
+                ffi_closure_free(closure);
+                closure = nullptr;
+                code = nullptr;
+                pendingFree = false;
+            }
+            idle.notify_all();
+        }
     }
     void Close()
     {
         std::unique_lock lock(mutex);
         if (closed) return;
         closed = true;
+        // Any callback currently running on this thread may be nested inside
+        // this callback (A -> B -> A.Close). Waiting for activeCalls here
+        // would deadlock that stack, so defer native closure reclamation until
+        // the final EndCall instead.
+        const bool reentrant = Lode::Detail::CurrentCFunctionCallContext().inForeignCallback;
+        if (reentrant && activeCalls != 0)
+        {
+            pendingFree = true;
+            return;
+        }
         idle.wait(lock, [this] { return activeCalls == 0; });
         if (closure != nullptr) { ffi_closure_free(closure); closure = nullptr; code = nullptr; }
+    }
+    void Fault(std::string error)
+    {
+        std::lock_guard lock(mutex);
+        if (faulted) return;
+        faulted = true;
+        lastError = std::move(error);
     }
     bool IsClosed()
     {
         std::lock_guard lock(mutex);
         return closed;
+    }
+    bool IsFaulted()
+    {
+        std::lock_guard lock(mutex);
+        return faulted;
+    }
+    std::string LastError()
+    {
+        std::lock_guard lock(mutex);
+        return lastError;
     }
 };
 
@@ -757,6 +846,10 @@ Lode::Value CallbackArgument(ArgClass type, void* value)
 void InvokeCallback(ffi_cif*, void* output, void** values, void* userdata)
 {
     auto& callback = *static_cast<CallbackState*>(userdata);
+    // Always provide the ABI zero value, including calls rejected because the
+    // callback was closed or faulted before entering the protected path.
+    if (output != nullptr && callback.ret != RetKind::Void)
+        std::memset(output, 0, callback.cif.rtype->size);
     if (!callback.BeginCall())
         return;
     struct EndCall
@@ -764,9 +857,8 @@ void InvokeCallback(ffi_cif*, void* output, void** values, void* userdata)
         CallbackState& callback;
         ~EndCall() { callback.EndCall(); }
     } endCall{callback};
-    if (output != nullptr && callback.ret != RetKind::Void)
-        std::memset(output, 0, callback.cif.rtype->size);
-    if (std::this_thread::get_id() != callback.ownerThread)
+    if (std::this_thread::get_id() != callback.ownerThread ||
+        Lode::Detail::CurrentCFunctionCallContext().activeState == nullptr)
     {
         ++callback.foreignCalls;
         if (callback.postForeignCalls && callback.eventLoop != nullptr)
@@ -798,11 +890,17 @@ void InvokeCallback(ffi_cif*, void* output, void** values, void* userdata)
     args.reserve(callback.args.size());
     for (size_t i = 0; i < callback.args.size(); ++i)
         args.push_back(CallbackArgument(callback.args[i], values[i]));
-    Lode::State vm(callback.luaState);
+    lua_State* activeState = Lode::Detail::CurrentCFunctionCallContext().activeState;
+    Lode::State vm(activeState);
+    Lode::Detail::ScopedForeignCallback callbackScope(&callback);
     const auto result = callback.function.CallSingle(vm, args);
     if (result.IsError())
     {
-        Lode::Logger::Error("ffi callback failed: " + result.GetError().ErrorMessage());
+        const std::string error = result.GetError().ErrorMessage();
+        const bool wasFaulted = callback.IsFaulted();
+        callback.Fault(error);
+        if (!wasFaulted)
+            Lode::Logger::Error("ffi callback failed: " + error);
         return;
     }
     const double number = result.GetValue().IsNumber() ? result.GetValue().AsNumber() : 0.0;
@@ -1182,6 +1280,7 @@ Lode::Table BindLibrary(Lode::State& vm, std::shared_ptr<DynamicLibrary> lib,
                                 : bound->ret == RetKind::F64 ? static_cast<void*>(&floatResult)
                                                              : static_cast<void*>(&intResult);
 
+            Lode::Detail::ScopedCFunctionCall cFunctionCall(L);
             ffi_call(&bound->cif, FFI_FN(bound->fn), retSlot, values.data());
             CaptureLastError();
 
@@ -1197,6 +1296,9 @@ Lode::Table BindLibrary(Lode::State& vm, std::shared_ptr<DynamicLibrary> lib,
     }
 
     exports.Set("CallAsync", CreateFfiFunctionN(vm, [lib, bindings](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
+        const auto& execution = Lode::Detail::CurrentCFunctionCallContext();
+        if (execution.inForeignCallback && !execution.callbackMayYield)
+            BindError("ffi.callAsync cannot be used from a synchronous foreign callback");
         if (args.Size() < 1 || !args[0].IsString())
         {
             vm.RaiseError("ffi.callAsync: expected a bound function name as the first argument");
@@ -1352,15 +1454,12 @@ LODE_MODULE(vm)
     exports.Set("CDef", CreateFfiFunctionN(vm, [](Lode::State& callVm, Lode::StackArgs args) -> Lode::Value {
         if (args.Size() != 1 || !args[0].IsString()) BindError("ffi.cdef: declarations must be a string");
         const std::string source = args[0].AsString();
-        std::string functionTypeName;
-        const std::string normalizedFunction = NormalizeFunctionTypedef(source, &functionTypeName);
         TypeRegistry existing;
         {
             std::lock_guard lock(gTypeRegistryMutex);
             const auto found = gTypeRegistries.find(callVm.GetMainThread());
             if (found != gTypeRegistries.end()) existing = found->second;
         }
-        const std::string declarations = normalizedFunction.empty() ? source : normalizedFunction;
         // The preamble lets new declarations refer to types already registered
         // for this State.  A compatible redefinition, however, cannot be
         // parsed together with its existing declaration by the C parser.  In
@@ -1369,11 +1468,11 @@ LODE_MODULE(vm)
         CdefParseResult parsed;
         try
         {
-            parsed = ParseCdef(RegistryPreamble(existing) + declarations);
+            parsed = ParseCdef(RegistryPreamble(existing) + source);
         }
         catch (const std::runtime_error&)
         {
-            parsed = ParseCdef(declarations);
+            parsed = ParseCdef(source);
         }
         std::lock_guard lock(gTypeRegistryMutex);
         auto& registry = gTypeRegistries[callVm.GetMainThread()];
@@ -1392,14 +1491,13 @@ LODE_MODULE(vm)
             else if (found->second != type)
                 BindError("ffi.cdef: incompatible redefinition of alias '" + name + "'");
         }
-        if (!functionTypeName.empty())
+        for (const auto& [name, prototype] : parsed.functionTypes)
         {
-            if (parsed.prototypes.size() != 1) BindError("ffi.cdef: invalid function typedef");
-            const auto found = registry.functionTypes.find(functionTypeName);
+            const auto found = registry.functionTypes.find(name);
             if (found == registry.functionTypes.end())
-                registry.functionTypes.emplace(functionTypeName, parsed.prototypes.front());
-            else if (!SamePrototype(found->second, parsed.prototypes.front()))
-                BindError("ffi.cdef: incompatible redefinition of function type '" + functionTypeName + "'");
+                registry.functionTypes.emplace(name, prototype);
+            else if (!SamePrototype(found->second, prototype))
+                BindError("ffi.cdef: incompatible redefinition of function type '" + name + "'");
         }
         return Lode::Value();
     }));
@@ -1495,7 +1593,7 @@ LODE_MODULE(vm)
                 size_t field = 0; for (size_t n = 0; n < index; ++n) field += registered.layout.fieldCounts[n];
                 return ReadScalar(storage, offset->second, registered.layout.fields[field]);
             });
-            meta.SetNewIndexFunction([storage, registered, keepAlive](Lode::State&, Lode::Value key, Lode::Value value) {
+            meta.SetNewIndexFunction([storage, registered, keepAlive](Lode::State& fieldVm, Lode::Value key, Lode::Value value) {
                 if (!key.IsString()) BindError("ffi struct field name must be a string");
                 const auto offset = registered.raw.offsets.find(key.AsString());
                 if (offset == registered.raw.offsets.end()) BindError("ffi struct: unknown field '" + key.AsString() + "'");
@@ -1507,15 +1605,47 @@ LODE_MODULE(vm)
                 if (type == ArgClass::Ptr)
                 {
                     void* pointer = nullptr;
+                    Lode::Value retained = value;
                     if (value.GetType() == Lode::ValueType::LightUserdata) pointer = value.AsLightUserdata();
                     else if (value.IsBuffer()) { auto span = value.AsSpan(); pointer = span.empty() ? nullptr : span.data(); }
-                    else if (value.IsTable()) { const auto v = value.AsTable().Get("Pointer"); if (v.IsOk()) pointer = v.GetValue().AsLightUserdata(); }
-                    else if (!value.IsNil()) BindError("ffi struct: pointer field requires pointer, buffer, callback, or nil");
-                    std::memcpy(p, &pointer, sizeof(pointer)); (*keepAlive)[key.AsString()] = value; return;
+                    else if (value.IsString())
+                    {
+                        const std::string text = value.AsString();
+                        retained = fieldVm.CreateBuffer(text.size() + 1);
+                        auto retainedBytes = retained.AsSpan();
+                        std::memcpy(retainedBytes.data(), text.data(), text.size());
+                        retainedBytes[text.size()] = 0;
+                        pointer = retainedBytes.data();
+                    }
+                    else if (value.IsTable())
+                    {
+                        const auto closed = value.AsTable().Get("__ffiClosed");
+                        if (closed.IsOk() && closed.GetValue().IsBoolean() && closed.GetValue().AsBoolean())
+                            BindError("ffi struct: pointer field callback is closed");
+                        const auto v = value.AsTable().Get("Pointer");
+                        if (v.IsOk() && v.GetValue().GetType() == Lode::ValueType::LightUserdata)
+                            pointer = v.GetValue().AsLightUserdata();
+                    }
+                    else if (!value.IsNil()) BindError("ffi struct: pointer field requires pointer, string, buffer, callback, or nil");
+                    std::memcpy(p, &pointer, sizeof(pointer)); (*keepAlive)[key.AsString()] = retained; return;
                 }
                 if (!value.IsNumber() && !value.IsBoolean()) BindError("ffi struct: scalar field requires a number");
-                const double n=value.AsNumber();
-                switch(type) { case ArgClass::I32:*reinterpret_cast<int32_t*>(p)=static_cast<int32_t>(n);break; case ArgClass::U32:*reinterpret_cast<uint32_t*>(p)=static_cast<uint32_t>(n);break; case ArgClass::I64:*reinterpret_cast<int64_t*>(p)=static_cast<int64_t>(n);break; case ArgClass::U64:*reinterpret_cast<uint64_t*>(p)=static_cast<uint64_t>(n);break; case ArgClass::F32:*reinterpret_cast<float*>(p)=static_cast<float>(n);break; case ArgClass::F64:*reinterpret_cast<double*>(p)=n;break; case ArgClass::I16:*reinterpret_cast<int16_t*>(p)=static_cast<int16_t>(n);break; case ArgClass::U16:*reinterpret_cast<uint16_t*>(p)=static_cast<uint16_t>(n);break; case ArgClass::I8:*reinterpret_cast<int8_t*>(p)=static_cast<int8_t>(n);break; case ArgClass::U8: case ArgClass::Bool:*p=static_cast<uint8_t>(n);break; default:break; }
+                const double number = value.AsNumber();
+                switch (type)
+                {
+                    case ArgClass::Bool: { const uint8_t v = number != 0; std::memcpy(p, &v, sizeof(v)); break; }
+                    case ArgClass::I8: { const int8_t v = static_cast<int8_t>(number); std::memcpy(p, &v, sizeof(v)); break; }
+                    case ArgClass::U8: { const uint8_t v = static_cast<uint8_t>(number); std::memcpy(p, &v, sizeof(v)); break; }
+                    case ArgClass::I16: { const int16_t v = static_cast<int16_t>(number); std::memcpy(p, &v, sizeof(v)); break; }
+                    case ArgClass::U16: { const uint16_t v = static_cast<uint16_t>(number); std::memcpy(p, &v, sizeof(v)); break; }
+                    case ArgClass::I32: { const int32_t v = static_cast<int32_t>(number); std::memcpy(p, &v, sizeof(v)); break; }
+                    case ArgClass::U32: { const uint32_t v = static_cast<uint32_t>(number); std::memcpy(p, &v, sizeof(v)); break; }
+                    case ArgClass::I64: { const int64_t v = static_cast<int64_t>(number); std::memcpy(p, &v, sizeof(v)); break; }
+                    case ArgClass::U64: { const uint64_t v = static_cast<uint64_t>(number); std::memcpy(p, &v, sizeof(v)); break; }
+                    case ArgClass::F32: { const float v = static_cast<float>(number); std::memcpy(p, &v, sizeof(v)); break; }
+                    case ArgClass::F64: { const double v = number; std::memcpy(p, &v, sizeof(v)); break; }
+                    default: break;
+                }
             });
             object.SetMetatable(meta);
             if (args.Size() == 2 && !args[1].IsNil())
@@ -1866,6 +1996,7 @@ LODE_MODULE(vm)
         const Lode::Value close = CreateFfiFunctionN(callVm, [callback, handle](Lode::State&, Lode::StackArgs) mutable -> Lode::Value {
             callback->Close();
             handle.Set("__ffiClosed", Lode::Value(true));
+            handle.Set("Pointer", Lode::Value());
             return Lode::Value();
         });
         handle.Set("Close", close);
@@ -1876,9 +2007,11 @@ LODE_MODULE(vm)
             if (args.Size() != 0) BindError("ffi callback state: expected no arguments");
             Lode::Table snapshot = state.CreateTable();
             snapshot.Set("closed", Lode::Value(callback->IsClosed()));
+            snapshot.Set("faulted", Lode::Value(callback->IsFaulted()));
             snapshot.Set("foreignCalls", Lode::Value(static_cast<double>(callback->foreignCalls.load())));
             snapshot.Set("postedForeignCalls", Lode::Value(static_cast<double>(callback->postedForeignCalls.load())));
             snapshot.Set("rejectedForeignCalls", Lode::Value(static_cast<double>(callback->rejectedForeignCalls.load())));
+            snapshot.Set("lastError", Lode::Value(callback->LastError()));
             return Lode::Value(snapshot);
         }));
         return Lode::Value(handle);

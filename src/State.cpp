@@ -4,6 +4,7 @@
 #include "Lode/Metatable.hpp"
 #include "Lode/Task.hpp"
 #include "Lode/EventLoop.hpp"
+#include "Lode/CFunctionCallContext.hpp"
 #include "ModuleLoader.hpp"
 #include "Registry.hpp"
 #include "LuaError.hpp"
@@ -526,6 +527,13 @@ void State::SetUserdataGC(const Table& metatable, void(*destructor)(void* ptr))
 int State::YieldThread()
 {
     if (!L_) return 0;
+    const auto& execution = Detail::CurrentCFunctionCallContext();
+    if (execution.inForeignCallback && !execution.callbackMayYield)
+    {
+        luaL_error(L_, "cannot yield from a synchronous foreign callback");
+        return 0;
+    }
+    Detail::CurrentCFunctionCallContext().explicitYieldRequested = true;
     return lua_yield(L_, 0);
 }
 

@@ -185,6 +185,7 @@ set(LODE_CORE_SOURCES
     src/CiGenerator.cpp
     src/ProjectInitializer.cpp
     src/State.cpp
+    src/CFunctionCallContext.cpp
     src/StateLifetime.cpp
     src/Compiler.cpp
     src/Sha256.cpp
@@ -217,6 +218,7 @@ set(LODE_CORE_HEADERS
     include/Lode/Module.hpp
     include/Lode/StackValue.hpp
     include/Lode/State.hpp
+    include/Lode/CFunctionCallContext.hpp
     include/Lode/Compiler.hpp
     include/Lode/Gc.hpp
     include/Lode/Logger.hpp
