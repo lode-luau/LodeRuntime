@@ -89,7 +89,44 @@ local reentrant = FFI.Callback(fixtureUnary, function(value: number): number
     return fixture.ffi_fixture_add_i32(value, 1)
 end)
 check(fixture.ffi_fixture_invoke_callback(reentrant, 41) == 42, "reentrant callback result mismatch")
+check(reentrant.State().callbackDepth == 0 and reentrant.State().activeCalls == 0,
+    "callback depth must return to zero after synchronous re-entry")
 reentrant.Close()
+
+-- Exercise true nested dispatch through the same closure.  The callback calls
+-- back into C, and C immediately enters that callback again on this thread.
+local nestedDepth = 0
+local nested: FFI.Callback
+nested = FFI.Callback(fixtureUnary, function(value: number): number
+    if nestedDepth == 0 then
+        check(nested.State().callbackDepth == 1, "outer callback depth was not recorded")
+        nestedDepth += 1
+        local result = fixture.ffi_fixture_invoke_callback(nested, value - 1)
+        nestedDepth -= 1
+        return result + 1
+    end
+    check(nested.State().callbackDepth == 2, "nested callback depth was not recorded")
+    return value
+end)
+check(fixture.ffi_fixture_invoke_callback(nested, 41) == 41,
+    "nested callback dispatch must remain synchronous")
+local nestedState = nested.State()
+check(nestedState.callbackDepth == 0 and nestedState.activeCalls == 0,
+    "nested callback depth must be balanced")
+nested.Close()
+
+-- Closing from inside the active callback must defer ffi_closure_free until
+-- the final stack frame returns instead of waiting on itself.
+local selfClosing: FFI.Callback
+selfClosing = FFI.Callback(fixtureUnary, function(value: number): number
+    selfClosing.Close()
+    return value + 1
+end)
+check(fixture.ffi_fixture_invoke_callback(selfClosing, 41) == 42,
+    "callback close from its own invocation must remain synchronous")
+check(selfClosing.State().closed and selfClosing.State().activeCalls == 0,
+    "self-closed callback must finish without active calls")
+selfClosing.Close()
 
 local rejected = FFI.Callback(fixtureUnary, function(value: number): number
     return value + 1

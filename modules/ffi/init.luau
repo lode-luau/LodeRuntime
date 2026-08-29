@@ -25,6 +25,11 @@ export type CallbackState = {
     closed: boolean,
     --- True after the first Luau exception; subsequent calls return ABI zero.
     faulted: boolean,
+    --- Number of callback entries currently executing (all threads).
+    activeCalls: number,
+    --- Nested callback depth on the runtime owner thread. Re-entrant entries
+    --- are allowed and remain synchronous; this is diagnostic only.
+    callbackDepth: number,
     foreignCalls: number,
     postedForeignCalls: number,
     rejectedForeignCalls: number,
@@ -35,6 +40,8 @@ export type CallbackState = {
 --- Represents a C-callable callback closure.
 export type Callback = {
     Pointer: Pointer,
+    --- Closes after C has released the pointer. Calling it from the callback
+    --- itself defers native closure reclamation until the active call returns.
     Close: () -> (),
     State: () -> CallbackState,
     ForeignCalls: () -> number,

@@ -744,6 +744,11 @@ struct CallbackState
     std::mutex mutex;
     std::condition_variable idle;
     size_t activeCalls = 0;
+    // These counters describe callbacks executing on the owner thread.  They
+    // are deliberately maintained under the short-lived state mutex only;
+    // the mutex is never held while ffi_call enters arbitrary native code.
+    std::thread::id callbackThread;
+    size_t callbackDepth = 0;
     bool closed = false;
     bool faulted = false;
     bool pendingFree = false;
@@ -753,17 +758,42 @@ struct CallbackState
     std::atomic<uint64_t> rejectedForeignCalls{0};
     bool postForeignCalls = false;
     Lode::EventLoop* eventLoop = nullptr;
-    ~CallbackState() { if (closure != nullptr) ffi_closure_free(closure); }
+    ~CallbackState()
+    {
+        std::unique_lock lock(mutex);
+        if (closure == nullptr) return;
+        // A well-formed owner keeps the callback alive until C has released
+        // its function pointer.  Still avoid freeing a closure underneath an
+        // in-flight invocation when destruction happens from another thread.
+        if (activeCalls != 0 || callbackDepth != 0)
+        {
+            const bool onCallbackThread = callbackThread == std::this_thread::get_id() && callbackDepth != 0;
+            if (!onCallbackThread)
+                idle.wait(lock, [this] { return activeCalls == 0 && callbackDepth == 0; });
+            else
+                return;
+        }
+        ffi_closure_free(closure);
+        closure = nullptr;
+        code = nullptr;
+    }
     bool BeginCall()
     {
         std::lock_guard lock(mutex);
         if (closed || faulted) return false;
         ++activeCalls;
+        if (std::this_thread::get_id() == ownerThread)
+        {
+            callbackThread = ownerThread;
+            ++callbackDepth;
+        }
         return true;
     }
     void EndCall()
     {
         std::lock_guard lock(mutex);
+        if (std::this_thread::get_id() == callbackThread && callbackDepth != 0)
+            --callbackDepth;
         if (--activeCalls == 0)
         {
             if (pendingFree && closure != nullptr)
@@ -785,21 +815,22 @@ struct CallbackState
         // this callback (A -> B -> A.Close). Waiting for activeCalls here
         // would deadlock that stack, so defer native closure reclamation until
         // the final EndCall instead.
-        const bool reentrant = Lode::Detail::CurrentCFunctionCallContext().inForeignCallback;
+        const bool reentrant = callbackThread == std::this_thread::get_id() && callbackDepth != 0;
         if (reentrant && activeCalls != 0)
         {
             pendingFree = true;
             return;
         }
-        idle.wait(lock, [this] { return activeCalls == 0; });
+        idle.wait(lock, [this] { return activeCalls == 0 && callbackDepth == 0; });
         if (closure != nullptr) { ffi_closure_free(closure); closure = nullptr; code = nullptr; }
     }
-    void Fault(std::string error)
+    bool Fault(std::string error)
     {
         std::lock_guard lock(mutex);
-        if (faulted) return;
+        if (faulted) return false;
         faulted = true;
         lastError = std::move(error);
+        return true;
     }
     bool IsClosed()
     {
@@ -815,6 +846,16 @@ struct CallbackState
     {
         std::lock_guard lock(mutex);
         return lastError;
+    }
+    size_t ActiveCalls()
+    {
+        std::lock_guard lock(mutex);
+        return activeCalls;
+    }
+    size_t CallbackDepth()
+    {
+        std::lock_guard lock(mutex);
+        return callbackDepth;
     }
 };
 
@@ -857,8 +898,13 @@ void InvokeCallback(ffi_cif*, void* output, void** values, void* userdata)
         CallbackState& callback;
         ~EndCall() { callback.EndCall(); }
     } endCall{callback};
-    if (std::this_thread::get_id() != callback.ownerThread ||
-        Lode::Detail::CurrentCFunctionCallContext().activeState == nullptr)
+    // Thread identity, rather than callback depth or a scheduler lock, decides
+    // whether this invocation is foreign.  A nested callback on the owner
+    // thread is valid and must remain synchronous (notably WNDPROC ->
+    // DefWindowProcW -> WNDPROC).  The callback-depth counter is diagnostic and
+    // never a rejection condition.
+    const bool sameThread = std::this_thread::get_id() == callback.ownerThread;
+    if (!sameThread)
     {
         ++callback.foreignCalls;
         if (callback.postForeignCalls && callback.eventLoop != nullptr)
@@ -890,16 +936,24 @@ void InvokeCallback(ffi_cif*, void* output, void** values, void* userdata)
     args.reserve(callback.args.size());
     for (size_t i = 0; i < callback.args.size(); ++i)
         args.push_back(CallbackArgument(callback.args[i], values[i]));
-    lua_State* activeState = Lode::Detail::CurrentCFunctionCallContext().activeState;
+    auto& callContext = Lode::Detail::CurrentCFunctionCallContext();
+    // ffi_call normally installs activeState.  The owner-thread fallback keeps
+    // direct native re-entry usable for callers that invoke the closure from a
+    // native callback without going through another FFI wrapper.
+    lua_State* activeState = callContext.activeState != nullptr ? callContext.activeState : callback.luaState;
+    if (activeState == nullptr)
+    {
+        ++callback.rejectedForeignCalls;
+        Lode::Logger::Error("ffi callback has no active runtime state");
+        return;
+    }
     Lode::State vm(activeState);
     Lode::Detail::ScopedForeignCallback callbackScope(&callback);
     const auto result = callback.function.CallSingle(vm, args);
     if (result.IsError())
     {
         const std::string error = result.GetError().ErrorMessage();
-        const bool wasFaulted = callback.IsFaulted();
-        callback.Fault(error);
-        if (!wasFaulted)
+        if (callback.Fault(error))
             Lode::Logger::Error("ffi callback failed: " + error);
         return;
     }
@@ -1009,10 +1063,20 @@ void PushResult(lua_State* L, RetKind kind, uint64_t intValue, double floatValue
 template <typename Fn>
 Lode::Value CreateFfiFunctionN(Lode::State& vm, Fn&& function)
 {
-    return vm.CreateFastFunctionN([fn = std::forward<Fn>(function)](Lode::State& state, Lode::StackArgs args) mutable -> int {
-        // FastFunctionN caches the module-registration State. Configuration
-        // APIs may allocate tables/buffers, so bind them to the currently
-        // executing coroutine state rather than that cached root stack.
+    return vm.CreateFastFunctionNNoYield([fn = std::forward<Fn>(function)](Lode::State& state, Lode::StackArgs args) mutable -> int {
+        // NNoYield supplies a view bound to the active coroutine. Reuse it
+        // directly so configuration calls do not construct a second State.
+        Lode::Value result = fn(state, args);
+        if (result.IsNil()) return 0;
+        result.PushToLuaState(args.RawState());
+        return 1;
+    });
+}
+
+template <typename Fn>
+Lode::Value CreateFfiFunctionNYieldable(Lode::State& vm, Fn&& function)
+{
+    return vm.CreateFastFunctionNYieldable([fn = std::forward<Fn>(function)](Lode::State&, Lode::StackArgs args) mutable -> int {
         Lode::State current(args.RawState());
         Lode::Value result = fn(current, args);
         if (result.IsNil()) return 0;
@@ -1292,10 +1356,10 @@ Lode::Table BindLibrary(Lode::State& vm, std::shared_ptr<DynamicLibrary> lib,
             return bound->ret == RetKind::Void ? 0 : 1;
         };
 
-        exports.Set(proto.name, vm.CreateFastFunctionN(closure));
+        exports.Set(proto.name, vm.CreateFastFunctionNNoYield(closure));
     }
 
-    exports.Set("CallAsync", CreateFfiFunctionN(vm, [lib, bindings](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("CallAsync", CreateFfiFunctionNYieldable(vm, [lib, bindings](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
         const auto& execution = Lode::Detail::CurrentCFunctionCallContext();
         if (execution.inForeignCallback && !execution.callbackMayYield)
         {
@@ -2017,6 +2081,8 @@ LODE_MODULE(vm)
             Lode::Table snapshot = state.CreateTable();
             snapshot.Set("closed", Lode::Value(callback->IsClosed()));
             snapshot.Set("faulted", Lode::Value(callback->IsFaulted()));
+            snapshot.Set("activeCalls", Lode::Value(static_cast<double>(callback->ActiveCalls())));
+            snapshot.Set("callbackDepth", Lode::Value(static_cast<double>(callback->CallbackDepth())));
             snapshot.Set("foreignCalls", Lode::Value(static_cast<double>(callback->foreignCalls.load())));
             snapshot.Set("postedForeignCalls", Lode::Value(static_cast<double>(callback->postedForeignCalls.load())));
             snapshot.Set("rejectedForeignCalls", Lode::Value(static_cast<double>(callback->rejectedForeignCalls.load())));
