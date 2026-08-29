@@ -132,9 +132,9 @@ int main()
     std::printf("=== LodeRuntime C++ benchmarks ===\n");
 
     // Fast closure: zero-allocation callback path (State wrapper + StackArgs).
-    Lode::Value square = vm.CreateFastFunction([](Lode::State&, Lode::StackArgs args) -> Lode::Value {
-        double v = args[0].AsNumber();
-        return Lode::Value(v * v);
+    Lode::Value square = vm.CreateFastFunctionNNoYield([](Lode::State&, Lode::StackArgs args) -> int {
+        lua_pushnumber(args.RawState(), args[0].AsNumber() * args[0].AsNumber());
+        return 1;
     });
     (void)square.CallSingle(vm, 3.0);
     Measure("fast_closure_call", [&] {
@@ -161,14 +161,14 @@ int main()
         return Lode::Value(s);
     });
 
-    Lode::Value marshalFast = vm.CreateFastFunction([](Lode::State&, Lode::StackArgs args) -> Lode::Value {
+    Lode::Value marshalFast = vm.CreateFastFunctionNoYield([](Lode::State&, Lode::StackArgs args) -> Lode::Value {
         double s = 0.0;
         for (size_t i = 0; i < args.Size(); ++i)
             s += args[i].AsNumber();
         return Lode::Value(s);
     });
 
-    Lode::Value marshalFastN = vm.CreateFastFunctionN([](Lode::State&, Lode::StackArgs args) -> int {
+    Lode::Value marshalFastN = vm.CreateFastFunctionNNoYield([](Lode::State&, Lode::StackArgs args) -> int {
         lua_State* argL = args.RawState();
         double s = 0.0;
         const int n = static_cast<int>(args.Size());
@@ -236,11 +236,12 @@ int main()
 
     // Argument-count curve for the fast closure path: isolates how argument
     // boxing scales with arity through the full CallSingle round trip.
-    Lode::Value sumAll = vm.CreateFastFunction([](Lode::State&, Lode::StackArgs args) -> Lode::Value {
+    Lode::Value sumAll = vm.CreateFastFunctionNNoYield([](Lode::State&, Lode::StackArgs args) -> int {
         double s = 0.0;
         for (size_t i = 0; i < args.Size(); ++i)
             s += args[i].AsNumber();
-        return Lode::Value(s);
+        lua_pushnumber(args.RawState(), s);
+        return 1;
     });
     const Lode::Value one = Lode::Value(1.0);
     const std::vector<Lode::Value> oneArg = { one };
@@ -261,8 +262,8 @@ int main()
     // deliberately NOT measured here: Fire enqueues task spawns that would
     // accumulate without a running event loop.
     auto benchSignal = Lode::Signal::Create(vm);
-    Lode::Value noopCb = vm.CreateFastFunction([](Lode::State&, Lode::StackArgs) -> Lode::Value {
-        return Lode::Value();
+    Lode::Value noopCb = vm.CreateFastFunctionNNoYield([](Lode::State&, Lode::StackArgs) -> int {
+        return 0;
     });
     Measure("signal_connect_disconnect", [&] {
         auto id = benchSignal->Connect(noopCb);
@@ -274,10 +275,11 @@ int main()
     // and reads a member, mirroring a typical method call.
     struct BenchObj { double v = 2.0; };
     Lode::Table objMeta = vm.CreateTable();
-    Lode::Value unwrapCall = vm.CreateFastFunction([&](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
+    Lode::Value unwrapCall = vm.CreateFastFunctionNNoYield([&](Lode::State& vm2, Lode::StackArgs args) -> int {
         auto self = Lode::ObjectWrap<BenchObj>::Unwrap(vm2, 1);
-        if (!self) return Lode::Value();
-        return Lode::Value(self->v * args.Size() > 1 ? args[1].AsNumber() : 1.0);
+        if (!self) return 0;
+        lua_pushnumber(args.RawState(), self->v * (args.Size() > 1 ? args[1].AsNumber() : 1.0));
+        return 1;
     });
     objMeta.Set("__index", unwrapCall);
     auto obj = std::make_shared<BenchObj>();

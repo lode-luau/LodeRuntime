@@ -212,7 +212,7 @@ void WriteScalar(lua_State* L, Scalar scalar, void* address, const Lode::StackVa
 
 void AddRead(Lode::State& vm, Lode::Table& table, const char* name, Scalar scalar)
 {
-    table.Set(name, vm.CreateFastFunctionN([scalar](Lode::State&, Lode::StackArgs args) -> int {
+    table.Set(name, vm.CreateFastFunctionNNoYield([scalar](Lode::State&, Lode::StackArgs args) -> int {
         if (args.Size() < 1 || args.Size() > 2) Error("Address.Read: expected pointer and optional offset");
         const size_t offset = args.Size() == 2 ? Offset(args[1], "Address.Read") : 0;
         PushScalar(args.RawState(), scalar, At(args.RawState(), 1, offset, Width(scalar), "Address.Read"));
@@ -222,7 +222,7 @@ void AddRead(Lode::State& vm, Lode::Table& table, const char* name, Scalar scala
 
 void AddWrite(Lode::State& vm, Lode::Table& table, const char* name, Scalar scalar)
 {
-    table.Set(name, vm.CreateFastFunctionN([scalar](Lode::State&, Lode::StackArgs args) -> int {
+    table.Set(name, vm.CreateFastFunctionNNoYield([scalar](Lode::State&, Lode::StackArgs args) -> int {
         if (args.Size() != 3) Error("Address.Write: expected pointer, offset, and value");
         const size_t offset = Offset(args[1], "Address.Write");
         void* pointer = At(args.RawState(), 1, offset, Width(scalar), "Address.Write");
@@ -236,7 +236,7 @@ void AddWrite(Lode::State& vm, Lode::Table& table, const char* name, Scalar scal
 LODE_MODULE(vm)
 {
     Lode::Table exports = vm.CreateTable();
-    exports.Set("Of", vm.CreateFastFunctionN([](Lode::State&, Lode::StackArgs args) -> int {
+    exports.Set("Of", vm.CreateFastFunctionNNoYield([](Lode::State&, Lode::StackArgs args) -> int {
         if (args.Size() < 1 || args.Size() > 2) Error("Address.Of: expected value and optional offset");
         const uintptr_t base = reinterpret_cast<uintptr_t>(Pointer(args.RawState(), 1, "Address.Of"));
         const intptr_t offset = args.Size() == 2 ? SignedOffset(args[1], "Address.Of") : 0;
@@ -244,7 +244,7 @@ LODE_MODULE(vm)
         if (address == 0) lua_pushnil(args.RawState()); else lua_pushlightuserdata(args.RawState(), reinterpret_cast<void*>(address));
         return 1;
     }));
-    exports.Set("Cast", vm.CreateFastFunctionN([](Lode::State&, Lode::StackArgs args) -> int {
+    exports.Set("Cast", vm.CreateFastFunctionNNoYield([](Lode::State&, Lode::StackArgs args) -> int {
         if (args.Size() != 2 || (!args[0].IsString() && !args[0].IsTable())) Error("Address.Cast: expected pointer type and pointer");
         std::string type;
         if (args[0].IsString()) type = args[0].AsString();
@@ -258,7 +258,7 @@ LODE_MODULE(vm)
         lua_pushlightuserdata(args.RawState(), Pointer(args.RawState(), 2, "Address.Cast"));
         return 1;
     }));
-    exports.Set("Add", vm.CreateFastFunctionN([](Lode::State&, Lode::StackArgs args) -> int {
+    exports.Set("Add", vm.CreateFastFunctionNNoYield([](Lode::State&, Lode::StackArgs args) -> int {
         if (args.Size() != 2) Error("Address.Add: expected pointer and offset");
         const uintptr_t base = reinterpret_cast<uintptr_t>(Pointer(args.RawState(), 1, "Address.Add"));
         const intptr_t offset = SignedOffset(args[1], "Address.Add");
@@ -266,13 +266,13 @@ LODE_MODULE(vm)
         if (address == 0) lua_pushnil(args.RawState()); else lua_pushlightuserdata(args.RawState(), reinterpret_cast<void*>(address));
         return 1;
     }));
-    exports.Set("IsNull", vm.CreateFastFunctionN([](Lode::State&, Lode::StackArgs args) -> int {
+    exports.Set("IsNull", vm.CreateFastFunctionNNoYield([](Lode::State&, Lode::StackArgs args) -> int {
         if (args.Size() != 1) Error("Address.IsNull: expected a pointer");
         if (args[0].IsNil()) { lua_pushboolean(args.RawState(), true); return 1; }
         (void)Pointer(args.RawState(), 1, "Address.IsNull");
         lua_pushboolean(args.RawState(), false); return 1;
     }));
-    exports.Set("Equals", vm.CreateFastFunctionN([](Lode::State&, Lode::StackArgs args) -> int {
+    exports.Set("Equals", vm.CreateFastFunctionNNoYield([](Lode::State&, Lode::StackArgs args) -> int {
         if (args.Size() != 2) Error("Address.Equals: expected two pointers");
         void* left = args[0].IsNil() ? nullptr : Pointer(args.RawState(), 1, "Address.Equals");
         void* right = args[1].IsNil() ? nullptr : Pointer(args.RawState(), 2, "Address.Equals");
@@ -283,9 +283,9 @@ LODE_MODULE(vm)
     Lode::Table write = vm.CreateTable();
     for (const auto& entry : { std::pair{"I8", Scalar::I8}, {"U8", Scalar::U8}, {"I16", Scalar::I16}, {"U16", Scalar::U16}, {"I32", Scalar::I32}, {"U32", Scalar::U32}, {"I64", Scalar::I64}, {"U64", Scalar::U64}, {"F32", Scalar::F32}, {"F64", Scalar::F64}, {"Bool", Scalar::Bool}, {"Pointer", Scalar::Pointer} }) { AddRead(vm, read, entry.first, entry.second); AddWrite(vm, write, entry.first, entry.second); }
     exports.Set("Read", read); exports.Set("Write", write);
-    exports.Set("Copy", vm.CreateFastFunctionN([](Lode::State&, Lode::StackArgs args) -> int { if (args.Size() != 3) Error("Address.Copy: expected destination, source, bytes"); std::memcpy(Pointer(args.RawState(), 1, "Address.Copy"), Pointer(args.RawState(), 2, "Address.Copy"), Offset(args[2], "Address.Copy")); return 0; }));
-    exports.Set("Move", vm.CreateFastFunctionN([](Lode::State&, Lode::StackArgs args) -> int { if (args.Size() != 3) Error("Address.Move: expected destination, source, bytes"); std::memmove(Pointer(args.RawState(), 1, "Address.Move"), Pointer(args.RawState(), 2, "Address.Move"), Offset(args[2], "Address.Move")); return 0; }));
-    exports.Set("Fill", vm.CreateFastFunctionN([](Lode::State&, Lode::StackArgs args) -> int {
+    exports.Set("Copy", vm.CreateFastFunctionNNoYield([](Lode::State&, Lode::StackArgs args) -> int { if (args.Size() != 3) Error("Address.Copy: expected destination, source, bytes"); std::memcpy(Pointer(args.RawState(), 1, "Address.Copy"), Pointer(args.RawState(), 2, "Address.Copy"), Offset(args[2], "Address.Copy")); return 0; }));
+    exports.Set("Move", vm.CreateFastFunctionNNoYield([](Lode::State&, Lode::StackArgs args) -> int { if (args.Size() != 3) Error("Address.Move: expected destination, source, bytes"); std::memmove(Pointer(args.RawState(), 1, "Address.Move"), Pointer(args.RawState(), 2, "Address.Move"), Offset(args[2], "Address.Move")); return 0; }));
+    exports.Set("Fill", vm.CreateFastFunctionNNoYield([](Lode::State&, Lode::StackArgs args) -> int {
         if (args.Size() != 3 || !args[1].IsNumber()) Error("Address.Fill: expected destination, byte, bytes");
         const double byte = args[1].AsNumber();
         if (!std::isfinite(byte) || std::floor(byte) != byte ||
@@ -295,8 +295,8 @@ LODE_MODULE(vm)
         std::memset(Pointer(args.RawState(), 1, "Address.Fill"), static_cast<unsigned char>(static_cast<int64_t>(byte)), Offset(args[2], "Address.Fill"));
         return 0;
     }));
-    exports.Set("String", vm.CreateFastFunctionN([](Lode::State&, Lode::StackArgs args) -> int { if (args.Size() < 1 || args.Size() > 2) Error("Address.String: expected pointer and optional bytes"); const char* p = static_cast<const char*>(Pointer(args.RawState(), 1, "Address.String")); const size_t n = args.Size() == 2 ? Offset(args[1], "Address.String") : std::strlen(p); lua_pushlstring(args.RawState(), p, n); return 1; }));
-    exports.Set("WString", vm.CreateFastFunctionN([](Lode::State&, Lode::StackArgs args) -> int {
+    exports.Set("String", vm.CreateFastFunctionNNoYield([](Lode::State&, Lode::StackArgs args) -> int { if (args.Size() < 1 || args.Size() > 2) Error("Address.String: expected pointer and optional bytes"); const char* p = static_cast<const char*>(Pointer(args.RawState(), 1, "Address.String")); const size_t n = args.Size() == 2 ? Offset(args[1], "Address.String") : std::strlen(p); lua_pushlstring(args.RawState(), p, n); return 1; }));
+    exports.Set("WString", vm.CreateFastFunctionNNoYield([](Lode::State&, Lode::StackArgs args) -> int {
 #if defined(_WIN32)
         if (args.Size() < 1 || args.Size() > 2) Error("Address.WString: expected pointer and optional code-unit count");
         const wchar_t* wide = static_cast<const wchar_t*>(Pointer(args.RawState(), 1, "Address.WString"));
@@ -311,7 +311,7 @@ LODE_MODULE(vm)
         Error("Address.WString: UTF-16 helpers are only available on Windows");
 #endif
     }));
-    exports.Set("WBuffer", vm.CreateFastFunctionN([](Lode::State&, Lode::StackArgs args) -> int {
+    exports.Set("WBuffer", vm.CreateFastFunctionNNoYield([](Lode::State&, Lode::StackArgs args) -> int {
 #if defined(_WIN32)
         if (args.Size() != 1 || !args[0].IsString()) Error("Address.WBuffer: expected one UTF-8 string");
         const std::string text = args[0].AsString();
@@ -326,7 +326,7 @@ LODE_MODULE(vm)
         Error("Address.WBuffer: UTF-16 helpers are only available on Windows");
 #endif
     }));
-    exports.Set("Pin", vm.CreateFastFunctionN([](Lode::State&, Lode::StackArgs args) -> int {
+    exports.Set("Pin", vm.CreateFastFunctionNNoYield([](Lode::State&, Lode::StackArgs args) -> int {
         if (args.Size() != 1) Error("Address.Pin: expected an owner");
         void* pointer = Pointer(args.RawState(), 1, "Address.Pin");
         Lode::State current(args.RawState());
@@ -338,10 +338,10 @@ LODE_MODULE(vm)
         Lode::Table lease = current.CreateTable();
         lease.Set("Pointer", Lode::Value(pointer));
         lease.Set("__addressLease", hidden);
-        lease.Set("Close", current.CreateFastFunctionN([lease, raw](Lode::State&, Lode::StackArgs closeArgs) mutable -> int { if (closeArgs.Size() != 0) Error("Lease.Close: expected no arguments"); raw->closed = true; raw->owner = Lode::Value(); lease.Set("Pointer", Lode::Value()); return 0; }));
+        lease.Set("Close", current.CreateFastFunctionNNoYield([lease, raw](Lode::State&, Lode::StackArgs closeArgs) mutable -> int { if (closeArgs.Size() != 0) Error("Lease.Close: expected no arguments"); raw->closed = true; raw->owner = Lode::Value(); lease.Set("Pointer", Lode::Value()); return 0; }));
         Lode::Value(lease).PushToLuaState(args.RawState()); return 1;
     }));
-    exports.Set("KeepAlive", vm.CreateFastFunctionN([](Lode::State&, Lode::StackArgs args) -> int {
+    exports.Set("KeepAlive", vm.CreateFastFunctionNNoYield([](Lode::State&, Lode::StackArgs args) -> int {
         if (args.Size() != 2) Error("Address.KeepAlive: expected owner and pointer");
         void* pointer = Pointer(args.RawState(), 2, "Address.KeepAlive");
         Lode::State current(args.RawState());
@@ -353,7 +353,7 @@ LODE_MODULE(vm)
         Lode::Table lease = current.CreateTable();
         lease.Set("Pointer", Lode::Value(pointer));
         lease.Set("__addressLease", hidden);
-        lease.Set("Close", current.CreateFastFunctionN([lease, raw](Lode::State&, Lode::StackArgs closeArgs) mutable -> int { if (closeArgs.Size() != 0) Error("Lease.Close: expected no arguments"); raw->closed = true; raw->owner = Lode::Value(); lease.Set("Pointer", Lode::Value()); return 0; }));
+        lease.Set("Close", current.CreateFastFunctionNNoYield([lease, raw](Lode::State&, Lode::StackArgs closeArgs) mutable -> int { if (closeArgs.Size() != 0) Error("Lease.Close: expected no arguments"); raw->closed = true; raw->owner = Lode::Value(); lease.Set("Pointer", Lode::Value()); return 0; }));
         Lode::Value(lease).PushToLuaState(args.RawState()); return 1;
     }));
     return {exports};

@@ -294,7 +294,7 @@ void TcpServer::OnConnection(uv_stream_t* server, int status)
 Lode::Value WrapServer(Lode::State& vm, const std::shared_ptr<TcpServer>& server, const Lode::Table& methods)
 {
     Lode::Table meta = vm.CreateTable();
-    meta.Set("__index", vm.CreateFastFunction([server, methods](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
+    meta.Set("__index", vm.CreateFastFunctionNoYield([server, methods](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         std::string key = (args.Size() > 1 && args[1].IsString()) ? args[1].AsString() : "";
         if (key == "ClientConnected")
             return server->clientProxy;
@@ -305,12 +305,12 @@ Lode::Value WrapServer(Lode::State& vm, const std::shared_ptr<TcpServer>& server
             return value.GetValue();
         return Lode::Value();
     }));
-    meta.Set("__newindex", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
+    meta.Set("__newindex", vm.CreateFastFunctionNoYield([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         vm2.RaiseError("socket: objects are read-only");
         return Lode::Value();
     }));
     meta.Set("__metatable", Lode::Value(std::string("Server")));
-    meta.Set("__tostring", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs) -> Lode::Value {
+    meta.Set("__tostring", vm.CreateFastFunctionNoYield([](Lode::State&, Lode::StackArgs) -> Lode::Value {
         return Lode::Value(std::string("Server"));
     }));
     Lode::ObjectWrap<TcpServer>::Wrap(vm, server, meta);

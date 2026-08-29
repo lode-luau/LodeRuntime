@@ -29,7 +29,7 @@ static Lode::Value GetUvPath(Lode::State& vm, const char* name,
 
 void BindSysInfo(Lode::State& vm, Lode::Table& exports)
 {
-    exports.Set("GetPlatform", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("GetPlatform", vm.CreateFastFunctionNoYield([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
         uv_utsname_t buffer;
         int r = uv_os_uname(&buffer);
         if (r < 0) {
@@ -39,7 +39,7 @@ void BindSysInfo(Lode::State& vm, Lode::Table& exports)
         return Lode::Value(std::string(buffer.sysname));
     }));
 
-    exports.Set("GetArchitecture", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("GetArchitecture", vm.CreateFastFunctionNoYield([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
         uv_utsname_t buffer;
         int r = uv_os_uname(&buffer);
         if (r < 0) {
@@ -49,7 +49,7 @@ void BindSysInfo(Lode::State& vm, Lode::Table& exports)
         return Lode::Value(std::string(buffer.machine));
     }));
 
-    exports.Set("GetRelease", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("GetRelease", vm.CreateFastFunctionNoYield([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
         uv_utsname_t buffer;
         int r = uv_os_uname(&buffer);
         if (r < 0) {
@@ -59,7 +59,7 @@ void BindSysInfo(Lode::State& vm, Lode::Table& exports)
         return Lode::Value(std::string(buffer.release));
     }));
 
-    exports.Set("GetVersion", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("GetVersion", vm.CreateFastFunctionNoYield([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
         uv_utsname_t buffer;
         int r = uv_os_uname(&buffer);
         if (r < 0) {
@@ -69,7 +69,7 @@ void BindSysInfo(Lode::State& vm, Lode::Table& exports)
         return Lode::Value(std::string(buffer.version));
     }));
 
-    exports.Set("GetHostname", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("GetHostname", vm.CreateFastFunctionNoYield([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
         char buf[256];
         size_t size = sizeof(buf);
         int r = uv_os_gethostname(buf, &size);
@@ -80,17 +80,17 @@ void BindSysInfo(Lode::State& vm, Lode::Table& exports)
         return Lode::Value(std::string(buf, size));
     }));
 
-    exports.Set("GetTotalMemory", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("GetTotalMemory", vm.CreateFastFunctionNoYield([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
         uint64_t mem = uv_get_total_memory();
         return Lode::Value(static_cast<double>(mem));
     }));
 
-    exports.Set("GetFreeMemory", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("GetFreeMemory", vm.CreateFastFunctionNoYield([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
         uint64_t mem = uv_get_free_memory();
         return Lode::Value(static_cast<double>(mem));
     }));
 
-    exports.Set("GetUptime", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("GetUptime", vm.CreateFastFunctionNoYield([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
         double uptime;
         int r = uv_uptime(&uptime);
         if (r < 0) {
@@ -100,11 +100,11 @@ void BindSysInfo(Lode::State& vm, Lode::Table& exports)
         return Lode::Value(uptime);
     }));
 
-    exports.Set("GetAvailableParallelism", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("GetAvailableParallelism", vm.CreateFastFunctionNoYield([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
         return Lode::Value(static_cast<double>(uv_available_parallelism()));
     }));
 
-    exports.Set("GetCpuCount", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("GetCpuCount", vm.CreateFastFunctionNoYield([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
         uv_cpu_info_t* infos = nullptr;
         int count = 0;
         int r = uv_cpu_info(&infos, &count);
@@ -117,7 +117,7 @@ void BindSysInfo(Lode::State& vm, Lode::Table& exports)
         return Lode::Value(static_cast<double>(count));
     }));
 
-    exports.Set("GetCpuInfo", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("GetCpuInfo", vm.CreateFastFunctionNoYield([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
         uv_cpu_info_t* infos = nullptr;
         int count = 0;
         int r = uv_cpu_info(&infos, &count);
@@ -138,15 +138,15 @@ void BindSysInfo(Lode::State& vm, Lode::Table& exports)
         return Lode::Value(result);
     }));
 
-    exports.Set("GetTmpDir", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("GetTmpDir", vm.CreateFastFunctionNoYield([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
         return GetUvPath(vm, "GetTmpDir", uv_os_tmpdir);
     }));
 
-    exports.Set("GetHomeDir", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("GetHomeDir", vm.CreateFastFunctionNoYield([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
         return GetUvPath(vm, "GetHomeDir", uv_os_homedir);
     }));
 
-    exports.Set("GetLoadAverage", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("GetLoadAverage", vm.CreateFastFunctionNoYield([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
         double average[3];
         uv_loadavg(average);
         Lode::Table result = vm.CreateTable();
@@ -157,15 +157,15 @@ void BindSysInfo(Lode::State& vm, Lode::Table& exports)
     }));
     // --- Process identity / monotonic clock / env completion -----------------
 
-    exports.Set("GetPid", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs) -> Lode::Value {
+    exports.Set("GetPid", vm.CreateFastFunctionNoYield([](Lode::State& vm, Lode::StackArgs) -> Lode::Value {
         return Lode::Value(static_cast<double>(uv_os_getpid()));
     }));
 
-    exports.Set("GetPpid", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs) -> Lode::Value {
+    exports.Set("GetPpid", vm.CreateFastFunctionNoYield([](Lode::State& vm, Lode::StackArgs) -> Lode::Value {
         return Lode::Value(static_cast<double>(uv_os_getppid()));
     }));
 
-    exports.Set("GetExecPath", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs) -> Lode::Value {
+    exports.Set("GetExecPath", vm.CreateFastFunctionNoYield([](Lode::State& vm, Lode::StackArgs) -> Lode::Value {
         std::string path(1024, '\0');
         size_t size = path.size();
         int r = uv_exepath(path.data(), &size);
@@ -178,11 +178,11 @@ void BindSysInfo(Lode::State& vm, Lode::Table& exports)
     }));
 
     // High-resolution monotonic wall time in milliseconds (never goes back).
-    exports.Set("GetMonotonicMs", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs) -> Lode::Value {
+    exports.Set("GetMonotonicMs", vm.CreateFastFunctionNoYield([](Lode::State& vm, Lode::StackArgs) -> Lode::Value {
         return Lode::Value(static_cast<double>(uv_hrtime()) / 1e6);
     }));
 
-    exports.Set("UnsetEnv", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("UnsetEnv", vm.CreateFastFunctionNoYield([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
         if (args.Size() < 1 || !args[0].IsString()) {
             vm.RaiseError("sys.UnsetEnv: expected string argument");
             return Lode::Value();
@@ -196,7 +196,7 @@ void BindSysInfo(Lode::State& vm, Lode::Table& exports)
     }));
 
     // Returns every environment variable as a table {name = value}.
-    exports.Set("EnvEntries", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs) -> Lode::Value {
+    exports.Set("EnvEntries", vm.CreateFastFunctionNoYield([](Lode::State& vm, Lode::StackArgs) -> Lode::Value {
         uv_env_item_t* items = nullptr;
         int count = 0;
         int r = uv_os_environ(&items, &count);

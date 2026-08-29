@@ -186,7 +186,7 @@ void WsServer::FinishClosed()
 Lode::Value WrapServer(Lode::State& vm, const std::shared_ptr<WsServer>& server, const Lode::Table& methods)
 {
     Lode::Table meta = vm.CreateTable();
-    meta.Set("__index", vm.CreateFastFunction([server, methods](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
+    meta.Set("__index", vm.CreateFastFunctionNoYield([server, methods](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         const std::string_view key = (args.Size() > 1 && args[1].IsString()) ? args[1].AsStringView() : std::string_view();
         if (key == "ClientConnected")
             return server->clientProxy;
@@ -197,12 +197,12 @@ Lode::Value WrapServer(Lode::State& vm, const std::shared_ptr<WsServer>& server,
             return value.GetValue();
         return Lode::Value();
     }));
-    meta.Set("__newindex", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
+    meta.Set("__newindex", vm.CreateFastFunctionNoYield([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         vm2.RaiseError("websocket: objects are read-only");
         return Lode::Value();
     }));
     meta.Set("__metatable", Lode::Value(std::string("WebSocketServer")));
-    meta.Set("__tostring", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs) -> Lode::Value {
+    meta.Set("__tostring", vm.CreateFastFunctionNoYield([](Lode::State&, Lode::StackArgs) -> Lode::Value {
         return Lode::Value(std::string("WebSocketServer"));
     }));
     Lode::ObjectWrap<WsServer>::Wrap(vm, server, meta);

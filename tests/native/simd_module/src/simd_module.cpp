@@ -10,7 +10,7 @@ LODE_MODULE(vm)
 
     // C++ SIMD function to scale an array of floats
     // The Luau `buffer` ensures memory is contiguous.
-    exports.Set("scale_floats", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("scale_floats", vm.CreateFastFunctionNoYield([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
         if (args.Size() < 2 || !args[0].IsBuffer() || !args[1].IsNumber())
         {
             return Lode::Value(false);

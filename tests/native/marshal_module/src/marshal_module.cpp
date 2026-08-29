@@ -23,14 +23,14 @@ LODE_MODULE(vm)
         return Lode::Value(s);
     }));
 
-    exports.Set("addFast", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("addFast", vm.CreateFastFunctionNoYield([](Lode::State&, Lode::StackArgs args) -> Lode::Value {
         double s = 0.0;
         for (size_t i = 0; i < args.Size(); ++i)
             s += args[i].AsNumber();
         return Lode::Value(s);
     }));
 
-    exports.Set("addFastN", vm.CreateFastFunctionN([](Lode::State&, Lode::StackArgs args) -> int {
+    exports.Set("addFastN", vm.CreateFastFunctionNNoYield([](Lode::State&, Lode::StackArgs args) -> int {
         lua_State* L = args.RawState();
         double s = 0.0;
         const int n = static_cast<int>(args.Size());

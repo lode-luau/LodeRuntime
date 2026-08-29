@@ -453,7 +453,7 @@ void UdpSocket::OnSend(uv_udp_send_t* req, int status)
 Lode::Value WrapUdpSocket(Lode::State& vm, const std::shared_ptr<UdpSocket>& socket, const Lode::Table& methods)
 {
     Lode::Table meta = vm.CreateTable();
-    meta.Set("__index", vm.CreateFastFunction([socket, methods](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
+    meta.Set("__index", vm.CreateFastFunctionNoYield([socket, methods](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         std::string key = (args.Size() > 1 && args[1].IsString()) ? args[1].AsString() : "";
         if (key == "MessageReceived")
             return socket->messageProxy;
@@ -464,12 +464,12 @@ Lode::Value WrapUdpSocket(Lode::State& vm, const std::shared_ptr<UdpSocket>& soc
             return value.GetValue();
         return Lode::Value();
     }));
-    meta.Set("__newindex", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
+    meta.Set("__newindex", vm.CreateFastFunctionNoYield([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         vm2.RaiseError("udp: objects are read-only");
         return Lode::Value();
     }));
     meta.Set("__metatable", Lode::Value(std::string("UdpSocket")));
-    meta.Set("__tostring", vm.CreateFastFunction([](Lode::State&, Lode::StackArgs) -> Lode::Value {
+    meta.Set("__tostring", vm.CreateFastFunctionNoYield([](Lode::State&, Lode::StackArgs) -> Lode::Value {
         return Lode::Value(std::string("UdpSocket"));
     }));
     Lode::ObjectWrap<UdpSocket>::Wrap(vm, socket, meta);

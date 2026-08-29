@@ -33,7 +33,7 @@ LODE_MODULE(vm)
 {
     Lode::Table exports = vm.CreateTable();
 
-    exports.Set("parse", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("parse", vm.CreateFastFunctionNoYield([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
         std::string text = (args.Size() > 0 && args[0].IsString()) ? std::string(args[0].AsStringView()) : std::string();
         size_t maxDepth = ResolveLimit(vm, args.Size() > 1 ? args[1].ToValue() : Lode::Value(), Lode::Json::DefaultMaxDepth, "maxDepth");
         size_t maxNodes = ResolveLimit(vm, args.Size() > 2 ? args[2].ToValue() : Lode::Value(), Lode::Json::DefaultMaxNodes, "maxNodes");
@@ -46,7 +46,7 @@ LODE_MODULE(vm)
         return parsed.GetValue();
     }));
 
-    exports.Set("stringify", vm.CreateFastFunction([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
+    exports.Set("stringify", vm.CreateFastFunctionNoYield([](Lode::State& vm, Lode::StackArgs args) -> Lode::Value {
         Lode::Value value = args.Size() > 0 ? args[0].ToValue() : Lode::Value();
         bool pretty = args.Size() > 1 && args[1].IsBoolean() && args[1].AsBoolean();
         size_t maxDepth = ResolveLimit(vm, args.Size() > 2 ? args[2].ToValue() : Lode::Value(), Lode::Json::DefaultMaxDepth, "maxDepth");

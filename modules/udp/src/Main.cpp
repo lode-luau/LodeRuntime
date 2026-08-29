@@ -45,7 +45,7 @@ Lode::Table BuildSocketMethods(Lode::State& vm, const std::shared_ptr<UdpManager
 {
     Lode::Table m = vm.CreateTable();
 
-    m.Set("Bind", vm.CreateFastFunction([mgr](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
+    m.Set("Bind", vm.CreateFastFunctionNoYield([mgr](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodeudp::UdpSocket>::Unwrap(vm2, 1);
         if (!self)
         {
@@ -60,7 +60,7 @@ Lode::Table BuildSocketMethods(Lode::State& vm, const std::shared_ptr<UdpManager
         return self->MethodBind(vm2, args);
     }));
 
-    m.Set("Send", vm.CreateFastFunction([mgr](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
+    m.Set("Send", vm.CreateFastFunctionNoYield([mgr](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodeudp::UdpSocket>::Unwrap(vm2, 1);
         if (!self)
         {
@@ -75,7 +75,7 @@ Lode::Table BuildSocketMethods(Lode::State& vm, const std::shared_ptr<UdpManager
         return self->MethodSend(vm2, args);
     }));
 
-    m.Set("Close", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
+    m.Set("Close", vm.CreateFastFunctionNoYield([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodeudp::UdpSocket>::Unwrap(vm2, 1);
         if (!self)
         {
@@ -86,7 +86,7 @@ Lode::Table BuildSocketMethods(Lode::State& vm, const std::shared_ptr<UdpManager
         return Lode::Value();
     }));
 
-    m.Set("Destroy", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
+    m.Set("Destroy", vm.CreateFastFunctionNoYield([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodeudp::UdpSocket>::Unwrap(vm2, 1);
         if (!self)
         {
@@ -97,37 +97,37 @@ Lode::Table BuildSocketMethods(Lode::State& vm, const std::shared_ptr<UdpManager
         return Lode::Value();
     }));
 
-    m.Set("JoinGroup", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
+    m.Set("JoinGroup", vm.CreateFastFunctionNoYield([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodeudp::UdpSocket>::Unwrap(vm2, 1);
         if (!self) { vm2.RaiseError("udp JoinGroup: invalid UdpSocket"); return Lode::Value(); }
         return self->MethodJoinGroup(vm2, args);
     }));
 
-    m.Set("LeaveGroup", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
+    m.Set("LeaveGroup", vm.CreateFastFunctionNoYield([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodeudp::UdpSocket>::Unwrap(vm2, 1);
         if (!self) { vm2.RaiseError("udp LeaveGroup: invalid UdpSocket"); return Lode::Value(); }
         return self->MethodLeaveGroup(vm2, args);
     }));
 
-    m.Set("SetBroadcast", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
+    m.Set("SetBroadcast", vm.CreateFastFunctionNoYield([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodeudp::UdpSocket>::Unwrap(vm2, 1);
         if (!self) { vm2.RaiseError("udp SetBroadcast: invalid UdpSocket"); return Lode::Value(); }
         return self->MethodSetBroadcast(vm2, args);
     }));
 
-    m.Set("SetTTL", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
+    m.Set("SetTTL", vm.CreateFastFunctionNoYield([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodeudp::UdpSocket>::Unwrap(vm2, 1);
         if (!self) { vm2.RaiseError("udp SetTTL: invalid UdpSocket"); return Lode::Value(); }
         return self->MethodSetTTL(vm2, args);
     }));
 
-    m.Set("SetMulticastLoop", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
+    m.Set("SetMulticastLoop", vm.CreateFastFunctionNoYield([](Lode::State& vm2, Lode::StackArgs args) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodeudp::UdpSocket>::Unwrap(vm2, 1);
         if (!self) { vm2.RaiseError("udp SetMulticastLoop: invalid UdpSocket"); return Lode::Value(); }
         return self->MethodSetMulticastLoop(vm2, args);
     }));
 
-    m.Set("LocalAddress", vm.CreateFastFunction([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
+    m.Set("LocalAddress", vm.CreateFastFunctionNoYield([](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         auto self = Lode::ObjectWrap<lodeudp::UdpSocket>::Unwrap(vm2, 1);
         if (!self)
         {
@@ -152,7 +152,7 @@ LODE_MODULE(vm)
     mgr->socketMethods = BuildSocketMethods(vm, mgr);
 
     Lode::Table udpSocketClass = vm.CreateTable();
-    udpSocketClass.Set("Create", vm.CreateFastFunction([mgr](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
+    udpSocketClass.Set("Create", vm.CreateFastFunctionNoYield([mgr](Lode::State& vm2, Lode::StackArgs) -> Lode::Value {
         if (mgr->shuttingDown)
         {
             vm2.RaiseError("udp: runtime is shutting down");

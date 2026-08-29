@@ -60,7 +60,7 @@ void PushNewBlock(lua_State* L, std::shared_ptr<MemoryControl> control)
 LODE_MODULE(vm)
 {
     Lode::Table exports = vm.CreateTable();
-    exports.Set("new", vm.CreateFastFunctionN([](Lode::State&, Lode::StackArgs args) -> int {
+    exports.Set("new", vm.CreateFastFunctionNNoYield([](Lode::State&, Lode::StackArgs args) -> int {
         if (args.Size() < 1 || args.Size() > 2) Error("Memory.new: expected byteCount and optional options");
         const size_t size = SizeArgument(args[0], "new");
         bool zeroed = false;
@@ -102,17 +102,17 @@ LODE_MODULE(vm)
         PushNewBlock(args.RawState(), std::move(control));
         return 1;
     }));
-    exports.Set("Size", vm.CreateFastFunctionN([](Lode::State&, Lode::StackArgs args) -> int {
+    exports.Set("Size", vm.CreateFastFunctionNNoYield([](Lode::State&, Lode::StackArgs args) -> int {
         if (args.Size() != 1) Error("Memory.Size: expected a MemoryBlock");
         lua_pushnumber(args.RawState(), static_cast<double>(Block(args.RawState(), 1)->control->size));
         return 1;
     }));
-    exports.Set("IsAlive", vm.CreateFastFunctionN([](Lode::State&, Lode::StackArgs args) -> int {
+    exports.Set("IsAlive", vm.CreateFastFunctionNNoYield([](Lode::State&, Lode::StackArgs args) -> int {
         if (args.Size() != 1) Error("Memory.IsAlive: expected a MemoryBlock");
         lua_pushboolean(args.RawState(), Block(args.RawState(), 1)->control->alive);
         return 1;
     }));
-    exports.Set("Address", vm.CreateFastFunctionN([](Lode::State&, Lode::StackArgs args) -> int {
+    exports.Set("Address", vm.CreateFastFunctionNNoYield([](Lode::State&, Lode::StackArgs args) -> int {
         if (args.Size() < 1 || args.Size() > 2) Error("Memory.Address: expected block and optional offset");
         MemoryControl& control = LiveBlock(args.RawState(), 1);
         const size_t offset = args.Size() == 2 ? SizeArgument(args[1], "Address") : 0;
@@ -121,7 +121,7 @@ LODE_MODULE(vm)
         lua_pushlightuserdata(args.RawState(), static_cast<unsigned char*>(control.data) + offset);
         return 1;
     }));
-    exports.Set("Resize", vm.CreateFastFunctionN([](Lode::State&, Lode::StackArgs args) -> int {
+    exports.Set("Resize", vm.CreateFastFunctionNNoYield([](Lode::State&, Lode::StackArgs args) -> int {
         if (args.Size() != 2) Error("Memory.Resize: expected block and newByteCount");
         MemoryControl& control = LiveBlock(args.RawState(), 1);
         const size_t nextSize = SizeArgument(args[1], "Resize");
@@ -133,7 +133,7 @@ LODE_MODULE(vm)
         ++control.generation;
         return 0;
     }));
-    exports.Set("Zero", vm.CreateFastFunctionN([](Lode::State&, Lode::StackArgs args) -> int {
+    exports.Set("Zero", vm.CreateFastFunctionNNoYield([](Lode::State&, Lode::StackArgs args) -> int {
         if (args.Size() < 1 || args.Size() > 3) Error("Memory.Zero: expected block and optional offset and size");
         MemoryControl& control = LiveBlock(args.RawState(), 1);
         const size_t offset = args.Size() >= 2 ? SizeArgument(args[1], "Zero") : 0;
@@ -143,7 +143,7 @@ LODE_MODULE(vm)
         if (count != 0) std::memset(static_cast<unsigned char*>(control.data) + offset, 0, count);
         return 0;
     }));
-    exports.Set("Free", vm.CreateFastFunctionN([](Lode::State&, Lode::StackArgs args) -> int {
+    exports.Set("Free", vm.CreateFastFunctionNNoYield([](Lode::State&, Lode::StackArgs args) -> int {
         if (args.Size() != 1) Error("Memory.Free: expected a MemoryBlock");
         Block(args.RawState(), 1)->control->Free();
         return 0;
