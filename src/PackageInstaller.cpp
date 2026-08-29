@@ -1134,7 +1134,8 @@ InstallResult InstallLocked(const fs::path& packageRoot,
     }
 
     LockedGraphResult resolution = ResolveLockedGraph(
-        packageRoot, standardLibraryRoot, *cache.layout, includeDevelopmentDependencies);
+        packageRoot, standardLibraryRoot, *cache.layout, includeDevelopmentDependencies,
+        ValidationMode::InstallConsumer);
     if (!resolution.IsValid())
     {
         result.errors = std::move(resolution.errors);
@@ -1179,7 +1180,7 @@ InstallResult InstallLocal(const fs::path& packageRoot,
 {
     InstallResult result;
     const ValidationReport validation = Validate(
-        packageRoot, ValidationMode::InstallSource, standardLibraryRoot);
+        packageRoot, ValidationMode::InstallConsumer, standardLibraryRoot);
     if (!validation.IsValid())
     {
         result.errors = validation.errors;

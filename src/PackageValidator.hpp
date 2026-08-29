@@ -16,6 +16,9 @@ enum class ValidationMode
 {
     Source,
     Artifact,
+    // Validates a project that consumes dependencies but is not itself a
+    // publishable Luau package. A root init.luau is optional in this mode.
+    InstallConsumer,
     InstallSource,
     InstallArtifact,
     // Validates the package's complete published artifact matrix while

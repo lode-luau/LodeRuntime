@@ -115,9 +115,11 @@ if(signal_alias LESS 0 OR task_alias LESS 0)
     message(FATAL_ERROR "stdlib locked install did not generate both aliases")
 endif()
 
-# Regression: adding dependencies must update an existing .config.luau on
-# Windows. The reader must be closed before the atomic replacement; otherwise
+# Regression: a consumer project may add dependencies without a root
+# init.luau, and repeated additions must update an existing .config.luau on
+# Windows. The reader must be closed before atomic replacement; otherwise
 # MoveFileEx/MoveFile reports ERROR_ALREADY_EXISTS (183) on the next add.
+file(REMOVE "${test_root}/init.luau")
 execute_process(
     COMMAND "${CMAKE_COMMAND}" -E env "HOME=${cache_home}" "USERPROFILE=${cache_home}"
         "${LODE_EXECUTABLE}" add memory "${test_root}"
@@ -128,6 +130,10 @@ execute_process(
 if(NOT result EQUAL 0)
     file(REMOVE_RECURSE "${test_root}" "${unlocked_test_root}" "${dev_test_root}" "${cache_home}")
     message(FATAL_ERROR "adding a dependency failed to update an existing .config.luau:\n${output}\n${error}")
+endif()
+if(EXISTS "${test_root}/init.luau")
+    file(REMOVE_RECURSE "${test_root}" "${unlocked_test_root}" "${dev_test_root}" "${cache_home}")
+    message(FATAL_ERROR "lode add created an unexpected root init.luau for a consumer project")
 endif()
 
 execute_process(
@@ -150,6 +156,10 @@ foreach(alias IN ITEMS memory ffi)
         message(FATAL_ERROR "repeated lode add did not preserve alias '${alias}':\n${config_content}")
     endif()
 endforeach()
+
+# Restore the fixture entrypoint for the remaining execution checks, which
+# intentionally exercise requiring the installed package from Luau.
+file(WRITE "${test_root}/init.luau" "return {}\n")
 
 execute_process(
     COMMAND "${CMAKE_COMMAND}" -E env "HOME=${cache_home}" "USERPROFILE=${cache_home}"

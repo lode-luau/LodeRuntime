@@ -343,13 +343,9 @@ std::vector<std::string> AddDependencyToManifest(
             manifest["name"] = packageRoot.filename().string();
             manifest["version"] = "0.1.0";
 
-            // Ensure init.luau exists so that InstallLocal passes validation.
-            const fs::path initPath = packageRoot / "init.luau";
-            if (!fs::is_regular_file(initPath))
-            {
-                std::ofstream initFile(initPath, std::ios::binary | std::ios::trunc);
-                initFile << "return {}\n";
-            }
+            // A consumer project may only declare dependencies and does not
+            // need a root module entrypoint. InstallLocal validates it in
+            // consumer mode, so do not create a synthetic init.luau.
         }
     }
     catch (const std::exception& exception)

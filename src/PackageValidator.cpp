@@ -148,7 +148,8 @@ struct DependencyGraphContext
 
 bool AllowsUnresolvedStdlib(ValidationMode mode)
 {
-    return mode == ValidationMode::InstallSource ||
+    return mode == ValidationMode::InstallConsumer ||
+        mode == ValidationMode::InstallSource ||
         mode == ValidationMode::InstallArtifact ||
         mode == ValidationMode::LockedArtifact;
 }
@@ -655,7 +656,8 @@ void ValidateImplementation(const fs::path& root,
         publishTargets.emplace(value.substr(0, separator), value.substr(separator + 1));
     }
 
-    const bool sourceValidation = mode == ValidationMode::Source || mode == ValidationMode::InstallSource;
+    const bool sourceValidation = mode == ValidationMode::Source ||
+        mode == ValidationMode::InstallConsumer || mode == ValidationMode::InstallSource;
     if (sourceValidation)
         return;
 
@@ -765,12 +767,15 @@ ValidationReport Validate(const fs::path& packageRoot,
         !IsSemVer(manifest["version"].get<std::string>()))
         Error(report, "package manifest.version must be a valid SemVer string.");
 
-    if (!fs::is_regular_file(root / "init.luau"))
+    const bool consumerWithoutEntrypoint = mode == ValidationMode::InstallConsumer &&
+        !manifest.contains("implementation");
+    if (!consumerWithoutEntrypoint && !fs::is_regular_file(root / "init.luau"))
         Error(report, "Packages must contain a root init.luau file.");
 
     if (!fs::is_regular_file(root / "LICENSE"))
     {
-        if (mode == ValidationMode::InstallSource || mode == ValidationMode::InstallArtifact)
+        if (mode == ValidationMode::InstallConsumer ||
+            mode == ValidationMode::InstallSource || mode == ValidationMode::InstallArtifact)
             Warning(report, "Package has no LICENSE file; run `lode init --license <SPDX>` to add one.");
         else
             Error(report, "Packages must contain a root LICENSE file.");
@@ -790,7 +795,8 @@ ValidationReport Validate(const fs::path& packageRoot,
             Error(report, "implementation must be an object.");
             return report;
         }
-        const bool sourceValidation = mode == ValidationMode::Source || mode == ValidationMode::InstallSource;
+        const bool sourceValidation = mode == ValidationMode::Source ||
+            mode == ValidationMode::InstallConsumer || mode == ValidationMode::InstallSource;
         if (sourceValidation && !fs::is_regular_file(root / "CMakeLists.txt"))
             Error(report, "Native source packages must contain a root CMakeLists.txt file.");
         bool hasThirdPartyRuntime = false;
